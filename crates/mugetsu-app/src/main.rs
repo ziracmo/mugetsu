@@ -1,12 +1,18 @@
+mod app_menu;
 mod avatars;
 mod branch_tree;
+mod dialogs;
 mod fetch_policy;
 mod fmt;
+#[macro_use]
+mod i18n;
 mod graph_view;
 mod model;
 mod pr;
 mod repo_view;
 mod session;
+mod settings;
+mod settings_view;
 mod theme;
 mod workspace;
 
@@ -42,16 +48,17 @@ fn inherit_shell_path() {
 fn main() {
     inherit_shell_path();
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    let (paths, active) = Session::load().with_args(args);
+    let session = Session::load().with_args(args);
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            theme::init(cx);
+            settings::install(settings::Settings::load(), cx);
             avatars::init(cx);
             workspace::init(cx);
             repo_view::init(cx);
+            app_menu::init(cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(1440.), px(900.)), cx)),
                 window_min_size: Some(size(px(960.), px(600.))),
@@ -60,12 +67,19 @@ fn main() {
                 window_background: WindowBackgroundAppearance::Blurred,
                 ..TitleBar::window_options()
             };
-            gpui_kit::open_window(options, cx, |window, cx| {
+            let main = gpui_kit::open_window(options, cx, |window, cx| {
                 window.set_window_title("Mugetsu");
-                cx.new(|cx| Workspace::new(paths, active, true, window, cx))
+                cx.new(|cx| Workspace::new(session, true, window, cx))
             })
             .expect("failed to open the main window");
-            cx.on_window_closed(|cx, _| cx.quit()).detach();
+            // Closing the main window quits; the Settings window doesn't.
+            let main_id = main.0.window_id();
+            cx.on_window_closed(move |cx, id| {
+                if id == main_id {
+                    cx.quit()
+                }
+            })
+            .detach();
             cx.activate(true);
         });
 }

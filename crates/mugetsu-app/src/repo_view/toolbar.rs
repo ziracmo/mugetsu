@@ -12,6 +12,7 @@ use gpui_kit::{
 use mugetsu_forge::PrState;
 
 use super::{Mode, RepoView};
+use crate::i18n::tr;
 use crate::pr::PrLookup;
 use crate::theme;
 
@@ -84,7 +85,8 @@ pub fn pr_chip(
                     .text_color(theme::muted())
                     .child(Icon::new(Lucide::GitPullRequest).xsmall())
                     .tooltip(move |window, cx| {
-                        Tooltip::new(format!("PR introuvable : {err}")).build(window, cx)
+                        Tooltip::new(trf!("PR introuvable : {err}", "PR lookup failed: {err}"))
+                            .build(window, cx)
                     })
                     .into_any_element(),
             )
@@ -107,8 +109,12 @@ impl RepoView {
             icon.into_any_element()
         };
         let tip = match &self.fetch_error {
-            Some(e) => format!("Dernier fetch en échec : {e}"),
-            None => "Fetch, auto toutes les 10 s (⇧⌘F)".into(),
+            Some(e) => trf!("Dernier fetch en échec : {e}", "Last fetch failed: {e}"),
+            None => tr(
+                "Fetch, auto toutes les 10 s (⇧⌘F)",
+                "Fetch, automatic every 10 s (⇧⌘F)",
+            )
+            .into(),
         };
         h_flex()
             .id("fetch")
@@ -118,7 +124,7 @@ impl RepoView {
             .rounded_md()
             .cursor_pointer()
             .text_sm()
-            .when(self.fetching, |s| s.text_color(theme::cyan()))
+            .when(self.fetching, |s| s.text_color(theme::accent()))
             .when(self.fetch_error.is_some(), |s| s.text_color(theme::amber()))
             .hover(|s| s.bg(theme::raised()))
             .child(icon)
@@ -137,7 +143,7 @@ impl RepoView {
         let head_label = data.refs.head_branch.clone().unwrap_or_else(|| {
             data.refs
                 .head
-                .map(|h| format!("détaché @ {}", h.to_hex_with_len(8)))
+                .map(|h| trf!("détaché @ {}", "detached @ {}", h.to_hex_with_len(8)))
                 .unwrap_or_default()
         });
         let head_pr = head.as_ref().and_then(|b| {
@@ -186,7 +192,10 @@ impl RepoView {
                     } else {
                         Lucide::PanelLeftClose
                     }))
-                    .tooltip("Afficher / masquer la barre latérale (⌃⌘S)")
+                    .tooltip(tr(
+                        "Afficher / masquer la barre latérale (⌃⌘S)",
+                        "Show / hide sidebar (⌃⌘S)",
+                    ))
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
             )
             .child(
@@ -196,7 +205,7 @@ impl RepoView {
                     .child(
                         Icon::new(Lucide::GitBranch)
                             .small()
-                            .text_color(theme::cyan()),
+                            .text_color(theme::accent()),
                     )
                     .child(
                         div()
@@ -235,7 +244,7 @@ impl RepoView {
                     .child(
                         tab(
                             "mode-history",
-                            "Historique".into(),
+                            tr("Historique", "History").into(),
                             "⌘2",
                             mode == Mode::History,
                         )
@@ -245,9 +254,9 @@ impl RepoView {
                         tab(
                             "mode-changes",
                             if changes > 0 {
-                                format!("Changements · {changes}")
+                                trf!("Changements · {changes}", "Changes · {changes}")
                             } else {
-                                "Changements".into()
+                                tr("Changements", "Changes").into()
                             },
                             "⌘1",
                             mode == Mode::Changes,
@@ -264,7 +273,10 @@ impl RepoView {
                     .icon(Icon::new(Lucide::ArrowDownToLine))
                     .label("Pull")
                     .disabled(busy)
-                    .tooltip("Pull, fast-forward uniquement (⇧⌘L)")
+                    .tooltip(tr(
+                        "Pull, fast-forward uniquement (⇧⌘L)",
+                        "Pull, fast-forward only (⇧⌘L)",
+                    ))
                     .on_click(cx.listener(|this, _, window, cx| this.pull(window, cx))),
             )
             .child(

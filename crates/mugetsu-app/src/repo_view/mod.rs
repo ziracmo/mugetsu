@@ -28,6 +28,7 @@ use gpui_kit::{
 use mugetsu_git::{FileDiff, Repo};
 
 use crate::fetch_policy;
+use crate::i18n::tr;
 use crate::model::RepoData;
 use crate::pr::{self, PrCache, PrLookup};
 
@@ -172,18 +173,23 @@ impl RepoView {
         let commit_diff = cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Unified));
         let change_diff = cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Unified));
         let message = cx.new(|cx| {
-            let mut state = TextareaState::new(window, cx).placeholder("Commit message");
+            let mut state = TextareaState::new(window, cx)
+                .placeholder(tr("Message de commit", "Commit message"));
             state.set_auto_grow(3, 8, cx);
             state
         });
-        let sidebar_search = cx.new(|cx| InputState::new(window, cx).placeholder("Filtrer"));
+        let sidebar_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr("Filtrer", "Filter")));
         let _search = cx.subscribe(&sidebar_search, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
             }
         });
         let search_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Rechercher un commit, un auteur ou un SHA")
+            InputState::new(window, cx).placeholder(tr(
+                "Rechercher un commit, un auteur ou un SHA",
+                "Search a commit, author or SHA",
+            ))
         });
         let _commit_search =
             cx.subscribe(
@@ -623,8 +629,9 @@ impl RepoView {
                 match result {
                     Ok(()) => on_success(this, window, cx),
                     Err(e) => window.push_notification(
-                        gpui_kit::component::notification::Notification::error(format!(
-                            "{label} : {e:#}"
+                        gpui_kit::component::notification::Notification::error(trf!(
+                            "{label} : {e:#}",
+                            "{label}: {e:#}"
                         )),
                         cx,
                     ),
@@ -689,13 +696,13 @@ impl RepoView {
 
     fn new_branch_at_head(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.prompt(
-            "Nouvelle branche depuis HEAD".into(),
-            "Nom de la branche",
+            tr("Nouvelle branche depuis HEAD", "New branch from HEAD").into(),
+            tr("Nom de la branche", "Branch name"),
             String::new(),
-            "Créer et checkout",
+            tr("Créer et checkout", "Create and checkout"),
             |this, name, window, cx| {
                 this.run_op(
-                    "Nouvelle branche",
+                    tr("Nouvelle branche", "New branch"),
                     move |r| r.create_branch(&name, None, true),
                     window,
                     cx,
@@ -712,14 +719,14 @@ impl RepoView {
         };
         let sha = target.to_string();
         self.prompt(
-            format!("Nouveau tag sur {}", &sha[..7]),
-            "Nom du tag",
+            trf!("Nouveau tag sur {}", "New tag on {}", &sha[..7]),
+            tr("Nom du tag", "Tag name"),
             String::new(),
-            "Créer",
+            tr("Créer", "Create"),
             move |this, name, window, cx| {
                 let sha = sha.clone();
                 this.run_op(
-                    "Nouveau tag",
+                    tr("Nouveau tag", "New tag"),
                     move |r| r.create_tag(&name, &sha, None),
                     window,
                     cx,
@@ -739,8 +746,8 @@ impl RepoView {
             .map(|b| b.name.clone())
             .collect();
         self.prompt(
-            "Checkout d'une branche".into(),
-            "Nom exact de la branche locale",
+            tr("Checkout d'une branche", "Checkout branch").into(),
+            tr("Nom exact de la branche locale", "Exact local branch name"),
             String::new(),
             "Checkout",
             move |this, name, window, cx| {
@@ -748,8 +755,9 @@ impl RepoView {
                     this.checkout_with_burst(name, false, window, cx);
                 } else {
                     window.push_notification(
-                        gpui_kit::component::notification::Notification::error(format!(
-                            "Branche introuvable : {name}"
+                        gpui_kit::component::notification::Notification::error(trf!(
+                            "Branche introuvable : {name}",
+                            "Branch not found: {name}"
                         )),
                         cx,
                     );
@@ -823,11 +831,10 @@ impl Render for RepoView {
                 .items_center()
                 .justify_center()
                 .gap_2()
-                .child(
-                    div()
-                        .text_color(crate::theme::red())
-                        .child("Impossible de lire le dépôt"),
-                )
+                .child(div().text_color(crate::theme::red()).child(tr(
+                    "Impossible de lire le dépôt",
+                    "Can't read the repository",
+                )))
                 .child(
                     div()
                         .text_sm()

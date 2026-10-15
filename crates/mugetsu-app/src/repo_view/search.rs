@@ -12,6 +12,7 @@ use gpui_kit::{
 use mugetsu_git::History;
 
 use super::{CloseSearch, RepoView};
+use crate::i18n::tr;
 use crate::theme;
 
 /// Rows whose summary or author contains every word of `query`
@@ -106,7 +107,7 @@ impl RepoView {
         let has_query = !self.search_input.read(cx).value().trim().is_empty();
         let counter = match (has_query, n) {
             (false, _) => String::new(),
-            (true, 0) => "Aucun résultat".to_string(),
+            (true, 0) => tr("Aucun résultat", "No results").to_string(),
             (true, n) => format!("{}/{}", self.search_pos + 1, n),
         };
         Some(
@@ -157,7 +158,7 @@ impl RepoView {
                         .ghost()
                         .xsmall()
                         .icon(Icon::new(Lucide::ChevronUp))
-                        .tooltip("Précédent (⇧↩)")
+                        .tooltip(tr("Précédent (⇧↩)", "Previous (⇧↩)"))
                         .on_click(cx.listener(|this, _, _, cx| this.step_search(true, cx))),
                 )
                 .child(
@@ -165,7 +166,7 @@ impl RepoView {
                         .ghost()
                         .xsmall()
                         .icon(Icon::new(Lucide::ChevronDown))
-                        .tooltip("Suivant (↩)")
+                        .tooltip(tr("Suivant (↩)", "Next (↩)"))
                         .on_click(cx.listener(|this, _, _, cx| this.step_search(false, cx))),
                 )
                 .child(
@@ -173,7 +174,7 @@ impl RepoView {
                         .ghost()
                         .xsmall()
                         .icon(Icon::new(Lucide::X))
-                        .tooltip("Fermer (échap)")
+                        .tooltip(tr("Fermer (échap)", "Close (esc)"))
                         .on_click(cx.listener(|this, _, window, cx| this.close_search(window, cx))),
                 )
                 .into_any_element(),

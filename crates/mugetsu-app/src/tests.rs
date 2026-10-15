@@ -300,7 +300,7 @@ fn background_tab_shows_a_dot_when_remote_moves(cx: &mut TestAppContext) {
     let paths = vec![clone.clone(), other.path().to_path_buf()];
     let (handle, ws) = cx.update(|cx| {
         gpui_kit::open_window(options(), cx, |window, cx| {
-            cx.new(|cx| Workspace::new(paths, 1, false, window, cx))
+            cx.new(|cx| Workspace::new(session_of(paths, 1), false, window, cx))
         })
         .unwrap()
     });
@@ -529,4 +529,84 @@ fn sidebar_can_be_collapsed(cx: &mut TestAppContext) {
     })
     .unwrap();
     assert!(cx.read(|cx| view.read(cx).sidebar_collapsed()));
+}
+
+fn session_of(repos: Vec<std::path::PathBuf>, active: usize) -> crate::session::Session {
+    crate::session::Session::new(
+        vec![crate::session::RepoSet {
+            name: "Général".into(),
+            repos,
+            active,
+        }],
+        0,
+    )
+}
+
+#[gpui_kit::test]
+fn workspaces_switch_their_tabs(cx: &mut TestAppContext) {
+    init(cx);
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    fixture(a.path());
+    fixture(b.path());
+    let session = crate::session::Session::new(
+        vec![
+            crate::session::RepoSet {
+                name: "Perso".into(),
+                repos: vec![a.path().to_path_buf()],
+                active: 0,
+            },
+            crate::session::RepoSet {
+                name: "Boulot".into(),
+                repos: vec![b.path().to_path_buf()],
+                active: 0,
+            },
+        ],
+        0,
+    );
+    let (handle, ws) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| Workspace::new(session, false, window, cx))
+        })
+        .unwrap()
+    });
+    let root = |cx: &TestAppContext| {
+        cx.read(|cx| {
+            ws.read(cx)
+                .active()
+                .map(|v| v.read(cx).repo().root().to_path_buf())
+        })
+    };
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap();
+    assert_eq!(root(cx).map(|p| canon(&p)), Some(canon(a.path())));
+
+    handle
+        .update(cx, |_, window, cx| {
+            ws.update(cx, |w, cx| w.switch_workspace(1, window, cx))
+        })
+        .unwrap();
+    assert_eq!(root(cx).map(|p| canon(&p)), Some(canon(b.path())));
+
+    handle
+        .update(cx, |_, window, cx| {
+            ws.update(cx, |w, cx| w.new_workspace("Vide".into(), window, cx))
+        })
+        .unwrap();
+    assert!(root(cx).is_none(), "a new workspace starts empty");
+    let (names, current) = cx.read(|cx| ws.read(cx).workspace_names());
+    assert_eq!(names, ["Perso", "Boulot", "Vide"]);
+    assert_eq!(current, 2);
+
+    handle
+        .update(cx, |_, window, cx| {
+            ws.update(cx, |w, cx| w.delete_workspace(window, cx))
+        })
+        .unwrap();
+    let (names, current) = cx.read(|cx| ws.read(cx).workspace_names());
+    assert_eq!(names, ["Perso", "Boulot"]);
+    assert_eq!(current, 0);
+    assert_eq!(
+        root(cx).map(|p| canon(&p)),
+        Some(canon(a.path())),
+        "tabs come back"
+    );
 }

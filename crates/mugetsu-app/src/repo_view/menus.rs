@@ -1,25 +1,19 @@
 //! Right-click menus (Fork-like) for branches, remote branches, tags and commits,
 //! plus the small text-prompt and confirmation dialogs they open.
 
-use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gix::ObjectId;
 use gpui_kit::assets::IconName as Lucide;
-use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
-use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{Icon, WindowExt as _};
-use gpui_kit::{
-    App, AppContext as _, ClickEvent, ClipboardItem, Context, Focusable as _, ParentElement as _,
-    WeakEntity, Window, px,
-};
+use gpui_kit::{App, AppContext as _, ClickEvent, ClipboardItem, Context, WeakEntity, Window};
 use mugetsu_forge::{GithubRepo, PullRequest};
 use mugetsu_git::{RefLabel, ResetMode};
 
 use super::{RepoEvent, RepoView};
+use crate::i18n::tr;
 use crate::pr::PrLookup;
 
 pub type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
@@ -85,7 +79,11 @@ fn pr_item(
         (Some(pr), _) => {
             let url = pr.url.clone();
             item(
-                format!("Ouvrir la Pull Request #{}", pr.number),
+                trf!(
+                    "Ouvrir la Pull Request #{}",
+                    "Open Pull Request #{}",
+                    pr.number
+                ),
                 Lucide::GitPullRequest,
             )
             .on_click(move |_, _, cx| cx.open_url(&url))
@@ -96,13 +94,19 @@ fn pr_item(
                 gh.owner, gh.name
             );
             item(
-                format!("Créer une Pull Request sur '{remote}'"),
+                trf!(
+                    "Créer une Pull Request sur '{remote}'",
+                    "Create Pull Request on '{remote}'"
+                ),
                 Lucide::GitPullRequestCreateArrow,
             )
             .on_click(move |_, _, cx| cx.open_url(&url))
         }
         (None, None) => item(
-            format!("Créer une Pull Request sur '{remote}'"),
+            trf!(
+                "Créer une Pull Request sur '{remote}'",
+                "Create Pull Request on '{remote}'"
+            ),
             Lucide::GitPullRequestCreateArrow,
         )
         .disabled(true),
@@ -142,35 +146,42 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
     };
     let worktree = {
         let (name, default) = (name.clone(), worktree_path(&ctx.root, &b.name));
-        item("Checkout en worktree…", Lucide::FolderGit2)
-            .disabled(b.is_head)
-            .on_click(act(&ctx.view, move |this, window, cx| {
-                let name = name.clone();
-                this.prompt(
-                    format!("Checkout de '{name}' en worktree"),
-                    "Dossier du worktree",
-                    default.clone(),
-                    "Créer",
-                    move |this, path, window, cx| {
-                        let (name, open) = (name.clone(), PathBuf::from(&path));
-                        this.run_op_then(
-                            "Worktree",
-                            move |r| r.worktree_add(&path, &name, false),
-                            move |_, _, cx| cx.emit(RepoEvent::OpenWorktree(open)),
-                            window,
-                            cx,
-                        );
-                    },
-                    window,
-                    cx,
-                );
-            }))
+        item(
+            tr("Checkout en worktree…", "Checkout as worktree…"),
+            Lucide::FolderGit2,
+        )
+        .disabled(b.is_head)
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            let name = name.clone();
+            this.prompt(
+                trf!(
+                    "Checkout de '{name}' en worktree",
+                    "Checkout '{name}' as worktree"
+                ),
+                tr("Dossier du worktree", "Worktree folder"),
+                default.clone(),
+                tr("Créer", "Create"),
+                move |this, path, window, cx| {
+                    let (name, open) = (name.clone(), PathBuf::from(&path));
+                    this.run_op_then(
+                        "Worktree",
+                        move |r| r.worktree_add(&path, &name, false),
+                        move |_, _, cx| cx.emit(RepoEvent::OpenWorktree(open)),
+                        window,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+        }))
     };
     let fast_forward = {
         let (name, upstream, is_head) = (name.clone(), b.upstream.clone(), b.is_head);
         item(
-            format!(
+            trf!(
                 "Fast-forward vers '{}'",
+                "Fast-forward to '{}'",
                 b.upstream.as_deref().unwrap_or("upstream")
             ),
             Lucide::FastForward,
@@ -193,7 +204,11 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             b.upstream.is_some() && !b.gone,
         );
         item(
-            format!("Push vers '{}'", remote.as_deref().unwrap_or("remote")),
+            trf!(
+                "Push vers '{}'",
+                "Push to '{}'",
+                remote.as_deref().unwrap_or("remote")
+            ),
             Lucide::ArrowUpFromLine,
         )
         .disabled(remote.is_none())
@@ -209,36 +224,48 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
     };
     let rename = {
         let name = name.clone();
-        item("Renommer…", Lucide::Pencil).on_click(act(&ctx.view, move |this, window, cx| {
-            let old = name.clone();
-            this.prompt(
-                format!("Renommer '{old}'"),
-                "Nouveau nom",
-                old.clone(),
-                "Renommer",
-                move |this, new, window, cx| {
-                    let old = old.clone();
-                    this.run_op("Renommer", move |r| r.rename_branch(&old, &new), window, cx);
-                },
-                window,
-                cx,
-            );
-        }))
+        item(tr("Renommer…", "Rename…"), Lucide::Pencil).on_click(act(
+            &ctx.view,
+            move |this, window, cx| {
+                let old = name.clone();
+                this.prompt(
+                    trf!("Renommer '{old}'", "Rename '{old}'"),
+                    tr("Nouveau nom", "New name"),
+                    old.clone(),
+                    tr("Renommer", "Rename"),
+                    move |this, new, window, cx| {
+                        let old = old.clone();
+                        this.run_op(
+                            tr("Renommer", "Rename"),
+                            move |r| r.rename_branch(&old, &new),
+                            window,
+                            cx,
+                        );
+                    },
+                    window,
+                    cx,
+                );
+            },
+        ))
     };
     let delete = {
         let name = name.clone();
-        item("Supprimer…", Lucide::Trash)
+        item(tr("Supprimer…", "Delete…"), Lucide::Trash)
             .disabled(b.is_head)
             .on_click(act(&ctx.view, move |this, window, cx| {
                 let name = name.clone();
                 this.confirm(
-                    format!("Supprimer la branche '{name}' ?"),
-                    "La branche locale est supprimée. Git refuse si elle n'est pas mergée.".into(),
-                    "Supprimer",
+                    trf!("Supprimer la branche '{name}' ?", "Delete branch '{name}'?"),
+                    tr(
+                        "La branche locale est supprimée. Git refuse si elle n'est pas mergée.",
+                        "The local branch is deleted. Git refuses if it isn't merged.",
+                    )
+                    .into(),
+                    tr("Supprimer", "Delete"),
                     move |this, window, cx| {
                         let name = name.clone();
                         this.run_op(
-                            "Supprimer",
+                            tr("Supprimer", "Delete"),
                             move |r| r.delete_branch(&name, false),
                             window,
                             cx,
@@ -265,7 +292,13 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         .item(rename)
         .item(delete)
         .separator()
-        .item(item("Copier le nom de la branche", Lucide::Copy).on_click(copy(name)))
+        .item(
+            item(
+                tr("Copier le nom de la branche", "Copy branch name"),
+                Lucide::Copy,
+            )
+            .on_click(copy(name)),
+        )
 }
 
 /// `remote_branch` is `origin/feat/x`.
@@ -289,35 +322,49 @@ pub fn remote_branch_menu(
     };
     let delete = {
         let (remote, branch) = (remote.clone(), branch.clone());
-        item(format!("Supprimer de '{remote}'…"), Lucide::Trash).on_click(act(
-            &ctx.view,
-            move |this, window, cx| {
-                let (remote, branch) = (remote.clone(), branch.clone());
-                this.confirm(
-                    format!("Supprimer '{branch}' sur '{remote}' ?"),
-                    "La branche est supprimée sur le serveur pour tout le monde.".into(),
-                    "Supprimer",
-                    move |this, window, cx| {
-                        let (remote, branch) = (remote.clone(), branch.clone());
-                        this.run_op(
-                            "Supprimer",
-                            move |r| r.delete_remote_branch(&remote, &branch),
-                            window,
-                            cx,
-                        );
-                    },
-                    window,
-                    cx,
-                );
-            },
-        ))
+        item(
+            trf!("Supprimer de '{remote}'…", "Delete from '{remote}'…"),
+            Lucide::Trash,
+        )
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            let (remote, branch) = (remote.clone(), branch.clone());
+            this.confirm(
+                trf!(
+                    "Supprimer '{branch}' sur '{remote}' ?",
+                    "Delete '{branch}' on '{remote}'?"
+                ),
+                tr(
+                    "La branche est supprimée sur le serveur pour tout le monde.",
+                    "The branch is deleted on the server for everyone.",
+                )
+                .into(),
+                tr("Supprimer", "Delete"),
+                move |this, window, cx| {
+                    let (remote, branch) = (remote.clone(), branch.clone());
+                    this.run_op(
+                        tr("Supprimer", "Delete"),
+                        move |r| r.delete_remote_branch(&remote, &branch),
+                        window,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+        }))
     };
     menu.item(checkout)
         .separator()
         .item(pr_item(ctx, &remote, &branch, pr))
         .item(delete)
         .separator()
-        .item(item("Copier le nom de la branche", Lucide::Copy).on_click(copy(full)))
+        .item(
+            item(
+                tr("Copier le nom de la branche", "Copy branch name"),
+                Lucide::Copy,
+            )
+            .on_click(copy(full)),
+        )
 }
 
 pub fn tag_menu(menu: PopupMenu, ctx: &MenuContext, tag: &str) -> PopupMenu {
@@ -333,7 +380,11 @@ pub fn tag_menu(menu: PopupMenu, ctx: &MenuContext, tag: &str) -> PopupMenu {
     let push = {
         let (tag, remote) = (tag.clone(), remote.clone());
         item(
-            format!("Push vers '{}'", remote.as_deref().unwrap_or("remote")),
+            trf!(
+                "Push vers '{}'",
+                "Push to '{}'",
+                remote.as_deref().unwrap_or("remote")
+            ),
             Lucide::ArrowUpFromLine,
         )
         .disabled(remote.is_none())
@@ -344,27 +395,39 @@ pub fn tag_menu(menu: PopupMenu, ctx: &MenuContext, tag: &str) -> PopupMenu {
     };
     let delete = {
         let tag = tag.clone();
-        item("Supprimer…", Lucide::Trash).on_click(act(&ctx.view, move |this, window, cx| {
-            let tag = tag.clone();
-            this.confirm(
-                format!("Supprimer le tag '{tag}' ?"),
-                "Le tag local est supprimé (pas celui du remote).".into(),
-                "Supprimer",
-                move |this, window, cx| {
-                    let tag = tag.clone();
-                    this.run_op("Supprimer tag", move |r| r.delete_tag(&tag), window, cx);
-                },
-                window,
-                cx,
-            );
-        }))
+        item(tr("Supprimer…", "Delete…"), Lucide::Trash).on_click(act(
+            &ctx.view,
+            move |this, window, cx| {
+                let tag = tag.clone();
+                this.confirm(
+                    trf!("Supprimer le tag '{tag}' ?", "Delete tag '{tag}'?"),
+                    tr(
+                        "Le tag local est supprimé (pas celui du remote).",
+                        "The local tag is deleted (not the remote one).",
+                    )
+                    .into(),
+                    tr("Supprimer", "Delete"),
+                    move |this, window, cx| {
+                        let tag = tag.clone();
+                        this.run_op(
+                            tr("Supprimer tag", "Delete tag"),
+                            move |r| r.delete_tag(&tag),
+                            window,
+                            cx,
+                        );
+                    },
+                    window,
+                    cx,
+                );
+            },
+        ))
     };
     menu.item(checkout)
         .item(push)
         .separator()
         .item(delete)
         .separator()
-        .item(item("Copier le nom du tag", Lucide::Copy).on_click(copy(tag)))
+        .item(item(tr("Copier le nom du tag", "Copy tag name"), Lucide::Copy).on_click(copy(tag)))
 }
 
 /// Commit row menu: a submenu per ref on the commit, then commit actions.
@@ -431,20 +494,47 @@ pub fn commit_menu(
     let short = id.to_hex_with_len(7).to_string();
     let new_branch = {
         let sha = sha.clone();
-        item("Nouvelle branche…", Lucide::GitBranchPlus).on_click(act(
+        item(
+            tr("Nouvelle branche…", "New branch…"),
+            Lucide::GitBranchPlus,
+        )
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            let sha = sha.clone();
+            this.prompt(
+                tr("Nouvelle branche", "New branch").into(),
+                tr("Nom de la branche", "Branch name"),
+                String::new(),
+                tr("Créer et checkout", "Create and checkout"),
+                move |this, name, window, cx| {
+                    let sha = sha.clone();
+                    this.run_op(
+                        tr("Nouvelle branche", "New branch"),
+                        move |r| r.create_branch(&name, Some(&sha), true),
+                        window,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+        }))
+    };
+    let new_tag = {
+        let sha = sha.clone();
+        item(tr("Nouveau tag…", "New tag…"), Lucide::Tag).on_click(act(
             &ctx.view,
             move |this, window, cx| {
                 let sha = sha.clone();
                 this.prompt(
-                    "Nouvelle branche".into(),
-                    "Nom de la branche",
+                    tr("Nouveau tag", "New tag").into(),
+                    tr("Nom du tag", "Tag name"),
                     String::new(),
-                    "Créer et checkout",
+                    tr("Créer", "Create"),
                     move |this, name, window, cx| {
                         let sha = sha.clone();
                         this.run_op(
-                            "Nouvelle branche",
-                            move |r| r.create_branch(&name, Some(&sha), true),
+                            tr("Nouveau tag", "New tag"),
+                            move |r| r.create_tag(&name, &sha, None),
                             window,
                             cx,
                         );
@@ -455,29 +545,6 @@ pub fn commit_menu(
             },
         ))
     };
-    let new_tag = {
-        let sha = sha.clone();
-        item("Nouveau tag…", Lucide::Tag).on_click(act(&ctx.view, move |this, window, cx| {
-            let sha = sha.clone();
-            this.prompt(
-                "Nouveau tag".into(),
-                "Nom du tag",
-                String::new(),
-                "Créer",
-                move |this, name, window, cx| {
-                    let sha = sha.clone();
-                    this.run_op(
-                        "Nouveau tag",
-                        move |r| r.create_tag(&name, &sha, None),
-                        window,
-                        cx,
-                    );
-                },
-                window,
-                cx,
-            );
-        }))
-    };
     menu = menu.item(new_branch).item(new_tag).separator();
 
     if let Some(head) = ctx.head_branch.clone() {
@@ -485,7 +552,7 @@ pub fn commit_menu(
         let sha = sha.clone();
         menu = menu.submenu_with_icon(
             Some(Icon::new(Lucide::RotateCcw)),
-            format!("Reset '{head}' ici"),
+            trf!("Reset '{head}' ici", "Reset '{head}' here"),
             window,
             cx,
             move |m, _, _| {
@@ -503,8 +570,12 @@ pub fn commit_menu(
                             };
                         if mode == ResetMode::Hard {
                             this.confirm(
-                                format!("Reset --hard de '{head}' ?"),
-                                "Les modifications non commitées seront perdues.".into(),
+                                trf!("Reset --hard de '{head}' ?", "Reset --hard '{head}'?"),
+                                tr(
+                                    "Les modifications non commitées seront perdues.",
+                                    "Uncommitted changes will be lost.",
+                                )
+                                .into(),
                                 "Reset",
                                 run,
                                 window,
@@ -516,11 +587,20 @@ pub fn commit_menu(
                     }))
                 };
                 m.item(reset(
-                    "Soft : garde l'index et les fichiers",
+                    tr(
+                        "Soft : garde l'index et les fichiers",
+                        "Soft: keep index and files",
+                    ),
                     ResetMode::Soft,
                 ))
-                .item(reset("Mixed : garde les fichiers", ResetMode::Mixed))
-                .item(reset("Hard : écrase tout…", ResetMode::Hard))
+                .item(reset(
+                    tr("Mixed : garde les fichiers", "Mixed: keep files"),
+                    ResetMode::Mixed,
+                ))
+                .item(reset(
+                    tr("Hard : écrase tout…", "Hard: discard everything…"),
+                    ResetMode::Hard,
+                ))
             },
         );
     }
@@ -536,13 +616,16 @@ pub fn commit_menu(
     };
     let save_patch = {
         let (sha, short) = (sha.clone(), short.clone());
-        item("Enregistrer en patch…", Lucide::FileDown)
-            .on_click(act(&ctx.view, move |this, window, cx| {
-                this.save_patch(sha.clone(), short.clone(), window, cx)
-            }))
+        item(
+            tr("Enregistrer en patch…", "Save as patch…"),
+            Lucide::FileDown,
+        )
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            this.save_patch(sha.clone(), short.clone(), window, cx)
+        }))
     };
     menu.item(simple(
-        "Checkout du commit",
+        tr("Checkout du commit", "Checkout commit"),
         Lucide::GitCommitHorizontal,
         |r, s, _| r.checkout_detached(s),
     ))
@@ -552,7 +635,7 @@ pub fn commit_menu(
     .item(simple("Revert", Lucide::Undo2, |r, s, m| r.revert(s, m)))
     .item(save_patch)
     .separator()
-    .item(item("Copier le SHA", Lucide::Copy).on_click(copy(sha)))
+    .item(item(tr("Copier le SHA", "Copy SHA"), Lucide::Copy).on_click(copy(sha)))
 }
 
 impl RepoView {
@@ -568,39 +651,7 @@ impl RepoView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(placeholder)
-                .default_value(initial)
-        });
-        let view = cx.entity().downgrade();
-        let action = Rc::new(action);
-        let focus_once = Cell::new(true);
-        window.open_dialog(cx, move |dialog, window, cx| {
-            if focus_once.replace(false) {
-                input.focus_handle(cx).focus(window, cx);
-            }
-            let (input_ok, view, action) = (input.clone(), view.clone(), action.clone());
-            dialog
-                .title(title.clone())
-                .w(px(460.))
-                .child(Input::new(&input))
-                .footer(
-                    DialogFooter::new()
-                        .child(DialogClose::new().trigger(|b| b.ghost().label("Annuler")))
-                        .child(
-                            DialogAction::new().child(Button::new("prompt-ok").primary().label(ok)),
-                        ),
-                )
-                .on_ok(move |_, window, cx| {
-                    let value = input_ok.read(cx).value().trim().to_string();
-                    if value.is_empty() {
-                        return false;
-                    }
-                    let _ = view.update(cx, |this, cx| action(this, value, window, cx));
-                    true
-                })
-        });
+        crate::dialogs::prompt(title, placeholder, initial, ok, action, window, cx);
     }
 
     /// Asks before a destructive action.
@@ -613,22 +664,7 @@ impl RepoView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let view = cx.entity().downgrade();
-        let action = Rc::new(action);
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let (view, action) = (view.clone(), action.clone());
-            alert
-                .title(title.clone())
-                .description(description.clone())
-                .confirm()
-                .ok_text(ok)
-                .ok_variant(ButtonVariant::Danger)
-                .cancel_text("Annuler")
-                .on_ok(move |_, window, cx| {
-                    let _ = view.update(cx, |this, cx| action(this, window, cx));
-                    true
-                })
-        });
+        crate::dialogs::confirm(title, description, ok, action, window, cx);
     }
 
     fn save_patch(

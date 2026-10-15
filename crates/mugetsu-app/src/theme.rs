@@ -8,8 +8,9 @@ use gpui_kit::{App, Hsla, Rgba, rgb};
 
 const THEME_JSON: &str = include_str!("../assets/theme.json");
 
-pub fn cyan() -> Hsla {
-    rgb(0x6cc7dc).into()
+/// The user's accent colour (settings, red by default).
+pub fn accent() -> Hsla {
+    rgb(crate::settings::get().accent).into()
 }
 pub fn magenta() -> Hsla {
     rgb(0xc48ad6).into()
@@ -66,18 +67,50 @@ pub fn alpha(color: Hsla, a: f32) -> Hsla {
     Hsla { a, ..color }
 }
 
-pub fn init(cx: &mut App) {
-    let set: serde_json::Value =
+/// (Re)loads the theme with the accent colour from the settings.
+pub fn apply(cx: &mut App) {
+    let accent = crate::settings::get().accent;
+    let hex = |a: u8| format!("#{accent:06x}{a:02x}");
+    let mut set: serde_json::Value =
         serde_json::from_str(THEME_JSON).expect("theme.json is valid JSON");
+    let colors = &mut set["themes"][0]["colors"];
+    for (key, a) in [
+        ("primary.background", 0xd9),
+        ("primary.hover.background", 0xff),
+        ("primary.active.background", 0xb3),
+        ("caret", 0xff),
+        ("ring", 0x80),
+        ("selection.background", 0x40),
+        ("list.active.background", 0x24),
+        ("list.active.border", 0x80),
+        ("link.foreground", 0xff),
+        ("link.hover.foreground", 0xff),
+        ("link.active.foreground", 0xff),
+        ("progress_bar.background", 0xff),
+        ("drag_border", 0xff),
+        ("drop_target.background", 0x22),
+        ("sidebar.primary.background", 0xff),
+        ("scrollbar.thumb.hover.background", 0x80),
+    ] {
+        colors[key] = serde_json::Value::String(hex(a));
+    }
+    colors["primary.foreground"] = "#ffffff".into();
+    set["themes"][0]["highlight"]["editor.active_line_number"] = hex(0xff).into();
     let config: ThemeConfig = serde_json::from_value(set["themes"][0].clone())
         .expect("theme.json matches the theme schema");
     let config = Rc::new(config);
-    let _ = ThemeRegistry::global_mut(cx).load_themes_from_str(THEME_JSON);
+    let _ = ThemeRegistry::global_mut(cx).load_themes_from_str(&set.to_string());
     Theme::update(cx, |theme| {
         theme.dark_theme = config.clone();
         theme.mode = ThemeMode::Dark;
     });
     Theme::change(ThemeMode::Dark, None, cx);
+}
+
+/// Installs the theme with the current settings.
+#[cfg(test)]
+pub fn init(cx: &mut App) {
+    apply(cx);
 }
 
 /// Inside of graph nodes (opaque so lines don't show through).

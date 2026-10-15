@@ -20,6 +20,7 @@ use super::menus;
 use super::{Mode, RepoView, SelectNewer, SelectOlder};
 use crate::fmt;
 use crate::graph_view::{self, NodeStyle};
+use crate::i18n::tr;
 use crate::theme;
 
 pub const ROW_HEIGHT: f32 = 26.;
@@ -96,7 +97,11 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 if let Some(u) = synced {
                     merged.insert(u.clone());
                 }
-                let color = if *head { theme::cyan() } else { theme::lime() };
+                let color = if *head {
+                    theme::accent()
+                } else {
+                    theme::lime()
+                };
                 let remote_icon = if ctx.github {
                     Lucide::Github
                 } else {
@@ -177,18 +182,16 @@ impl RepoView {
                             |el, t| el.opacity(t),
                         ),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme::amber())
-                        .child(format!("{n} fichier(s) modifié(s) non commité(s)")),
-                )
+                .child(div().text_sm().text_color(theme::amber()).child(trf!(
+                    "{n} fichier(s) modifié(s) non commité(s)",
+                    "{n} uncommitted changed file(s)"
+                )))
                 .child(div().flex_1())
                 .child(
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .child("Voir les changements →"),
+                        .child(tr("Voir les changements →", "View changes →")),
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Changes, cx)))
                 .into_any_element()
@@ -246,10 +249,10 @@ impl RepoView {
                 .gap_3()
                 .text_color(cx.theme().muted_foreground)
                 .when(self.loading, |s| {
-                    s.child(Spinner::new().color(theme::cyan()))
-                        .child("Lecture de l'historique…")
+                    s.child(Spinner::new().color(theme::accent()))
+                        .child(tr("Lecture de l'historique…", "Reading history…"))
                 })
-                .when(!self.loading, |s| s.child("Aucun commit"))
+                .when(!self.loading, |s| s.child(tr("Aucun commit", "No commits")))
                 .into_any_element()
         } else {
             uniform_list("history", data.history.len(), move |range, _, cx| {
@@ -298,7 +301,7 @@ impl RepoView {
                             })
                             .when(is_selected, |s| {
                                 s.bg(theme::alpha(
-                                    theme::cyan(),
+                                    theme::accent(),
                                     if focused { 0.16 } else { 0.1 },
                                 ))
                             })
@@ -355,7 +358,7 @@ impl RepoView {
                                     .w(px(64.))
                                     .text_xs()
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(theme::alpha(theme::cyan(), 0.7))
+                                    .text_color(theme::alpha(theme::accent(), 0.7))
                                     .child(commit.id.to_hex_with_len(7).to_string()),
                             )
                             .on_click(move |_, window, cx| {
@@ -420,7 +423,7 @@ impl RepoView {
                 .items_center()
                 .justify_center()
                 .text_color(cx.theme().muted_foreground)
-                .child("Sélectionne un commit")
+                .child(tr("Sélectionne un commit", "Select a commit"))
                 .into_any_element();
         };
         let sha = commit.id.to_string();
@@ -480,13 +483,14 @@ impl RepoView {
                                     .test_support()
                                     .text_xs()
                                     .cursor_pointer()
-                                    .text_color(theme::cyan())
+                                    .text_color(theme::accent())
                                     .hover(|s| s.text_color(cx.theme().foreground))
                                     .child(if expanded {
-                                        "Réduire".to_string()
+                                        tr("Réduire", "Show less").to_string()
                                     } else {
-                                        format!(
+                                        trf!(
                                             "Afficher plus ({} lignes)",
+                                            "Show more ({} lines)",
                                             lines.len() - BODY_PREVIEW_LINES
                                         )
                                     })
@@ -520,7 +524,7 @@ impl RepoView {
                                     .gap_1()
                                     .cursor_pointer()
                                     .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(theme::cyan())
+                                    .text_color(theme::accent())
                                     .hover(|s| s.text_color(theme::magenta()))
                                     .child(Icon::new(Lucide::Copy).xsmall())
                                     .child(commit.id.to_hex_with_len(10).to_string())
@@ -531,7 +535,7 @@ impl RepoView {
                                     }),
                             )
                             .child(div().flex_1())
-                            .child(format!("{} fichier(s)", self.commit_files)),
+                            .child(trf!("{} fichier(s)", "{} file(s)", self.commit_files)),
                     ),
             )
             .child(

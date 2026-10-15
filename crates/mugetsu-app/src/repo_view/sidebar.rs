@@ -18,6 +18,7 @@ use super::menus::{self, BranchMenu, MenuBuilder, MenuContext};
 use super::toolbar::pr_chip;
 use super::{RepoEvent, RepoView};
 use crate::branch_tree::{self, NodeKind, TreeNode};
+use crate::i18n::tr;
 use crate::theme;
 
 type Click = Box<dyn Fn(&ClickEvent, &mut Window, &mut gpui_kit::App)>;
@@ -58,9 +59,9 @@ fn render_row(row: Row) -> AnyElement {
         .cursor_pointer()
         .hover(|s| s.bg(theme::raised()))
         .when(row.selected, |s| {
-            s.bg(theme::alpha(theme::cyan(), 0.14))
+            s.bg(theme::alpha(theme::accent(), 0.14))
                 .border_1()
-                .border_color(theme::alpha(theme::cyan(), 0.25))
+                .border_color(theme::alpha(theme::accent(), 0.25))
         })
         .child(Icon::new(row.icon).xsmall().text_color(row.icon_color))
         .child(
@@ -243,7 +244,7 @@ impl RepoView {
                                     Lucide::Folder
                                 })
                                 .xsmall()
-                                .text_color(theme::alpha(theme::cyan(), 0.7)),
+                                .text_color(theme::alpha(theme::accent(), 0.7)),
                             )
                             .child(
                                 div()
@@ -353,7 +354,7 @@ impl RepoView {
                     Lucide::GitBranch
                 },
                 icon_color: if b.is_head {
-                    theme::cyan()
+                    theme::accent()
                 } else if pushed {
                     pushed_color
                 } else {
@@ -365,9 +366,15 @@ impl RepoView {
                 strong: theme::is_main_branch(&b.name),
                 burst: self.burst_for(&b.name),
                 tooltip: Some(match &b.upstream {
-                    Some(u) if !b.upstream_gone => format!("{}\nPoussée sur {u}", b.name),
-                    Some(u) => format!("{}\n{u} supprimée du remote", b.name),
-                    None => format!("{}\nPas encore poussée", b.name),
+                    Some(u) if !b.upstream_gone => {
+                        trf!("{}\nPoussée sur {u}", "{}\nPushed to {u}", b.name)
+                    }
+                    Some(u) => trf!(
+                        "{}\n{u} supprimée du remote",
+                        "{}\n{u} deleted on the remote",
+                        b.name
+                    ),
+                    None => trf!("{}\nPas encore poussée", "{}\nNot pushed yet", b.name),
                 }),
                 suffix,
                 on_click: Box::new(move |ev, window, cx| {
@@ -567,14 +574,17 @@ impl RepoView {
                 let id = SharedString::from(format!("worktree:{}", w.path));
                 let entity = entity.clone();
                 let path = PathBuf::from(&w.path);
-                let label = w.branch.clone().unwrap_or_else(|| "(détaché)".into());
+                let label = w
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| tr("(détaché)", "(detached)").into());
                 let is_current = path == self.repo.root();
                 render_row(Row {
                     id,
                     depth: 0,
                     icon: Lucide::FolderGit2,
                     icon_color: if is_current {
-                        theme::cyan()
+                        theme::accent()
                     } else {
                         theme::lime()
                     },
@@ -594,7 +604,10 @@ impl RepoView {
                         if is_current {
                             ""
                         } else {
-                            "\nCliquer pour ouvrir dans un onglet"
+                            tr(
+                                "\nCliquer pour ouvrir dans un onglet",
+                                "\nClick to open in a tab",
+                            )
                         }
                     )),
                     suffix: if w.locked {
@@ -732,13 +745,10 @@ impl RepoView {
                     .overflow_y_scroll()
                     .children(sections.into_iter().flatten())
                     .when(empty, |s| {
-                        s.child(
-                            div()
-                                .p_4()
-                                .text_sm()
-                                .text_color(theme::muted())
-                                .child(format!("Rien ne correspond à « {query} »")),
-                        )
+                        s.child(div().p_4().text_sm().text_color(theme::muted()).child(trf!(
+                            "Rien ne correspond à « {query} »",
+                            "Nothing matches “{query}”"
+                        )))
                     }),
             )
     }

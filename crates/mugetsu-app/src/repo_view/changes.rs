@@ -15,6 +15,7 @@ use gpui_kit::{
 use mugetsu_git::{Change, FileStatus};
 
 use super::{RepoView, SelectedChange};
+use crate::i18n::tr;
 use crate::theme;
 
 fn change_color(c: Change) -> gpui_kit::Hsla {
@@ -136,8 +137,8 @@ impl RepoView {
             .border_color(gpui_kit::transparent_black())
             .hover(|s| s.bg(theme::raised()))
             .when(is_selected, |s| {
-                s.bg(theme::alpha(theme::cyan(), 0.12))
-                    .border_color(theme::cyan())
+                s.bg(theme::alpha(theme::accent(), 0.12))
+                    .border_color(theme::accent())
             })
             .child(
                 div()
@@ -170,9 +171,9 @@ impl RepoView {
                     .xsmall()
                     .icon(Icon::new(if staged { Lucide::Minus } else { Lucide::Plus }))
                     .tooltip(if staged {
-                        "Retirer de l'index"
+                        tr("Retirer de l'index", "Unstage")
                     } else {
-                        "Ajouter à l'index"
+                        tr("Ajouter à l'index", "Stage")
                     })
                     .on_click(cx.listener({
                         let path = path.clone();
@@ -313,13 +314,13 @@ impl RepoView {
             .border_r_1()
             .border_color(cx.theme().border)
             .child(self.list_header(
-                "Non indexés",
+                tr("Non indexés", "Unstaged"),
                 unstaged.len(),
                 (!unstaged.is_empty()).then(|| {
                     Button::new("stage-all")
                         .xsmall()
                         .ghost()
-                        .label("Tout indexer")
+                        .label(tr("Tout indexer", "Stage all"))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.run_op("Stage all", |r| r.stage_all(), window, cx)
                         }))
@@ -336,14 +337,14 @@ impl RepoView {
                     .children(unstaged_rows),
             )
             .child(self.list_header(
-                "Indexés",
+                tr("Indexés", "Staged"),
                 staged.len(),
                 (!staged.is_empty()).then(|| {
                     let paths: Vec<String> = staged.iter().map(|f| f.path.clone()).collect();
                     Button::new("unstage-all")
                         .xsmall()
                         .ghost()
-                        .label("Tout retirer")
+                        .label(tr("Tout retirer", "Unstage all"))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             let paths = paths.clone();
                             this.run_op(
@@ -402,7 +403,11 @@ impl RepoView {
                                     .label(if staged.is_empty() {
                                         "Commit".to_string()
                                     } else {
-                                        format!("Commit {} fichier(s)", staged.len())
+                                        trf!(
+                                            "Commit {} fichier(s)",
+                                            "Commit {} file(s)",
+                                            staged.len()
+                                        )
                                     })
                                     .disabled(!can_commit)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -438,7 +443,7 @@ impl RepoView {
                                     .large()
                                     .text_color(theme::lime()),
                             )
-                            .child("Copie de travail propre")
+                            .child(tr("Copie de travail propre", "Working copy clean"))
                             .into_any_element()
                     }),
             );
@@ -451,7 +456,10 @@ impl RepoView {
         let message = self.message.read(cx).value().to_string();
         if message.trim().is_empty() {
             window.push_notification(
-                gpui_kit::component::notification::Notification::warning("Message de commit vide"),
+                gpui_kit::component::notification::Notification::warning(tr(
+                    "Message de commit vide",
+                    "Empty commit message",
+                )),
                 cx,
             );
             return;

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex,
@@ -20,8 +21,9 @@ use gpui_kit::{
 };
 use mugetsu_git::Repo;
 
+use crate::i18n::tr;
 use crate::repo_view::{RepoEvent, RepoView};
-use crate::session::Session;
+use crate::session::{RepoSet, Session};
 use crate::theme;
 
 gpui_kit::actions!(workspace, [OpenRepository, CloseTab, NextTab, PreviousTab]);
@@ -47,6 +49,10 @@ struct Tab {
 pub struct Workspace {
     tabs: Vec<Tab>,
     active: usize,
+    /// Named repository lists (Fork-like workspaces); `current` is the open one,
+    /// its `repos` kept in sync with the tabs.
+    sets: Vec<RepoSet>,
+    current: usize,
     window_active: bool,
     persist: bool,
     _scheduler: Task<()>,
@@ -55,8 +61,7 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new(
-        paths: Vec<PathBuf>,
-        active: usize,
+        session: Session,
         persist: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -76,21 +81,90 @@ impl Workspace {
         let mut this = Self {
             tabs: Vec::new(),
             active: 0,
+            sets: session.workspaces,
+            current: session.current,
             window_active: true,
             persist,
             _scheduler: scheduler,
             _activation: activation,
         };
-        for path in paths {
-            if let Err(e) = this.open(path, window, cx) {
+        this.open_set(window, cx);
+        this
+    }
+
+    /// Opens the tabs of the current workspace.
+    fn open_set(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let set = self.sets[self.current].clone();
+        for path in set.repos {
+            if let Err(e) = self.open(path, window, cx) {
                 window.push_notification(
                     gpui_kit::component::notification::Notification::error(e.to_string()),
                     cx,
                 );
             }
         }
-        this.activate(active.min(this.tabs.len().saturating_sub(1)), cx);
-        this
+        self.activate(set.active.min(self.tabs.len().saturating_sub(1)), cx);
+        cx.notify();
+    }
+
+    /// Copies the open tabs into the current workspace.
+    fn sync_set(&mut self, cx: &Context<Self>) {
+        let repos = self
+            .tabs
+            .iter()
+            .map(|t| t.view.read(cx).repo().root().to_path_buf())
+            .collect();
+        let set = &mut self.sets[self.current];
+        set.repos = repos;
+        set.active = self.active;
+    }
+
+    pub fn switch_workspace(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= self.sets.len() || index == self.current {
+            return;
+        }
+        self.sync_set(cx);
+        self.tabs.clear();
+        self.active = 0;
+        self.current = index;
+        self.open_set(window, cx);
+        self.save(cx);
+    }
+
+    pub fn new_workspace(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.sets.push(RepoSet {
+            name,
+            repos: Vec::new(),
+            active: 0,
+        });
+        self.switch_workspace(self.sets.len() - 1, window, cx);
+    }
+
+    pub fn rename_workspace(&mut self, name: String, cx: &mut Context<Self>) {
+        self.sets[self.current].name = name;
+        self.save(cx);
+        cx.notify();
+    }
+
+    /// Deletes the current workspace (never the last one) and opens the first.
+    pub fn delete_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sets.len() < 2 {
+            return;
+        }
+        self.sets.remove(self.current);
+        self.tabs.clear();
+        self.active = 0;
+        self.current = 0;
+        self.open_set(window, cx);
+        self.save(cx);
+    }
+
+    #[cfg(test)]
+    pub fn workspace_names(&self) -> (Vec<String>, usize) {
+        (
+            self.sets.iter().map(|s| s.name.clone()).collect(),
+            self.current,
+        )
     }
 
     #[cfg(test)]
@@ -189,19 +263,11 @@ impl Workspace {
         }
     }
 
-    fn save(&self, cx: &Context<Self>) {
-        if !self.persist {
-            return;
+    fn save(&mut self, cx: &Context<Self>) {
+        self.sync_set(cx);
+        if self.persist {
+            Session::new(self.sets.clone(), self.current).save();
         }
-        Session {
-            repos: self
-                .tabs
-                .iter()
-                .map(|t| t.view.read(cx).repo().root().to_path_buf())
-                .collect(),
-            active: self.active,
-        }
-        .save();
     }
 
     fn prompt_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -209,7 +275,7 @@ impl Workspace {
             files: false,
             directories: true,
             multiple: true,
-            prompt: Some("Ouvrir".into()),
+            prompt: Some(tr("Ouvrir", "Open").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = paths.await {
@@ -228,6 +294,94 @@ impl Workspace {
             }
         })
         .detach();
+    }
+
+    /// Title-bar menu listing the workspaces, plus new / rename / delete.
+    fn render_workspace_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.entity().downgrade();
+        let names: Vec<String> = self.sets.iter().map(|s| s.name.clone()).collect();
+        let current = self.current;
+        Button::new("workspace-menu")
+            .ghost()
+            .xsmall()
+            .icon(Icon::new(Lucide::LayoutDashboard))
+            .label(names[current].clone())
+            .tooltip(tr("Workspaces", "Workspaces"))
+            .dropdown_menu(move |mut menu, _, _| {
+                let act = |f: fn(&mut Workspace, &mut Window, &mut Context<Workspace>)| {
+                    let this = this.clone();
+                    move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
+                        let _ = this.update(cx, |ws, cx| f(ws, window, cx));
+                    }
+                };
+                for (i, name) in names.iter().enumerate() {
+                    let this = this.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(i == current)
+                            .on_click(move |_, window, cx| {
+                                let _ = this.update(cx, |ws, cx| ws.switch_workspace(i, window, cx));
+                            }),
+                    );
+                }
+                menu.separator()
+                    .item(
+                        PopupMenuItem::new(tr("Nouveau workspace…", "New Workspace…"))
+                            .icon(Icon::new(Lucide::Plus))
+                            .on_click(act(|_, window, cx| {
+                                crate::dialogs::prompt(
+                                    tr("Nouveau workspace", "New Workspace").into(),
+                                    tr("Nom du workspace", "Workspace name"),
+                                    String::new(),
+                                    tr("Créer", "Create"),
+                                    |ws: &mut Workspace, name, window, cx| {
+                                        ws.new_workspace(name, window, cx)
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new(tr("Renommer…", "Rename…"))
+                            .icon(Icon::new(Lucide::Pencil))
+                            .on_click(act(|ws, window, cx| {
+                                let name = ws.sets[ws.current].name.clone();
+                                crate::dialogs::prompt(
+                                    trf!("Renommer '{name}'", "Rename '{name}'"),
+                                    tr("Nom du workspace", "Workspace name"),
+                                    name,
+                                    tr("Renommer", "Rename"),
+                                    |ws: &mut Workspace, name, _, cx| ws.rename_workspace(name, cx),
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new(tr("Supprimer…", "Delete…"))
+                            .icon(Icon::new(Lucide::Trash))
+                            .disabled(names.len() < 2)
+                            .on_click(act(|ws, window, cx| {
+                                let name = ws.sets[ws.current].name.clone();
+                                crate::dialogs::confirm(
+                                    trf!(
+                                        "Supprimer le workspace '{name}' ?",
+                                        "Delete workspace '{name}'?"
+                                    ),
+                                    tr(
+                                        "Les dépôts restent sur le disque ; seule la liste est supprimée.",
+                                        "Repositories stay on disk; only the list is deleted.",
+                                    )
+                                    .into(),
+                                    tr("Supprimer", "Delete"),
+                                    |ws: &mut Workspace, window, cx| ws.delete_workspace(window, cx),
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    )
+            })
     }
 
     /// Safari-like tab: equal widths, frosted pill for the active one,
@@ -356,7 +510,7 @@ impl Workspace {
                             div()
                                 .size(px(5.))
                                 .rounded_full()
-                                .bg(theme::cyan())
+                                .bg(theme::accent())
                                 .with_animation(
                                     "fetch-blink",
                                     Animation::new(Duration::from_millis(700))
@@ -388,19 +542,18 @@ impl Render for Workspace {
                     div()
                         .text_3xl()
                         .font_weight(gpui_kit::FontWeight::BOLD)
-                        .text_color(theme::cyan())
+                        .text_color(theme::accent())
                         .child("月 Mugetsu"),
                 )
-                .child(
-                    div()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Ouvre un dépôt Git pour commencer"),
-                )
+                .child(div().text_color(cx.theme().muted_foreground).child(tr(
+                    "Ouvre un dépôt Git pour commencer",
+                    "Open a Git repository to start",
+                )))
                 .child(
                     Button::new("open-first")
                         .primary()
                         .icon(Icon::new(Lucide::FolderOpen))
-                        .label("Ouvrir un dépôt…")
+                        .label(tr("Ouvrir un dépôt…", "Open repository…"))
                         .on_click(cx.listener(|this, _, window, cx| this.prompt_open(window, cx))),
                 )
                 .into_any_element(),
@@ -432,13 +585,22 @@ impl Render for Workspace {
                         .pr_2()
                         .gap_1()
                         .items_center()
+                        .child(self.render_workspace_menu(cx))
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(1.))
+                                .h(px(16.))
+                                .mx_1()
+                                .bg(theme::hairline()),
+                        )
                         .children(tabs)
                         .child(
                             Button::new("open")
                                 .ghost()
                                 .xsmall()
                                 .icon(Icon::new(Lucide::Plus))
-                                .tooltip("Ouvrir un dépôt (⌘O)")
+                                .tooltip(tr("Ouvrir un dépôt (⌘O)", "Open repository (⌘O)"))
                                 .on_click(
                                     cx.listener(|this, _, window, cx| this.prompt_open(window, cx)),
                                 ),
