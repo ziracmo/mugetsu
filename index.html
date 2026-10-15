@@ -351,9 +351,32 @@
         <div><dt>Git engine</dt><dd id="f-engine"></dd></div>
         <div><dt>Price</dt><dd id="f-price"></dd></div>
         <div><dt>Source</dt><dd id="f-source"></dd></div>
+        <div class="facts__bench"><dt>Open git.git, click to graph</dt><dd id="f-open"></dd></div>
+        <div class="facts__bench"><dt>Memory after a minute idle</dt><dd id="f-mem"></dd></div>
       </dl>
     </div>
-    <p class="compare__note">Facts about the other clients come from their public documentation; numbers on this page are measured on Mugetsu only.</p>
+    <div class="compare__foot">
+      <div class="compare__method">
+        <h3>How the two measured rows are taken</h3>
+        <p id="bench-machine">Not measured yet. The rows fill in from the first run of this protocol on one Mac.</p>
+        <ol>
+          <li>Clone <a class="link-plain" href="https://github.com/git/git">git/git</a> once. Every client opens that same clone.</li>
+          <li>Quit the client. Launch it, open the clone, and record the screen at 60 fps. Count frames from the click on the repository to the first frame where the commit graph is painted. Three runs, keep the median.</li>
+          <li>Leave the repository open and idle for one minute. In Activity Monitor, add up the Memory column for every process of the app, helpers included.</li>
+        </ol>
+      </div>
+      <ol class="compare__sources" aria-label="Sources">
+        <li id="src-1"><a class="link-plain" href="https://github.com/ziracmo/mugetsu">Mugetsu source and README</a></li>
+        <li id="src-2"><a class="link-plain" href="https://git-fork.com/">git-fork.com, team page: "Software developer (Swift, Cocoa)" and "(.NET, WPF)"</a></li>
+        <li id="src-3"><a class="link-plain" href="https://git-fork.com/releasenotes">Fork release notes: "Update git to 2.45.2" (2.44, June 2024)</a></li>
+        <li id="src-4"><a class="link-plain" href="https://git-fork.com/buy">Fork, buy page: one-time purchase, 1 user, up to 3 machines</a></li>
+        <li id="src-5"><a class="link-plain" href="https://www.gitkraken.com/blog/5-electron-apps">GitKraken blog: "built on Electron" (2017)</a></li>
+        <li id="src-6"><a class="link-plain" href="https://gitkraken.com/blog/nodegit-libgit2">GitKraken blog: NodeGit, the engine powering GitKraken (2021)</a></li>
+        <li id="src-7"><a class="link-plain" href="https://www.gitkraken.com/pricing">GitKraken pricing: Community tier, per-seat plans renewed yearly</a></li>
+        <li id="src-8"><a class="link-plain" href="https://github.com/desktop/desktop">GitHub Desktop README: Electron, TypeScript, React, MIT</a></li>
+        <li id="src-9"><a class="link-plain" href="https://www.npmjs.com/package/dugite">dugite: bindings that use the same command line interface as core Git</a></li>
+      </ol>
+    </div>
   </div>
 </section>
 

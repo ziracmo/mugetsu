@@ -147,35 +147,46 @@
   });
 
   // ---- competitor stack ----
+  // each fact is [text, source number]; the numbered sources are listed under the comparison
   const CLIENTS = {
     mugetsu: {
       layers: [['Rust', 'your click, handled in native code', 'is-native'], ['GPUI', 'the UI framework, draws through Metal', 'is-native']],
-      facts: ['Native Rust, no web view', 'The GPU, only visible rows', 'gix in process, git CLI for the rest', 'Free', 'Open source, MIT'],
+      facts: [['Native Rust, GPUI, no web view', 1], ['The GPU, only the visible rows', 1], ['gix in process, git CLI for config, hooks and credentials', 1], ['Free', 1], ['Open source, MIT', 1]],
     },
     fork: {
       layers: [['Native Cocoa', 'the macOS toolkit', 'is-native'], ['Git CLI', 'spawned for every operation', '']],
-      facts: ['Native Cocoa on macOS, .NET on Windows', 'The CPU, in a native view', 'The git command line', 'Paid licence after an evaluation period', 'Closed'],
+      facts: [['Native: Swift and Cocoa on macOS, .NET and WPF on Windows', 2], ['The CPU, in a native view (not published)', 0], ['A bundled git command line, updated with each release', 3], ['$59.99 one-time, 1 user, up to 3 machines, free evaluation', 4], ['Closed', 2]],
     },
     kraken: {
       layers: [['JavaScript', 'the app logic', 'is-heavy'], ['DOM and CSS', 'every row is an element', 'is-heavy'], ['Chromium', 'a bundled browser', 'is-heavy'], ['Node.js', 'the host process', 'is-heavy']],
-      facts: ['Electron', 'The browser engine', 'Its own JavaScript implementation', 'Free tier, paid plans for teams and features', 'Closed'],
+      facts: [['Electron, by their own account', 5], ['The browser engine (not published)', 0], ['NodeGit, their libgit2 bindings', 6], ['Free Community tier for local repos and public remotes; paid plans per seat, renewed yearly', 7], ['Closed', 7]],
     },
     ghd: {
       layers: [['React', 'the app logic', 'is-heavy'], ['DOM and CSS', 'every row is an element', 'is-heavy'], ['Chromium', 'a bundled browser', 'is-heavy'], ['Node.js', 'the host process', 'is-heavy']],
-      facts: ['Electron', 'The browser engine', 'The git command line (dugite)', 'Free', 'Open source, MIT'],
+      facts: [['Electron, TypeScript and React', 8], ['The browser engine (not published)', 0], ['dugite, the git command line driven from Node', 9], ['No charge', 8], ['Open source, MIT', 8]],
     },
   };
+  // measured on one Mac, by hand, with the protocol under the table; null means not measured yet
+  let BENCH = {};
   const pick = [...document.querySelectorAll('[data-client]')];
   const layersEl = document.getElementById('stack-layers');
   const factEls = ['f-runtime', 'f-graph', 'f-engine', 'f-price', 'f-source'].map((id) => document.getElementById(id));
+  const benchEls = ['f-open', 'f-mem'].map((id) => document.getElementById(id));
+  const benchText = (key) => {
+    const b = BENCH[key] || {};
+    return [b.open_s == null ? 'Not measured yet' : `${b.open_s.toFixed(1)} s`, b.rss_mb == null ? 'Not measured yet' : `${Math.round(b.rss_mb)} MB`];
+  };
+  let current = 'mugetsu';
   const showClient = (key) => {
+    current = key;
     pick.forEach((b) => { const on = b.dataset.client === key; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
     const c = CLIENTS[key];
     layersEl.innerHTML = c.layers.map(([n, d, cls]) => `<li class="${cls}"><span>${n}</span><small>${d}</small></li>`).join('');
-    c.facts.forEach((f, i) => { factEls[i].textContent = f; });
+    c.facts.forEach(([f, src], i) => { factEls[i].textContent = f; if (src) { const a = document.createElement('a'); a.className = 'src'; a.href = `#src-${src}`; a.textContent = src; a.setAttribute('aria-label', `source ${src}`); factEls[i].append(a); } });
+    benchText(key).forEach((t, i) => { benchEls[i].textContent = t; benchEls[i].classList.toggle('is-missing', /^Not/.test(t)); });
     if (M && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       M.animate(layersEl.children, { opacity: [0, 1], transform: ['translateY(-14px) scale(0.98)', 'none'] }, { delay: M.stagger(0.09), duration: 0.5, easing: [0.22, 1, 0.36, 1] });
-      M.animate(factEls, { opacity: [0, 1] }, { delay: M.stagger(0.06), duration: 0.4 });
+      M.animate([...factEls, ...benchEls], { opacity: [0, 1] }, { delay: M.stagger(0.06), duration: 0.4 });
     }
   };
   pick.forEach((b, i) => {
@@ -186,6 +197,12 @@
     });
   });
   showClient('mugetsu');
+  fetch('bench.json').then((r) => r.ok ? r.json() : {}).then((j) => {
+    BENCH = j.clients || {};
+    const m = document.getElementById('bench-machine');
+    if (m && j.machine) m.textContent = `Measured on ${j.machine}, ${j.date}.`;
+    showClient(current);
+  }).catch(() => {});
 
   // ---- downloads: look at the latest release for a .dmg and a .exe ----
   const dlCards = { mac: { el: document.getElementById('dl-mac'), ext: '.dmg', soon: 'Signed .dmg coming with the first release' }, win: { el: document.getElementById('dl-win'), ext: '.exe', soon: 'Windows build in progress' } };

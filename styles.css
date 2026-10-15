@@ -371,7 +371,6 @@ body::after { content: ""; position: fixed; inset: 0; z-index: 50; pointer-event
 .facts div + div { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
 .facts dt { color: var(--soft); font-size: var(--step-small); }
 .facts dd { margin: 0; }
-.compare__note { margin-top: 2.5rem; color: var(--soft); font-size: var(--step-small); max-width: 70ch; }
 
 /* ---------- download ---------- */
 .dl { padding-block: var(--section); background: radial-gradient(ellipse 50% 60% at 50% 100%, color-mix(in oklab, var(--accent) 45%, transparent), transparent 70%), var(--bg); text-align: center; }
@@ -561,3 +560,18 @@ body::after { content: ""; position: fixed; inset: 0; z-index: 50; pointer-event
 @keyframes beam-in { to { transform: translateX(-50%) scaleY(1); } }
 @keyframes ring-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
 @keyframes drift { from { transform: translateY(-6%); } to { transform: translateY(0); } }
+
+/* comparison: measured rows, method, sources */
+.facts .src { margin-left: 0.35em; font-size: 0.7em; vertical-align: super; color: var(--soft); text-decoration: none; }
+.facts .src:hover { color: var(--ink); }
+.facts__bench dt { color: var(--glow); }
+.facts dd.is-missing { color: var(--soft); font-style: italic; }
+.compare__foot { margin-top: 4rem; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 2rem; }
+.compare__method { grid-column: 1 / span 6; }
+.compare__method h3 { font-family: var(--font-text); font-weight: 500; font-size: var(--step-lead); margin-bottom: 0.75rem; }
+.compare__method p { color: var(--soft); margin-bottom: 1rem; }
+.compare__method ol { list-style: decimal; padding-left: 1.2em; display: grid; gap: 0.5rem; color: var(--soft); font-size: var(--step-small); }
+.compare__sources { list-style: decimal; grid-column: 8 / span 5; padding-left: 1.4em; display: grid; gap: 0.4rem; font-size: var(--step-small); color: var(--soft); }
+.compare__sources li::marker { color: var(--glow); }
+.compare__sources li:target { color: var(--ink); }
+@media (max-width: 860px) { .compare__foot { display: block; } .compare__sources { margin-top: 2rem; } }

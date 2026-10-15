@@ -1,0 +1,10 @@
+{
+  "machine": null,
+  "date": null,
+  "clients": {
+    "mugetsu": { "open_s": null, "rss_mb": null },
+    "fork": { "open_s": null, "rss_mb": null },
+    "kraken": { "open_s": null, "rss_mb": null },
+    "ghd": { "open_s": null, "rss_mb": null }
+  }
+}
