@@ -198,6 +198,7 @@ impl RepoView {
             view: cx.entity().downgrade(),
             root: self.repo.root().to_path_buf(),
             github: self.data.github.clone(),
+            forge: self.data.forge.clone(),
             default_remote: default_remote(&self.data.refs),
             head_branch: self.data.refs.head_branch.clone(),
         }

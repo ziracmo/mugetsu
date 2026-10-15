@@ -87,6 +87,12 @@ pub struct Settings {
     pub ai_command: String,
     /// System notifications about pull requests (all off by default).
     pub notifications: Notifications,
+    /// GitLab personal access token (else `GITLAB_TOKEN` or the `glab` login).
+    pub gitlab_token: String,
+    /// Self-hosted GitLab hosts, besides gitlab.com and `gitlab.*` ones.
+    pub gitlab_hosts: Vec<String>,
+    /// Bitbucket `user:app-password` or access token (else `BITBUCKET_TOKEN`).
+    pub bitbucket_token: String,
 }
 
 /// Which pull request events raise a system notification.
@@ -177,6 +183,9 @@ impl Default for Settings {
             ai_tool: AiTool::Claude,
             ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),
             notifications: Notifications::default(),
+            gitlab_token: String::new(),
+            gitlab_hosts: Vec::new(),
+            bitbucket_token: String::new(),
         }
     }
 }

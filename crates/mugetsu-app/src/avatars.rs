@@ -142,6 +142,15 @@ pub fn avatar(email: &str, name: &str, size: f32, cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
+/// A PR author's picture: GitHub logins have one, other forges show initials.
+pub fn pr_author(pr: &mugetsu_forge::PullRequest, size: f32, cx: &mut App) -> AnyElement {
+    if pr.url.starts_with("https://github.com/") {
+        github(&pr.author, size, cx)
+    } else {
+        avatar("", &pr.author, size, cx)
+    }
+}
+
 /// A GitHub user's picture by login (via the noreply address), or initials.
 pub fn github(login: &str, size: f32, cx: &mut App) -> AnyElement {
     avatar(

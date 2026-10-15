@@ -12,7 +12,7 @@ use gpui_kit::{
     App, AppContext as _, ClickEvent, ClipboardItem, Context, WeakEntity, Window,
     prelude::FluentBuilder as _,
 };
-use mugetsu_forge::{GithubRepo, PullRequest};
+use mugetsu_forge::{ForgeRepo, GithubRepo, PullRequest};
 use mugetsu_git::{RefLabel, ResetMode};
 
 use super::{RepoEvent, RepoView};
@@ -47,7 +47,9 @@ fn copy(text: String) -> Handler {
 pub struct MenuContext {
     pub view: WeakEntity<RepoView>,
     pub root: PathBuf,
+    /// Set for GitHub remotes only (GitHub links).
     pub github: Option<GithubRepo>,
+    pub forge: Option<ForgeRepo>,
     pub default_remote: Option<String>,
     pub head_branch: Option<String>,
 }
@@ -73,35 +75,35 @@ pub fn found_pr(lookup: Option<&PrLookup>) -> Option<PullRequest> {
     }
 }
 
-/// `https://github.com/o/r/compare/branch?expand=1`, or the PR itself when it exists.
+/// The forge's "new pull / merge request" page, or the PR itself when it exists.
 fn pr_item(
     ctx: &MenuContext,
     remote: &str,
     branch: &str,
     pr: Option<&PullRequest>,
 ) -> PopupMenuItem {
-    match (pr, &ctx.github) {
-        (Some(pr), _) => {
+    let noun = ctx
+        .forge
+        .as_ref()
+        .map_or("Pull Request", |f| f.kind.pr_noun());
+    match (pr, &ctx.forge) {
+        (Some(pr), forge) => {
             let url = pr.url.clone();
+            let number = forge
+                .as_ref()
+                .map_or_else(|| format!("#{}", pr.number), |f| f.kind.pr_ref(pr.number));
             item(
-                trf!(
-                    "Ouvrir la Pull Request #{}",
-                    "Open Pull Request #{}",
-                    pr.number
-                ),
+                trf!("Ouvrir la {noun} {number}", "Open {noun} {number}"),
                 Lucide::GitPullRequest,
             )
             .on_click(move |_, _, cx| cx.open_url(&url))
         }
-        (None, Some(gh)) => {
-            let url = format!(
-                "https://github.com/{}/{}/compare/{branch}?expand=1",
-                gh.owner, gh.name
-            );
+        (None, Some(forge)) => {
+            let url = forge.new_pr_url(branch);
             item(
                 trf!(
-                    "Créer une Pull Request sur '{remote}'",
-                    "Create Pull Request on '{remote}'"
+                    "Créer une {noun} sur '{remote}'",
+                    "Create {noun} on '{remote}'"
                 ),
                 Lucide::GitPullRequestCreateArrow,
             )
@@ -109,8 +111,8 @@ fn pr_item(
         }
         (None, None) => item(
             trf!(
-                "Créer une Pull Request sur '{remote}'",
-                "Create Pull Request on '{remote}'"
+                "Créer une {noun} sur '{remote}'",
+                "Create {noun} on '{remote}'"
             ),
             Lucide::GitPullRequestCreateArrow,
         )
