@@ -20,6 +20,11 @@ pub fn lookup(repo: &GithubRepo, branch: &str) -> Result<Option<PullRequest>, St
         .map_err(|e| e.to_string())
 }
 
+/// Blocking: recent PRs of the repository keyed by head branch.
+pub fn recent(repo: &GithubRepo) -> Result<HashMap<String, PullRequest>, String> {
+    github().recent_pulls(repo).map_err(|e| e.to_string())
+}
+
 #[derive(Clone, Debug)]
 pub enum PrLookup {
     Loading,
@@ -31,9 +36,26 @@ pub enum PrLookup {
 #[derive(Default)]
 pub struct PrCache {
     entries: HashMap<String, (PrLookup, Instant)>,
+    bulk_at: Option<Instant>,
 }
 
 impl PrCache {
+    /// True when the repository-wide PR list should be refreshed.
+    pub fn needs_bulk(&self, now: Instant) -> bool {
+        self.bulk_at.is_none_or(|at| now.duration_since(at) > TTL)
+    }
+
+    pub fn mark_bulk(&mut self, now: Instant) {
+        self.bulk_at = Some(now);
+    }
+
+    /// Records every PR of a repository-wide listing.
+    pub fn set_bulk(&mut self, prs: HashMap<String, PullRequest>, now: Instant) {
+        for (branch, pr) in prs {
+            self.entries.insert(branch, (PrLookup::Found(pr), now));
+        }
+    }
+
     pub fn get(&self, branch: &str) -> Option<&PrLookup> {
         self.entries.get(branch).map(|(l, _)| l)
     }

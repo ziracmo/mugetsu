@@ -1,8 +1,10 @@
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::diff::Diff;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
@@ -13,12 +15,15 @@ use gpui_kit::{
 };
 use mugetsu_git::RefLabel;
 
+use super::menus;
 use super::{Mode, RepoView, SelectNewer, SelectOlder};
 use crate::fmt;
 use crate::graph_view::{self, NodeStyle};
 use crate::theme;
 
 pub const ROW_HEIGHT: f32 = 26.;
+/// Commit body lines shown before "Afficher plus".
+const BODY_PREVIEW_LINES: usize = 3;
 
 fn label_chip(label: &RefLabel) -> AnyElement {
     let (text, color, icon) = match label {
@@ -110,6 +115,26 @@ impl RepoView {
         let entity = cx.entity().downgrade();
         let now = fmt::now();
         let focused = self.history_focus.is_focused(window);
+        let menu_ctx = self.menu_context(cx);
+        let branches: Rc<Vec<_>> = Rc::new(
+            data.refs
+                .branches
+                .iter()
+                .map(|b| self.branch_menu_info(b))
+                .collect(),
+        );
+        let remote_prs: Rc<Vec<_>> = Rc::new(
+            data.refs
+                .remote_branches
+                .iter()
+                .map(|b| {
+                    (
+                        b.name.clone(),
+                        menus::found_pr(self.pr_for(&b.name, None, true)),
+                    )
+                })
+                .collect(),
+        );
 
         let list = if data.history.is_empty() {
             v_flex()
@@ -147,6 +172,14 @@ impl RepoView {
                             .unwrap_or_default();
                         let id = commit.id;
                         let entity = entity.clone();
+                        let is_merge = commit.parents.len() > 1;
+                        let ref_labels = data
+                            .decorations
+                            .get(&commit.id)
+                            .cloned()
+                            .unwrap_or_default();
+                        let (menu_ctx, branches, remote_prs) =
+                            (menu_ctx.clone(), branches.clone(), remote_prs.clone());
                         h_flex()
                             .id(SharedString::from(commit.id.to_string()))
                             .test_support()
@@ -219,6 +252,19 @@ impl RepoView {
                                     this.select_commit(id, false, cx);
                                 });
                             })
+                            .context_menu(move |m, window, cx| {
+                                menus::commit_menu(
+                                    m,
+                                    &menu_ctx,
+                                    id,
+                                    is_merge,
+                                    &ref_labels,
+                                    &branches,
+                                    &remote_prs,
+                                    window,
+                                    cx,
+                                )
+                            })
                             .into_any_element()
                     })
                     .collect()
@@ -289,7 +335,7 @@ impl RepoView {
                     .gap_1()
                     .bg(theme::panel())
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(theme::hairline())
                     .child(
                         div()
                             .text_base()
@@ -297,12 +343,47 @@ impl RepoView {
                             .child(subject),
                     )
                     .when(!body.is_empty(), |s| {
+                        let lines: Vec<&str> = body.lines().collect();
+                        let long = lines.len() > BODY_PREVIEW_LINES;
+                        let expanded = self.body_expanded;
+                        let shown = if long && !expanded {
+                            lines[..BODY_PREVIEW_LINES].join("\n")
+                        } else {
+                            body.clone()
+                        };
                         s.child(
                             div()
+                                .id("commit-body")
+                                .test_support()
+                                .max_h(px(180.))
+                                .overflow_y_scroll()
                                 .text_sm()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(body),
+                                .child(shown),
                         )
+                        .when(long, |s| {
+                            s.child(
+                                div()
+                                    .id("commit-body-toggle")
+                                    .test_support()
+                                    .text_xs()
+                                    .cursor_pointer()
+                                    .text_color(theme::cyan())
+                                    .hover(|s| s.text_color(cx.theme().foreground))
+                                    .child(if expanded {
+                                        "Réduire".to_string()
+                                    } else {
+                                        format!(
+                                            "Afficher plus ({} lignes)",
+                                            lines.len() - BODY_PREVIEW_LINES
+                                        )
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.body_expanded = !this.body_expanded;
+                                        cx.notify();
+                                    })),
+                            )
+                        })
                     })
                     .child(
                         h_flex()

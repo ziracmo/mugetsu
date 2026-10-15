@@ -1,4 +1,4 @@
-//! "Cyber dark" look: a near-black base with neon accents, inspired by Fork's
+//! "Cyber dark" glass look: a translucent blurred base with soft accents, inspired by Fork's
 //! density and GitKraken's colourful graph.
 
 use std::rc::Rc;
@@ -9,37 +9,43 @@ use gpui_kit::{App, Hsla, Rgba, rgb};
 const THEME_JSON: &str = include_str!("../assets/theme.json");
 
 pub fn cyan() -> Hsla {
-    rgb(0x00e5ff).into()
+    rgb(0x6cc7dc).into()
 }
 pub fn magenta() -> Hsla {
-    rgb(0xff2bd6).into()
+    rgb(0xc48ad6).into()
 }
 pub fn lime() -> Hsla {
-    rgb(0xa3ff12).into()
+    rgb(0x9ccc7a).into()
 }
 pub fn amber() -> Hsla {
-    rgb(0xffb020).into()
+    rgb(0xd9b26f).into()
 }
 pub fn red() -> Hsla {
-    rgb(0xff4d6d).into()
+    rgb(0xe07a86).into()
 }
 pub fn violet() -> Hsla {
-    rgb(0x8b5cf6).into()
+    rgb(0x9d8fe8).into()
 }
+/// Frosted surface: translucent so the window blur shows through.
 pub fn panel() -> Hsla {
-    rgb(0x0d121a).into()
+    alpha(rgb(0x121826).into(), 0.55)
 }
+/// Hover / raised overlay, works on any surface.
 pub fn raised() -> Hsla {
-    rgb(0x121925).into()
+    alpha(rgb(0xffffff).into(), 0.06)
+}
+/// Hairline used for glass edges.
+pub fn hairline() -> Hsla {
+    alpha(rgb(0xffffff).into(), 0.08)
 }
 pub fn muted() -> Hsla {
-    rgb(0x64748b).into()
+    rgb(0x7d8798).into()
 }
 
 /// Graph lane palette, cycled by lane color index.
 const LANES: [u32; 10] = [
-    0x00e5ff, 0xff2bd6, 0xa3ff12, 0xffb020, 0x8b5cf6, 0x38bdf8, 0xf472b6, 0x2dd4bf, 0xfb7185,
-    0xfacc15,
+    0x6cc7dc, 0xc48ad6, 0x9ccc7a, 0xd9b26f, 0x9d8fe8, 0x6fa8dc, 0xd68fb0, 0x6cc4b0, 0xd98a8a,
+    0xcfc27a,
 ];
 
 pub fn lane_color(index: u16) -> Hsla {

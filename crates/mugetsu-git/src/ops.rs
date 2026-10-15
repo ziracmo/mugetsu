@@ -169,4 +169,98 @@ impl Repo {
     pub fn remote_remove(&self, name: &str) -> anyhow::Result<()> {
         self.git().run(["remote", "remove", name]).map(drop)
     }
+
+    pub fn rename_branch(&self, old: &str, new: &str) -> anyhow::Result<()> {
+        self.git().run(["branch", "-m", old, new]).map(drop)
+    }
+
+    /// Fast-forwards `branch` to `upstream`, refusing anything that is not a fast-forward.
+    pub fn fast_forward(&self, branch: &str, upstream: &str, is_head: bool) -> anyhow::Result<()> {
+        if is_head {
+            self.git().run(["merge", "--ff-only", "--quiet", upstream])
+        } else {
+            // `fetch .` updates a non-checked-out branch, fast-forward only.
+            self.git()
+                .run(["fetch", "--quiet", ".", &format!("{upstream}:{branch}")])
+        }
+        .map(drop)
+    }
+
+    pub fn push_branch(
+        &self,
+        remote: &str,
+        branch: &str,
+        set_upstream: bool,
+    ) -> anyhow::Result<()> {
+        let mut args = vec!["push", "--quiet"];
+        if set_upstream {
+            args.push("-u");
+        }
+        args.extend([remote, branch]);
+        self.git().run(args).map(drop)
+    }
+
+    /// Deletes `remote/branch` on the server.
+    pub fn delete_remote_branch(&self, remote: &str, branch: &str) -> anyhow::Result<()> {
+        self.git()
+            .run(["push", "--quiet", remote, "--delete", branch])
+            .map(drop)
+    }
+
+    pub fn push_tag(&self, remote: &str, tag: &str) -> anyhow::Result<()> {
+        self.git()
+            .run(["push", "--quiet", remote, &format!("refs/tags/{tag}")])
+            .map(drop)
+    }
+
+    /// `git reset --soft|--mixed|--hard <target>` on the current branch.
+    pub fn reset(&self, target: &str, mode: ResetMode) -> anyhow::Result<()> {
+        self.git().run(["reset", mode.flag(), target]).map(drop)
+    }
+
+    pub fn checkout_detached(&self, rev: &str) -> anyhow::Result<()> {
+        self.git().run(["switch", "--detach", rev]).map(drop)
+    }
+
+    /// Merge commits are picked relative to their first parent.
+    pub fn cherry_pick(&self, rev: &str, is_merge: bool) -> anyhow::Result<()> {
+        let mut args = vec!["cherry-pick"];
+        if is_merge {
+            args.extend(["-m", "1"]);
+        }
+        args.push(rev);
+        self.git().run(args).map(drop)
+    }
+
+    /// Merge commits are reverted relative to their first parent.
+    pub fn revert(&self, rev: &str, is_merge: bool) -> anyhow::Result<()> {
+        let mut args = vec!["revert", "--no-edit"];
+        if is_merge {
+            args.extend(["-m", "1"]);
+        }
+        args.push(rev);
+        self.git().run(args).map(drop)
+    }
+
+    /// The commit as a mailbox patch (`git format-patch`).
+    pub fn format_patch(&self, rev: &str) -> anyhow::Result<String> {
+        self.git().run(["format-patch", "-1", "--stdout", rev])
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetMode {
+    Soft,
+    Mixed,
+    Hard,
+}
+
+impl ResetMode {
+    fn flag(self) -> &'static str {
+        match self {
+            ResetMode::Soft => "--soft",
+            ResetMode::Mixed => "--mixed",
+            ResetMode::Hard => "--hard",
+        }
+    }
 }

@@ -54,7 +54,26 @@ pub struct PullRequest {
 }
 
 #[derive(Deserialize)]
+struct ApiHead {
+    #[serde(rename = "ref")]
+    branch: String,
+    repo: Option<ApiHeadRepo>,
+}
+
+#[derive(Deserialize)]
+struct ApiHeadRepo {
+    owner: ApiOwner,
+}
+
+#[derive(Deserialize)]
+struct ApiOwner {
+    login: String,
+}
+
+#[derive(Deserialize)]
 struct ApiPull {
+    #[serde(default)]
+    head: Option<ApiHead>,
     number: u64,
     title: String,
     html_url: String,
@@ -93,6 +112,23 @@ pub fn pick(prs: Vec<PullRequest>) -> Option<PullRequest> {
     prs.into_iter().next()
 }
 
+fn by_branch(pulls: Vec<ApiPull>, owner: &str) -> std::collections::HashMap<String, PullRequest> {
+    let mut grouped: std::collections::HashMap<String, Vec<PullRequest>> = Default::default();
+    for mut p in pulls {
+        let Some(head) = p.head.take() else { continue };
+        let same_owner = head
+            .repo
+            .is_some_and(|r| r.owner.login.eq_ignore_ascii_case(owner));
+        if same_owner {
+            grouped.entry(head.branch).or_default().push(p.into());
+        }
+    }
+    grouped
+        .into_iter()
+        .filter_map(|(branch, prs)| Some((branch, pick(prs)?)))
+        .collect()
+}
+
 /// Token from `GH_TOKEN` / `GITHUB_TOKEN`, else the GitHub CLI's stored login.
 pub fn token(gh_binary: &str) -> Option<String> {
     for var in ["GH_TOKEN", "GITHUB_TOKEN"] {
@@ -124,6 +160,36 @@ impl Github {
         Self { agent, token }
     }
 
+    fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> anyhow::Result<T> {
+        let mut req = self
+            .agent
+            .get(url)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "mugetsu");
+        if let Some(t) = &self.token {
+            req = req.header("Authorization", &format!("Bearer {t}"));
+        }
+        Ok(req
+            .call()
+            .context("GitHub request")?
+            .body_mut()
+            .read_json()?)
+    }
+
+    /// The most recently updated PRs of `repo`, keyed by head branch (same-repo
+    /// branches only), most relevant PR per branch.
+    pub fn recent_pulls(
+        &self,
+        repo: &GithubRepo,
+    ) -> anyhow::Result<std::collections::HashMap<String, PullRequest>> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/pulls?state=all&sort=updated&direction=desc&per_page=100",
+            repo.owner, repo.name
+        );
+        let pulls: Vec<ApiPull> = self.get_json(&url)?;
+        Ok(by_branch(pulls, &repo.owner))
+    }
+
     /// PR whose head is `branch` in `repo` (same-repo branches; forks are matched by owner).
     pub fn pull_for_branch(
         &self,
@@ -134,19 +200,7 @@ impl Github {
             "https://api.github.com/repos/{}/{}/pulls?state=all&per_page=10&head={}:{}",
             repo.owner, repo.name, repo.owner, branch
         );
-        let mut req = self
-            .agent
-            .get(&url)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "mugetsu");
-        if let Some(t) = &self.token {
-            req = req.header("Authorization", &format!("Bearer {t}"));
-        }
-        let pulls: Vec<ApiPull> = req
-            .call()
-            .context("GitHub request")?
-            .body_mut()
-            .read_json()?;
+        let pulls: Vec<ApiPull> = self.get_json(&url)?;
         Ok(pick(pulls.into_iter().map(Into::into).collect()))
     }
 }
@@ -180,6 +234,7 @@ mod tests {
     #[test]
     fn maps_api_states() {
         let api = |state: &str, draft, merged: bool| ApiPull {
+            head: None,
             number: 1,
             title: String::new(),
             html_url: String::new(),
@@ -221,5 +276,23 @@ mod tests {
         assert_eq!(picked.unwrap().number, 3);
         let picked = pick(vec![pr(2, PrState::Merged), pr(7, PrState::Closed)]);
         assert_eq!(picked.unwrap().number, 7);
+    }
+
+    #[test]
+    fn groups_pulls_by_head_branch() {
+        let json = r#"[
+            {"number": 3, "title": "t3", "html_url": "u3", "state": "open", "draft": false, "merged_at": null,
+             "head": {"ref": "feat/x", "repo": {"owner": {"login": "Me"}}}},
+            {"number": 2, "title": "t2", "html_url": "u2", "state": "closed", "draft": false, "merged_at": null,
+             "head": {"ref": "feat/x", "repo": {"owner": {"login": "me"}}}},
+            {"number": 1, "title": "t1", "html_url": "u1", "state": "open", "draft": false, "merged_at": null,
+             "head": {"ref": "fork-branch", "repo": {"owner": {"login": "someone"}}}},
+            {"number": 4, "title": "t4", "html_url": "u4", "state": "open", "draft": false, "merged_at": null,
+             "head": {"ref": "gone", "repo": null}}
+        ]"#;
+        let pulls: Vec<ApiPull> = serde_json::from_str(json).unwrap();
+        let map = by_branch(pulls, "me");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map["feat/x"].number, 3);
     }
 }

@@ -3,23 +3,24 @@
 
 mod changes;
 mod history;
+mod menus;
 mod sidebar;
 mod toolbar;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use gix::ObjectId;
 use gpui_kit::component::diff::{DiffFile as UiDiffFile, DiffMode, DiffState};
-use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::{ActiveTheme as _, WindowExt as _, v_flex};
 use gpui_kit::{
     AnimationExt as _, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollStrategy, SharedString,
-    Styled as _, Task, UniformListScrollHandle, Window, div,
+    Styled as _, Subscription, Task, UniformListScrollHandle, Window, div,
 };
 use mugetsu_git::{FileDiff, Repo};
 
@@ -90,6 +91,8 @@ pub struct RepoView {
     commit_diff: Entity<DiffState>,
     commit_message: SharedString,
     commit_files: usize,
+    /// Long commit bodies start collapsed.
+    body_expanded: bool,
 
     // Changes
     selected_change: Option<SelectedChange>,
@@ -100,6 +103,9 @@ pub struct RepoView {
 
     // Sidebar
     collapsed: HashSet<&'static str>,
+    /// Folder open state by key; absent means the default (open if it holds HEAD).
+    folders: HashMap<String, bool>,
+    sidebar_search: Entity<InputState>,
     prs: PrCache,
 
     // Fetch
@@ -114,6 +120,7 @@ pub struct RepoView {
     _detail: Task<()>,
     _fetch: Task<()>,
     _op: Task<()>,
+    _search: Subscription,
 }
 
 impl EventEmitter<RepoEvent> for RepoView {}
@@ -126,6 +133,12 @@ impl RepoView {
             let mut state = TextareaState::new(window, cx).placeholder("Commit message");
             state.set_auto_grow(3, 8, cx);
             state
+        });
+        let sidebar_search = cx.new(|cx| InputState::new(window, cx).placeholder("Filtrer"));
+        let _search = cx.subscribe(&sidebar_search, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
         });
         let mut this = Self {
             repo,
@@ -141,12 +154,15 @@ impl RepoView {
             commit_diff,
             commit_message: SharedString::default(),
             commit_files: 0,
+            body_expanded: false,
             selected_change: None,
             change_diff,
             change_hunks: None,
             message,
             amend: false,
             collapsed: HashSet::from(["tags"]),
+            folders: HashMap::new(),
+            sidebar_search,
             prs: PrCache::default(),
             focused: false,
             fetching: false,
@@ -158,6 +174,7 @@ impl RepoView {
             _detail: Task::ready(()),
             _fetch: Task::ready(()),
             _op: Task::ready(()),
+            _search,
         };
         this.reload(cx);
         this
@@ -202,6 +219,11 @@ impl RepoView {
     #[cfg(test)]
     pub fn selected_ref(&self) -> Option<&SharedString> {
         self.selected_ref.as_ref()
+    }
+
+    #[cfg(test)]
+    pub fn body_expanded(&self) -> bool {
+        self.body_expanded
     }
 
     #[cfg(test)]
@@ -287,6 +309,7 @@ impl RepoView {
                 self.select_first_change(cx);
             }
         }
+        self.refresh_prs(cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
             let upstream = self
                 .data
@@ -314,6 +337,7 @@ impl RepoView {
             return;
         }
         self.selected = Some(id);
+        self.body_expanded = false;
         self.commit_message = SharedString::default();
         let repo = self.repo.clone();
         let rev = id.to_string();
@@ -365,6 +389,28 @@ impl RepoView {
 
     // ---- Pull requests -----------------------------------------------------
 
+    /// Lists the repository's recent PRs so every branch shows its chip.
+    fn refresh_prs(&mut self, cx: &mut Context<Self>) {
+        let Some(gh) = self.data.github.clone() else {
+            return;
+        };
+        let now = Instant::now();
+        if !self.prs.needs_bulk(now) {
+            return;
+        }
+        self.prs.mark_bulk(now);
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { pr::recent(&gh) }).await;
+            if let Ok(prs) = result {
+                let _ = this.update(cx, |this, cx| {
+                    this.prs.set_bulk(prs, Instant::now());
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     pub fn lookup_pr(
         &mut self,
         branch: &str,
@@ -412,6 +458,9 @@ impl RepoView {
 
     /// Called every second by the workspace scheduler.
     pub fn tick(&mut self, focused: bool, now: Instant, cx: &mut Context<Self>) {
+        if focused && !self.loading {
+            self.refresh_prs(cx);
+        }
         if self.fetching || self.loading || self.data.refs.remotes.is_empty() {
             return;
         }

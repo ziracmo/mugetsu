@@ -351,3 +351,115 @@ fn background_tab_shows_a_dot_when_remote_moves(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn branches_are_foldered_and_searchable(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(dir.path(), &["branch", "feat/alpha"]);
+    git(dir.path(), &["branch", "feat/beta"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("folder:local:feat").is_some());
+        assert!(
+            window.try_find("branch:feat/alpha").is_none(),
+            "folders start closed unless they hold HEAD"
+        );
+        window.click("folder:local:feat", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("branch:feat/alpha").is_some());
+
+        window.click("sidebar-search", cx);
+        window.input("beta", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("branch:feat/beta").is_some());
+        assert!(window.try_find("branch:feat/alpha").is_none());
+        assert!(window.try_find("branch:main").is_none());
+    })
+    .unwrap();
+    let _ = view;
+}
+
+#[gpui_kit::test]
+fn long_commit_bodies_start_collapsed(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let body: String = (1..=10).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(dir.path().join("a.txt"), "long\n").unwrap();
+    git(dir.path(), &["add", "a.txt"]);
+    git(
+        dir.path(),
+        &["commit", "-q", "-m", "subject", "-m", body.as_str()],
+    );
+    let (handle, view) = open_repo_view(cx, dir.path());
+    assert!(!cx.read(|cx| view.read(cx).body_expanded()));
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("commit-body").is_some());
+        window.click("commit-body-toggle", cx);
+    })
+    .unwrap();
+    assert!(cx.read(|cx| view.read(cx).body_expanded()));
+
+    // A short body has nothing to expand.
+    let first = cx.read(|cx| {
+        let d = view.read(cx).data().clone();
+        d.history
+            .commits
+            .iter()
+            .find(|c| c.summary == "c1")
+            .unwrap()
+            .id
+    });
+    cx.update(|cx| view.update(cx, |v, cx| v.select_commit(first, true, cx)));
+    settle(cx, &view);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("commit-body-toggle").is_none());
+    })
+    .unwrap();
+    let _ = view;
+}
+
+#[gpui_kit::test]
+fn branch_context_menu_renames(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let step = |cx: &mut TestAppContext, f: &dyn Fn(&mut gpui_kit::Window, &mut gpui_kit::App)| {
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            f(window, cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+    step(cx, &|window, cx| window.right_click("branch:topic", cx));
+    step(cx, &|window, cx| {
+        let rename = window.within("popup-menu").find(7usize);
+        assert_eq!(rename.label(), Some("Renommer…"));
+        window.within("popup-menu").click(7usize, cx);
+    });
+    step(cx, &|window, cx| {
+        window.press("secondary-a", cx);
+        window.input("feat/renamed", cx);
+    });
+    step(cx, &|window, cx| window.press("enter", cx));
+    settle(cx, &view);
+    let names: Vec<String> = cx.read(|cx| {
+        view.read(cx)
+            .data()
+            .refs
+            .branches
+            .iter()
+            .map(|b| b.name.clone())
+            .collect()
+    });
+    assert!(names.contains(&"feat/renamed".to_string()), "{names:?}");
+    assert!(!names.contains(&"topic".to_string()));
+}

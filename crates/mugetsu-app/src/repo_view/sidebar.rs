@@ -1,7 +1,10 @@
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
@@ -9,15 +12,21 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
     prelude::FluentBuilder as _, px,
 };
+use mugetsu_git::{Branch, RefsSnapshot};
 
+use super::menus::{self, BranchMenu, MenuBuilder, MenuContext};
 use super::toolbar::pr_chip;
 use super::{RepoEvent, RepoView};
+use crate::branch_tree::{self, NodeKind, TreeNode};
 use crate::theme;
 
 type Click = Box<dyn Fn(&ClickEvent, &mut Window, &mut gpui_kit::App)>;
 
+const INDENT: f32 = 14.;
+
 struct Row {
     id: SharedString,
+    depth: usize,
     icon: Lucide,
     icon_color: gpui_kit::Hsla,
     label: String,
@@ -26,27 +35,28 @@ struct Row {
     tooltip: Option<String>,
     suffix: Vec<AnyElement>,
     on_click: Click,
+    menu: Option<MenuBuilder>,
 }
 
 fn render_row(row: Row) -> AnyElement {
     let tooltip = row.tooltip;
-    h_flex()
+    let el = h_flex()
         .id(row.id)
         .test_support()
         .h(px(24.))
-        .pl_4()
+        .pl(px(14. + INDENT * row.depth as f32))
         .pr_2()
+        .mx_1()
         .gap_2()
-        .w_full()
         .min_w_0()
+        .rounded_md()
         .text_sm()
         .cursor_pointer()
-        .border_l_2()
-        .border_color(gpui_kit::transparent_black())
         .hover(|s| s.bg(theme::raised()))
         .when(row.selected, |s| {
-            s.bg(theme::alpha(theme::cyan(), 0.12))
-                .border_color(theme::cyan())
+            s.bg(theme::alpha(theme::cyan(), 0.14))
+                .border_1()
+                .border_color(theme::alpha(theme::cyan(), 0.25))
         })
         .child(Icon::new(row.icon).xsmall().text_color(row.icon_color))
         .child(
@@ -54,21 +64,64 @@ fn render_row(row: Row) -> AnyElement {
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .when(row.bold, |s| {
-                    s.font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .text_color(theme::cyan())
-                })
+                .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::SEMIBOLD))
                 .child(row.label),
         )
         .children(row.suffix)
         .when_some(tooltip, |s, tip| {
             s.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         })
-        .on_click(row.on_click)
-        .into_any_element()
+        .on_click(row.on_click);
+    match row.menu {
+        Some(menu) => el
+            .context_menu(move |m, window, cx| menu(m, window, cx))
+            .into_any_element(),
+        None => el.into_any_element(),
+    }
+}
+
+/// `origin` when present, else the first remote.
+pub(super) fn default_remote(refs: &RefsSnapshot) -> Option<String> {
+    refs.remotes
+        .iter()
+        .find(|r| r.name == "origin")
+        .or(refs.remotes.first())
+        .map(|r| r.name.clone())
 }
 
 impl RepoView {
+    pub(super) fn menu_context(&self, cx: &Context<Self>) -> MenuContext {
+        MenuContext {
+            view: cx.entity().downgrade(),
+            root: self.repo.root().to_path_buf(),
+            github: self.data.github.clone(),
+            default_remote: default_remote(&self.data.refs),
+            head_branch: self.data.refs.head_branch.clone(),
+        }
+    }
+
+    pub(super) fn branch_menu_info(&self, b: &Branch) -> BranchMenu {
+        BranchMenu {
+            name: b.name.clone(),
+            upstream: b.upstream.clone(),
+            ahead: b.ahead,
+            behind: b.behind,
+            is_head: b.is_head,
+            gone: b.upstream_gone,
+            pr: menus::found_pr(self.pr_for(&b.name, b.upstream.as_deref(), false)),
+        }
+    }
+
+    pub(super) fn sidebar_query(&self, cx: &gpui_kit::App) -> String {
+        self.sidebar_search.read(cx).value().trim().to_string()
+    }
+
+    /// Folder rows are open when toggled open, or by default when they hold HEAD.
+    fn folder_open(&self, key: &str, default: bool, searching: bool) -> bool {
+        searching || self.folders.get(key).copied().unwrap_or(default)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn section(
         &self,
         key: &'static str,
@@ -76,171 +129,344 @@ impl RepoView {
         icon: Lucide,
         count: usize,
         rows: Vec<AnyElement>,
+        searching: bool,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let collapsed = self.collapsed.contains(key);
-        v_flex()
-            .w_full()
-            .child(
+    ) -> Option<AnyElement> {
+        if searching && rows.is_empty() {
+            return None;
+        }
+        let collapsed = !searching && self.collapsed.contains(key);
+        Some(
+            v_flex()
+                .w_full()
+                .child(
+                    h_flex()
+                        .id(SharedString::from(format!("section-{key}")))
+                        .h(px(28.))
+                        .px_2()
+                        .gap_1p5()
+                        .cursor_pointer()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().muted_foreground)
+                        .hover(|s| s.text_color(cx.theme().foreground))
+                        .child(
+                            Icon::new(if collapsed {
+                                Lucide::ChevronRight
+                            } else {
+                                Lucide::ChevronDown
+                            })
+                            .xsmall(),
+                        )
+                        .child(Icon::new(icon).xsmall())
+                        .child(div().flex_1().child(title))
+                        .child(
+                            div()
+                                .px_1p5()
+                                .rounded_md()
+                                .text_xs()
+                                .bg(theme::raised())
+                                .child(count.to_string()),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !this.collapsed.remove(key) {
+                                this.collapsed.insert(key);
+                            }
+                            cx.notify();
+                        })),
+                )
+                .when(!collapsed, |s| s.children(rows))
+                .into_any_element(),
+        )
+    }
+
+    /// Renders a folder tree; `leaf` renders one item at a depth.
+    #[allow(clippy::too_many_arguments)]
+    fn tree_rows<T>(
+        &self,
+        scope: &str,
+        nodes: &[TreeNode<T>],
+        depth: usize,
+        head_path: Option<&str>,
+        searching: bool,
+        out: &mut Vec<AnyElement>,
+        leaf: &mut dyn FnMut(&TreeNode<T>, &T, usize) -> AnyElement,
+        cx: &mut Context<Self>,
+    ) {
+        for node in nodes {
+            match &node.kind {
+                NodeKind::Leaf(value) => out.push(leaf(node, value, depth)),
+                NodeKind::Folder(children) => {
+                    let key = format!("{scope}:{}", node.path);
+                    let holds_head =
+                        head_path.is_some_and(|h| h.starts_with(&format!("{}/", node.path)));
+                    let open = self.folder_open(&key, holds_head, searching);
+                    out.push(
+                        h_flex()
+                            .id(SharedString::from(format!("folder:{key}")))
+                            .test_support()
+                            .h(px(24.))
+                            .pl(px(2. + INDENT * depth as f32))
+                            .pr_2()
+                            .mx_1()
+                            .gap_1()
+                            .rounded_md()
+                            .text_sm()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme::raised()))
+                            .child(
+                                Icon::new(if open {
+                                    Lucide::ChevronDown
+                                } else {
+                                    Lucide::ChevronRight
+                                })
+                                .xsmall()
+                                .text_color(theme::muted()),
+                            )
+                            .child(
+                                Icon::new(if open {
+                                    Lucide::FolderOpen
+                                } else {
+                                    Lucide::Folder
+                                })
+                                .xsmall()
+                                .text_color(theme::alpha(theme::cyan(), 0.7)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(node.label.clone()),
+                            )
+                            .when(!open, |s| {
+                                s.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme::muted())
+                                        .child(node.leaf_count().to_string()),
+                                )
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.folders.insert(key.clone(), !open);
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                    );
+                    if open {
+                        self.tree_rows(
+                            scope,
+                            children,
+                            depth + 1,
+                            head_path,
+                            searching,
+                            out,
+                            leaf,
+                            cx,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn branch_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let data = self.data.clone();
+        let entity = cx.entity().downgrade();
+        let ctx = self.menu_context(cx);
+        let searching = !query.is_empty();
+        let pushed_color = theme::alpha(cx.theme().foreground, 0.55);
+        let tree = branch_tree::build(
+            data.refs
+                .branches
+                .iter()
+                .filter(|b| branch_tree::matches(&b.name, query))
+                .map(|b| (b.name.clone(), b)),
+        );
+        let mut rows = Vec::new();
+        let mut leaf = |node: &TreeNode<&Branch>, b: &&Branch, depth: usize| {
+            let b: &Branch = b;
+            let id = SharedString::from(format!("branch:{}", b.name));
+            let pushed = b.upstream.is_some() && !b.upstream_gone;
+            let mut suffix = Vec::new();
+            if b.ahead > 0 {
+                suffix.push(
+                    div()
+                        .text_xs()
+                        .text_color(theme::lime())
+                        .child(format!("{}↑", b.ahead))
+                        .into_any_element(),
+                );
+            }
+            if b.behind > 0 {
+                suffix.push(
+                    div()
+                        .text_xs()
+                        .text_color(theme::amber())
+                        .child(format!("{}↓", b.behind))
+                        .into_any_element(),
+                );
+            }
+            if b.upstream_gone {
+                suffix.push(
+                    div()
+                        .text_xs()
+                        .text_color(theme::muted())
+                        .child("gone")
+                        .into_any_element(),
+                );
+            }
+            suffix.extend(pr_chip(
+                SharedString::from(format!("pr:{}", b.name)),
+                self.pr_for(&b.name, b.upstream.as_deref(), false),
+            ));
+            let info = self.branch_menu_info(b);
+            let menu_ctx = ctx.clone();
+            let (entity, name, upstream, target, row_id) = (
+                entity.clone(),
+                b.name.clone(),
+                b.upstream.clone(),
+                b.target,
+                id.clone(),
+            );
+            render_row(Row {
+                id: id.clone(),
+                depth,
+                icon: if b.is_head {
+                    Lucide::Check
+                } else if pushed {
+                    Lucide::Github
+                } else {
+                    Lucide::GitBranch
+                },
+                icon_color: if b.is_head {
+                    theme::cyan()
+                } else if pushed {
+                    pushed_color
+                } else {
+                    theme::muted()
+                },
+                label: node.label.clone(),
+                selected: self.selected_ref.as_ref() == Some(&id),
+                bold: b.is_head,
+                tooltip: Some(match &b.upstream {
+                    Some(u) if !b.upstream_gone => format!("{}\nPoussée sur {u}", b.name),
+                    Some(u) => format!("{}\n{u} supprimée du remote", b.name),
+                    None => format!("{}\nPas encore poussée", b.name),
+                }),
+                suffix,
+                on_click: Box::new(move |ev, window, cx| {
+                    let double = ev.click_count() >= 2;
+                    let _ = entity.update(cx, |this, cx| {
+                        this.selected_ref = Some(row_id.clone());
+                        this.select_commit(target, true, cx);
+                        this.lookup_pr(&name, upstream.as_deref(), false, cx);
+                        if double {
+                            let name = name.clone();
+                            this.run_op("Checkout", move |r| r.checkout(&name), window, cx);
+                        }
+                    });
+                }),
+                menu: Some(Rc::new(move |m, _, _| {
+                    menus::local_branch_menu(m, &menu_ctx, &info)
+                })),
+            })
+        };
+        self.tree_rows(
+            "local",
+            &tree,
+            0,
+            data.refs.head_branch.as_deref(),
+            searching,
+            &mut rows,
+            &mut leaf,
+            cx,
+        );
+        rows
+    }
+
+    fn remote_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let data = self.data.clone();
+        let entity = cx.entity().downgrade();
+        let ctx = self.menu_context(cx);
+        let searching = !query.is_empty();
+        let mut rows = Vec::new();
+        for remote in &data.refs.remotes {
+            let prefix = format!("{}/", remote.name);
+            let tree = branch_tree::build(
+                data.refs
+                    .remote_branches
+                    .iter()
+                    .filter(|b| b.name.starts_with(&prefix) && !b.name.ends_with("/HEAD"))
+                    .filter(|b| branch_tree::matches(&b.name, query))
+                    .map(|b| (b.name[prefix.len()..].to_string(), b)),
+            );
+            if searching && tree.is_empty() {
+                continue;
+            }
+            let key = format!("remote:{}", remote.name);
+            let open = self.folder_open(&key, true, searching);
+            let url = remote.url.clone();
+            rows.push(
                 h_flex()
-                    .id(SharedString::from(format!("section-{key}")))
-                    .h(px(28.))
-                    .px_2()
-                    .gap_1p5()
+                    .id(SharedString::from(key.clone()))
+                    .h(px(24.))
+                    .pl(px(2.))
+                    .mx_1()
+                    .gap_1()
+                    .rounded_md()
+                    .text_sm()
                     .cursor_pointer()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .hover(|s| s.text_color(cx.theme().foreground))
+                    .text_color(theme::violet())
+                    .hover(|s| s.bg(theme::raised()))
                     .child(
-                        Icon::new(if collapsed {
-                            Lucide::ChevronRight
-                        } else {
+                        Icon::new(if open {
                             Lucide::ChevronDown
+                        } else {
+                            Lucide::ChevronRight
                         })
                         .xsmall(),
                     )
-                    .child(Icon::new(icon).xsmall())
-                    .child(div().flex_1().child(title.to_uppercase()))
                     .child(
-                        div()
-                            .px_1p5()
-                            .rounded_sm()
-                            .bg(theme::raised())
-                            .child(count.to_string()),
+                        Icon::new(if url.contains("github.com") {
+                            Lucide::Github
+                        } else {
+                            Lucide::Cloud
+                        })
+                        .xsmall(),
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.collapsed.remove(key) {
-                            this.collapsed.insert(key);
-                        }
-                        cx.notify();
-                    })),
-            )
-            .when(!collapsed, |s| s.children(rows))
-            .into_any_element()
-    }
-
-    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let data = self.data.clone();
-        let entity = cx.entity().downgrade();
-        let selected_ref = self.selected_ref.clone();
-
-        // Local branches: click selects + looks up PR, double-click checks out.
-        let mut branches: Vec<_> = data.refs.branches.iter().collect();
-        branches.sort_by_key(|b| (!b.is_head, b.name.clone()));
-        let branch_rows = branches
-            .into_iter()
-            .map(|b| {
-                let id = SharedString::from(format!("branch:{}", b.name));
-                let mut suffix = Vec::new();
-                if b.ahead > 0 {
-                    suffix.push(
-                        div()
-                            .text_xs()
-                            .text_color(theme::lime())
-                            .child(format!("↑{}", b.ahead))
-                            .into_any_element(),
-                    );
-                }
-                if b.behind > 0 {
-                    suffix.push(
-                        div()
-                            .text_xs()
-                            .text_color(theme::amber())
-                            .child(format!("↓{}", b.behind))
-                            .into_any_element(),
-                    );
-                }
-                if b.upstream_gone {
-                    suffix.push(
-                        div()
-                            .text_xs()
-                            .text_color(theme::muted())
-                            .child("gone")
-                            .into_any_element(),
-                    );
-                }
-                suffix.extend(pr_chip(
-                    SharedString::from(format!("pr:{}", b.name)),
-                    self.pr_for(&b.name, b.upstream.as_deref(), false),
-                ));
-                let (entity, name, upstream, target, row_id) = (
-                    entity.clone(),
-                    b.name.clone(),
-                    b.upstream.clone(),
-                    b.target,
-                    id.clone(),
-                );
-                render_row(Row {
-                    id: id.clone(),
-                    icon: if b.is_head {
-                        Lucide::CircleDot
-                    } else {
-                        Lucide::GitBranch
-                    },
-                    icon_color: if b.is_head {
-                        theme::cyan()
-                    } else {
-                        theme::muted()
-                    },
-                    label: b.name.clone(),
-                    selected: selected_ref.as_ref() == Some(&id),
-                    bold: b.is_head,
-                    tooltip: b.upstream.as_ref().map(|u| format!("suit {u}")),
-                    suffix,
-                    on_click: Box::new(move |ev, window, cx| {
-                        let double = ev.click_count() >= 2;
-                        let _ = entity.update(cx, |this, cx| {
-                            this.selected_ref = Some(row_id.clone());
-                            this.select_commit(target, true, cx);
-                            this.lookup_pr(&name, upstream.as_deref(), false, cx);
-                            if double {
-                                let name = name.clone();
-                                this.run_op("Checkout", move |r| r.checkout(&name), window, cx);
-                            }
-                        });
-                    }),
-                })
-            })
-            .collect::<Vec<_>>();
-
-        // Remotes with their branches.
-        let mut remote_rows = Vec::new();
-        for remote in &data.refs.remotes {
-            remote_rows.push(
-                h_flex()
-                    .h(px(22.))
-                    .pl_4()
-                    .gap_2()
-                    .text_xs()
-                    .text_color(theme::violet())
-                    .child(Icon::new(Lucide::Cloud).xsmall())
                     .child(div().truncate().child(remote.name.clone()))
+                    .tooltip(move |window, cx| Tooltip::new(url.clone()).build(window, cx))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.folders.insert(key.clone(), !open);
+                        cx.notify();
+                    }))
                     .into_any_element(),
             );
-            let prefix = format!("{}/", remote.name);
-            for b in data
-                .refs
-                .remote_branches
-                .iter()
-                .filter(|b| b.name.starts_with(&prefix))
-            {
+            if !open {
+                continue;
+            }
+            let mut leaf = |node: &TreeNode<&Branch>, b: &&Branch, depth: usize| {
+                let b: &Branch = b;
                 let id = SharedString::from(format!("remote:{}", b.name));
+                let lookup = self.pr_for(&b.name, None, true);
+                let pr = menus::found_pr(lookup);
+                let suffix = pr_chip(SharedString::from(format!("rpr:{}", b.name)), lookup)
+                    .into_iter()
+                    .collect();
+                let menu_ctx = ctx.clone();
                 let (entity, name, target, row_id) =
                     (entity.clone(), b.name.clone(), b.target, id.clone());
-                let suffix = pr_chip(
-                    SharedString::from(format!("rpr:{}", b.name)),
-                    self.pr_for(&b.name, None, true),
-                )
-                .into_iter()
-                .collect();
-                remote_rows.push(render_row(Row {
+                let menu_name = name.clone();
+                render_row(Row {
                     id: id.clone(),
+                    depth,
                     icon: Lucide::GitBranch,
                     icon_color: theme::alpha(theme::violet(), 0.7),
-                    label: b.name[prefix.len()..].to_string(),
-                    selected: selected_ref.as_ref() == Some(&id),
+                    label: node.label.clone(),
+                    selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
-                    tooltip: Some(remote.url.clone()),
+                    tooltip: Some(b.name.clone()),
                     suffix,
                     on_click: Box::new(move |ev, window, cx| {
                         let double = ev.click_count() >= 2;
@@ -259,24 +485,45 @@ impl RepoView {
                             }
                         });
                     }),
-                }));
-            }
+                    menu: Some(Rc::new(move |m, _, _| {
+                        menus::remote_branch_menu(m, &menu_ctx, &menu_name, pr.as_ref())
+                    })),
+                })
+            };
+            self.tree_rows(
+                &format!("rb:{}", remote.name),
+                &tree,
+                1,
+                None,
+                searching,
+                &mut rows,
+                &mut leaf,
+                cx,
+            );
         }
+        rows
+    }
 
-        let tag_rows = data
+    fn tag_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let entity = cx.entity().downgrade();
+        let ctx = self.menu_context(cx);
+        self.data
             .refs
             .tags
             .iter()
             .rev()
+            .filter(|t| branch_tree::matches(&t.name, query))
             .map(|t| {
                 let id = SharedString::from(format!("tag:{}", t.name));
                 let (entity, target, row_id) = (entity.clone(), t.target, id.clone());
+                let (menu_ctx, tag) = (ctx.clone(), t.name.clone());
                 render_row(Row {
                     id: id.clone(),
+                    depth: 0,
                     icon: Lucide::Tag,
                     icon_color: theme::amber(),
                     label: t.name.clone(),
-                    selected: selected_ref.as_ref() == Some(&id),
+                    selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
                     tooltip: None,
                     suffix: vec![],
@@ -286,14 +533,24 @@ impl RepoView {
                             this.select_commit(target, true, cx);
                         });
                     }),
+                    menu: Some(Rc::new(move |m, _, _| menus::tag_menu(m, &menu_ctx, &tag))),
                 })
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
 
-        let worktree_rows = data
+    fn worktree_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let entity = cx.entity().downgrade();
+        self.data
             .refs
             .worktrees
             .iter()
+            .filter(|w| {
+                branch_tree::matches(
+                    &format!("{} {}", w.branch.as_deref().unwrap_or_default(), w.path),
+                    query,
+                )
+            })
             .map(|w| {
                 let id = SharedString::from(format!("worktree:{}", w.path));
                 let entity = entity.clone();
@@ -302,6 +559,7 @@ impl RepoView {
                 let is_current = path == self.repo.root();
                 render_row(Row {
                     id,
+                    depth: 0,
                     icon: Lucide::FolderGit2,
                     icon_color: if is_current {
                         theme::cyan()
@@ -338,23 +596,29 @@ impl RepoView {
                             }
                         });
                     }),
+                    menu: None,
                 })
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
 
-        let stash_rows = data
+    fn stash_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let entity = cx.entity().downgrade();
+        self.data
             .refs
             .stashes
             .iter()
+            .filter(|s| branch_tree::matches(&s.message, query))
             .map(|s| {
                 let id = SharedString::from(format!("stash:{}", s.index));
                 let (entity, target, row_id) = (entity.clone(), s.id, id.clone());
                 render_row(Row {
                     id: id.clone(),
+                    depth: 0,
                     icon: Lucide::Archive,
                     icon_color: theme::magenta(),
                     label: s.message.clone(),
-                    selected: selected_ref.as_ref() == Some(&id),
+                    selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
                     tooltip: Some(format!("stash@{{{}}}", s.index)),
                     suffix: vec![],
@@ -364,48 +628,104 @@ impl RepoView {
                             this.select_commit(target, true, cx);
                         });
                     }),
+                    menu: None,
                 })
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
 
+    pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let query = self.sidebar_query(cx);
+        let searching = !query.is_empty();
+        let refs = &self.data.refs;
         let (nb, nr, nt, nw, ns) = (
-            data.refs.branches.len(),
-            data.refs.remote_branches.len(),
-            data.refs.tags.len(),
-            data.refs.worktrees.len(),
-            data.refs.stashes.len(),
+            refs.branches.len(),
+            refs.remote_branches.len(),
+            refs.tags.len(),
+            refs.worktrees.len(),
+            refs.stashes.len(),
         );
-        div()
+        let branches = self.branch_rows(&query, cx);
+        let remotes = self.remote_rows(&query, cx);
+        let worktrees = self.worktree_rows(&query, cx);
+        let tags = self.tag_rows(&query, cx);
+        let stashes = self.stash_rows(&query, cx);
+        let sections = [
+            self.section(
+                "branches",
+                "Branches",
+                Lucide::GitBranch,
+                nb,
+                branches,
+                searching,
+                cx,
+            ),
+            self.section(
+                "remotes",
+                "Remotes",
+                Lucide::Cloud,
+                nr,
+                remotes,
+                searching,
+                cx,
+            ),
+            self.section(
+                "worktrees",
+                "Worktrees",
+                Lucide::FolderTree,
+                nw,
+                worktrees,
+                searching,
+                cx,
+            ),
+            self.section("tags", "Tags", Lucide::Tags, nt, tags, searching, cx),
+            self.section(
+                "stashes",
+                "Stashes",
+                Lucide::Archive,
+                ns,
+                stashes,
+                searching,
+                cx,
+            ),
+        ];
+        let empty = searching && sections.iter().all(Option::is_none);
+        v_flex()
             .id("sidebar")
             .size_full()
             .bg(theme::panel())
             .border_r_1()
-            .border_color(cx.theme().border)
+            .border_color(theme::hairline())
+            .child(
+                div().flex_none().p_2().child(
+                    Input::new(&self.sidebar_search)
+                        .id("sidebar-search")
+                        .small()
+                        .cleanable(true)
+                        .prefix(
+                            Icon::new(Lucide::Search)
+                                .xsmall()
+                                .text_color(theme::muted()),
+                        ),
+                ),
+            )
             .child(
                 v_flex()
                     .id("sidebar-scroll")
-                    .size_full()
-                    .py_1()
+                    .flex_1()
+                    .min_h_0()
+                    .pb_2()
                     .overflow_y_scroll()
-                    .child(self.section(
-                        "branches",
-                        "Branches",
-                        Lucide::GitBranch,
-                        nb,
-                        branch_rows,
-                        cx,
-                    ))
-                    .child(self.section("remotes", "Remotes", Lucide::Cloud, nr, remote_rows, cx))
-                    .child(self.section(
-                        "worktrees",
-                        "Worktrees",
-                        Lucide::FolderTree,
-                        nw,
-                        worktree_rows,
-                        cx,
-                    ))
-                    .child(self.section("tags", "Tags", Lucide::Tags, nt, tag_rows, cx))
-                    .child(self.section("stashes", "Stashes", Lucide::Archive, ns, stash_rows, cx)),
+                    .children(sections.into_iter().flatten())
+                    .when(empty, |s| {
+                        s.child(
+                            div()
+                                .p_4()
+                                .text_sm()
+                                .text_color(theme::muted())
+                                .child(format!("Rien ne correspond à « {query} »")),
+                        )
+                    }),
             )
     }
 }

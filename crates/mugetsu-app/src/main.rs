@@ -1,3 +1,4 @@
+mod branch_tree;
 mod fetch_policy;
 mod fmt;
 mod graph_view;
@@ -11,7 +12,9 @@ mod workspace;
 use std::path::PathBuf;
 
 use gpui_kit::component::TitleBar;
-use gpui_kit::{AppContext as _, WindowBounds, WindowOptions, px, size};
+use gpui_kit::{
+    AppContext as _, WindowBackgroundAppearance, WindowBounds, WindowOptions, px, size,
+};
 
 use session::Session;
 use workspace::Workspace;
@@ -56,6 +59,8 @@ fn main() {
                 window_bounds: Some(WindowBounds::centered(size(px(1440.), px(900.)), cx)),
                 window_min_size: Some(size(px(960.), px(600.))),
                 app_id: Some("dev.mugetsu".into()),
+                // Glass look: the translucent theme lets the blurred desktop through.
+                window_background: WindowBackgroundAppearance::Blurred,
                 ..TitleBar::window_options()
             };
             gpui_kit::open_window(options, cx, |window, cx| {

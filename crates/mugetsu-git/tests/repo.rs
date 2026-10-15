@@ -159,3 +159,52 @@ fn fetch_moves_fingerprint() {
     assert_eq!(main.behind, 1);
     let _ = repo;
 }
+
+#[test]
+fn branch_menu_operations() {
+    let (dir, repo) = fixture();
+    let clone_dir = tempfile::tempdir().unwrap();
+    git(
+        clone_dir.path(),
+        &["clone", "-q", dir.path().to_str().unwrap(), "c"],
+    );
+    let clone = Repo::open(clone_dir.path().join("c")).unwrap();
+    let branch = |name: &str| {
+        clone
+            .refs()
+            .unwrap()
+            .branches
+            .into_iter()
+            .find(|b| b.name == name)
+    };
+
+    // Fast-forward a branch that is not checked out.
+    clone.checkout_remote("origin/feature").unwrap();
+    clone.checkout("main").unwrap();
+    git(dir.path(), &["switch", "-q", "feature"]);
+    commit_file(dir.path(), "b.txt", "b\nb2\nb3\n", "f3");
+    clone.fetch_all().unwrap();
+    assert_eq!(branch("feature").unwrap().behind, 1);
+    clone
+        .fast_forward("feature", "origin/feature", false)
+        .unwrap();
+    assert_eq!(branch("feature").unwrap().behind, 0);
+
+    // Rename, then detached checkout, revert and reset.
+    clone.rename_branch("feature", "feat/renamed").unwrap();
+    assert!(branch("feature").is_none());
+    assert!(branch("feat/renamed").is_some());
+
+    let head = clone.refs().unwrap().head.unwrap().to_string();
+    let patch = clone.format_patch(&head).unwrap();
+    assert!(patch.starts_with("From "), "{patch}");
+
+    clone.revert(&head, true).unwrap();
+    assert_ne!(clone.refs().unwrap().head.unwrap().to_string(), head);
+    clone.reset(&head, mugetsu_git::ResetMode::Hard).unwrap();
+    assert_eq!(clone.refs().unwrap().head.unwrap().to_string(), head);
+
+    clone.checkout_detached(&head).unwrap();
+    assert!(clone.refs().unwrap().head_branch.is_none());
+    let _ = repo;
+}
