@@ -1,4 +1,4 @@
-//! Right-click menus (Fork-like) for branches, remote branches, tags and commits,
+//! Right-click menus for branches, remote branches, tags and commits,
 //! plus the small text-prompt and confirmation dialogs they open.
 
 use std::path::{Path, PathBuf};

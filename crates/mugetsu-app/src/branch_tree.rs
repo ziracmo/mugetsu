@@ -1,4 +1,4 @@
-//! Groups slash-separated ref names into folders, like Fork's sidebar:
+//! Groups slash-separated ref names into folders, in the sidebar:
 //! `feat/a`, `feat/b` → a `feat` folder holding `a` and `b`.
 
 /// Names pinned above folders at the root, in this order.

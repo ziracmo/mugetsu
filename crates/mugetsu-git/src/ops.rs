@@ -103,7 +103,7 @@ impl Repo {
     }
 
     /// Switches to `branch` (created from `track` and tracking it when it
-    /// doesn't exist yet), handling uncommitted changes like Fork does.
+    /// doesn't exist yet), handling uncommitted changes.
     pub fn switch_to(
         &self,
         branch: &str,

@@ -56,7 +56,7 @@ fn mark_match(el: AnyElement, name: &str, ctx: &ChipContext) -> AnyElement {
         .into_any_element()
 }
 
-/// Double-click on a branch chip checks it out (Fork-like dialog when needed).
+/// Double-click on a branch chip checks it out (with a dialog when needed).
 fn checkout_on_double_click(
     el: gpui_kit::Div,
     name: &str,

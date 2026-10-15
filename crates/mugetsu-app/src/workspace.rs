@@ -49,7 +49,7 @@ struct Tab {
 pub struct Workspace {
     tabs: Vec<Tab>,
     active: usize,
-    /// Named repository lists (Fork-like workspaces); `current` is the open one,
+    /// Named repository lists (workspaces); `current` is the open one,
     /// its `repos` kept in sync with the tabs.
     sets: Vec<RepoSet>,
     current: usize,

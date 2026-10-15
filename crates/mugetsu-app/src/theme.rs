@@ -1,5 +1,5 @@
-//! "Cyber dark" glass look: a translucent blurred base with soft accents, inspired by Fork's
-//! density and GitKraken's colourful graph.
+//! "Cyber dark" glass look: a translucent blurred base with soft accents, a dense
+//! layout and a colourful graph.
 
 use std::rc::Rc;
 

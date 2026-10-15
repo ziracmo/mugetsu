@@ -1,4 +1,4 @@
-//! Fork-like sheets: checkout (track a remote branch, handle local changes)
+//! Sheets: checkout (track a remote branch, handle local changes)
 //! and push (target branch, tags, force-with-lease).
 
 use std::sync::{Arc, LazyLock};
@@ -30,7 +30,7 @@ pub(crate) static APP_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
     ))
 });
 
-/// Icon, title and subtitle at the top of a sheet, like Fork's.
+/// Icon, title and subtitle at the top of a sheet.
 fn header(title: &'static str, subtitle: &'static str) -> impl IntoElement {
     h_flex()
         .gap_4()
@@ -351,7 +351,7 @@ impl Render for PushForm {
 
 impl RepoView {
     /// Checks out `name` (a local branch, or `remote/branch`). Goes straight
-    /// through when nothing needs deciding, otherwise asks like Fork does.
+    /// through when nothing needs deciding, otherwise asks.
     pub fn request_checkout(
         &mut self,
         name: String,

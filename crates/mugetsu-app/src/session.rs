@@ -1,4 +1,4 @@
-//! Remembers workspaces (named lists of repositories, like Fork) and which
+//! Remembers workspaces (named lists of repositories) and which
 //! one was open between launches.
 
 use std::path::PathBuf;
