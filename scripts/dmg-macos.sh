@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 OUT=${1:-target/release/Mugetsu.dmg}
 STAGE=target/release/dmg
 rm -rf "$STAGE" "$OUT"
-mkdir -p "$STAGE"
+mkdir -p "$STAGE" "$(dirname "$OUT")"
 cp -R target/release/Mugetsu.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname Mugetsu -srcfolder "$STAGE" -ov -format UDZO "$OUT"
