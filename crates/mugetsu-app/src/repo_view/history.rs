@@ -83,7 +83,6 @@ fn chip(
     text: String,
     color: gpui_kit::Hsla,
     icon: Lucide,
-    strong: bool,
     head: bool,
     pushed: Option<Lucide>,
     worktree: bool,
@@ -103,12 +102,6 @@ fn chip(
             .text_color(gpui_kit::white())
             .font_weight(gpui_kit::FontWeight::BOLD)
             .shadow_md()
-    } else if strong {
-        // main / develop / …: filled, bold, unmistakable.
-        base.border_color(color)
-            .bg(theme::alpha(color, 0.85))
-            .text_color(gpui_kit::rgb(0x111111))
-            .font_weight(gpui_kit::FontWeight::BOLD)
     } else {
         base.border_color(theme::alpha(color, 0.45))
             .bg(theme::alpha(color, 0.12))
@@ -191,7 +184,6 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                         } else {
                             Lucide::GitBranch
                         },
-                        theme::is_main_branch(name),
                         *head,
                         synced.map(|_| remote_icon),
                         ctx.worktrees.contains_key(name),
@@ -201,17 +193,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     ctx,
                 );
                 if let Some((_, seq)) = ctx.slashed.as_ref().filter(|(b, _)| b == name) {
-                    let half = || {
-                        chip(
-                            name.clone(),
-                            color,
-                            Lucide::GitBranch,
-                            theme::is_main_branch(name),
-                            *head,
-                            None,
-                            false,
-                        )
-                    };
+                    let half = || chip(name.clone(), color, Lucide::GitBranch, *head, None, false);
                     return_slash = Some(super::shimmer::slash(half, *seq));
                 }
                 match &ctx.pushed {
@@ -225,7 +207,6 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 theme::amber(),
                 Lucide::Tag,
                 false,
-                false,
                 None,
                 false,
             )
@@ -234,7 +215,6 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 "HEAD".into(),
                 theme::magenta(),
                 Lucide::CircleDot,
-                false,
                 false,
                 None,
                 false,
@@ -258,7 +238,6 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     name.clone(),
                     theme::violet(),
                     Lucide::Cloud,
-                    false,
                     false,
                     None,
                     false,

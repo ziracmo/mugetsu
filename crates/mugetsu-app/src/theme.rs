@@ -125,14 +125,3 @@ pub fn init(cx: &mut App) {
 pub fn node_fill() -> Hsla {
     rgb(0x161618).into()
 }
-
-/// Long-lived branches (main, develop, …) get a stronger look everywhere.
-/// Accepts local (`main`) and remote (`origin/main`) names.
-pub fn is_main_branch(name: &str) -> bool {
-    let short = name.rsplit('/').next().unwrap_or(name);
-    name.matches('/').count() <= 1
-        && matches!(
-            short,
-            "main" | "master" | "develop" | "dev" | "staging" | "production" | "trunk"
-        )
-}

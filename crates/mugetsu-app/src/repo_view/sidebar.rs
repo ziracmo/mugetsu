@@ -50,8 +50,6 @@ struct Row {
     label: String,
     selected: bool,
     bold: bool,
-    /// main / develop / …: brighter than the other branches.
-    strong: bool,
     tooltip: Option<String>,
     suffix: Vec<AnyElement>,
     on_click: Click,
@@ -97,10 +95,6 @@ fn render_row(row: Row) -> AnyElement {
             div().relative().flex_1().min_w_0().child(
                 div()
                     .truncate()
-                    .when(row.strong, |s| {
-                        s.text_color(gpui_kit::white())
-                            .font_weight(gpui_kit::FontWeight::BOLD)
-                    })
                     .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::BOLD))
                     .child(row.label),
             ),
@@ -484,7 +478,6 @@ impl RepoView {
                 label: node.label.clone(),
                 selected: self.selected_ref.as_ref() == Some(&id),
                 bold: b.is_head,
-                strong: theme::is_main_branch(&b.name),
                 tooltip: Some(match &b.upstream {
                     Some(u) if !b.upstream_gone => {
                         trf!("{}\nPoussée sur {u}", "{}\nPushed to {u}", b.name)
@@ -609,7 +602,6 @@ impl RepoView {
                     label: node.label.clone(),
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
-                    strong: theme::is_main_branch(&b.name),
                     tooltip: Some(b.name.clone()),
                     suffix,
                     on_click: Box::new(move |ev, window, cx| {
@@ -665,7 +657,6 @@ impl RepoView {
                     label: t.name.clone(),
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
-                    strong: false,
                     tooltip: None,
                     suffix: vec![],
                     on_click: Box::new(move |_, _, cx| {
@@ -720,7 +711,6 @@ impl RepoView {
                     ),
                     selected: false,
                     bold: is_current,
-                    strong: false,
                     tooltip: Some(format!(
                         "{}{}",
                         w.path,
@@ -772,7 +762,6 @@ impl RepoView {
                     label: s.message.clone(),
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
-                    strong: false,
                     tooltip: Some(format!("stash@{{{}}}", s.index)),
                     suffix: vec![],
                     on_click: Box::new(move |_, _, cx| {
