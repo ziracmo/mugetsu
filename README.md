@@ -27,6 +27,7 @@ A fast desktop Git client for macOS, written in Rust. Inspired by Fork (density,
 - **Feedback**: new commits shimmer after a reload, a pushed branch chip gets a moving gradient edge.
 - **Layout memory**: folded sections are remembered; sidebar width and tab are shared by every repository (Settings).
 - **PRs tab** in the sidebar (quick filters: all / mine / to review; right-click → Show branch): open PRs (reviews you owe first, flagged with an eye), drafts, GitHub stacks and PRs merged in the last 3 / 7 / 14 / 30 days (Settings). Branches in a stack show their `n/total` position.
+- **Stats view** (⌘3, next to History and Changes), from commits only (no GitHub API, no rate limit): top authors with lines added / removed, reviewers (`Reviewed-by` trailers), PR mergers, committers, co-authors, activity chart, weekday × hour heatmap and hot files on the default branch, over 7 / 30 / 90 days, a year or all history. Identities are merged (mailmap, email, name, GitHub login); line counts stream in after the first numbers.
 - **Checkout** like Fork: double-click a branch (sidebar or graph chip); with uncommitted changes, or for a remote branch, a sheet offers to keep, stash and reapply, or discard them, and to name the local branch.
 - **Push sheet**: branch, target remote branch, push tags, force with lease.
 - Pull (fast-forward only), stash and pop, a particle burst on the branch after a checkout.
@@ -45,7 +46,7 @@ Same as Fork on macOS where they exist.
 | Stash | ⇧⌘H |
 | Stage all / Stash (in Changes) | ⌘A / ⌘S |
 | Settings | ⌘, |
-| Show changes / All commits | ⌘1 / ⌘2 |
+| Show changes / All commits / Stats | ⌘1 / ⌘2 / ⌘3 |
 | Reveal HEAD | ⌘0 |
 | Search commits | ⌘F (or ⌃F) |
 | Checkout branch | ⌘B |

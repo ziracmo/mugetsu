@@ -10,6 +10,7 @@ pub mod graph;
 pub mod log;
 pub mod ops;
 pub mod refs;
+pub mod stats;
 pub mod status;
 
 use std::path::{Path, PathBuf};
@@ -20,6 +21,7 @@ pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout};
 pub use log::{Commit, CommitOrder, History};
 pub use ops::{LocalChanges, PushOptions, ResetMode};
 pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};
+pub use stats::{FileHeat, Person, RepoStats};
 pub use status::{Change, FileStatus, Status};
 
 /// Handle on one repository. Cheap to clone, safe to send to background threads.

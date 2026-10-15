@@ -82,6 +82,18 @@ impl Git {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
+    /// Starts git with stdout piped, for output read as it streams.
+    pub fn spawn<I, S>(&self, args: I) -> anyhow::Result<std::process::Child>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut cmd = self.command(args);
+        cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+        cmd.spawn()
+            .with_context(|| format!("failed to spawn {cmd:?}"))
+    }
+
     /// Runs git feeding `input` on stdin.
     pub fn run_with_stdin<I, S>(&self, args: I, input: &[u8]) -> anyhow::Result<String>
     where

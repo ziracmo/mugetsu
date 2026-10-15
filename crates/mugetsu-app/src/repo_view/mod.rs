@@ -11,6 +11,7 @@ mod pr_panel;
 mod search;
 mod shimmer;
 mod sidebar;
+mod stats_panel;
 mod toolbar;
 
 use std::collections::{HashMap, HashSet};
@@ -45,6 +46,7 @@ gpui_kit::actions!(
         Refresh,
         ShowHistory,
         ShowChanges,
+        ShowStats,
         Pull,
         Push,
         NewBranch,
@@ -79,6 +81,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-r", Refresh, Some("Repo")),
         KeyBinding::new("secondary-1", ShowChanges, Some("Repo")),
         KeyBinding::new("secondary-2", ShowHistory, Some("Repo")),
+        KeyBinding::new("secondary-3", ShowStats, Some("Repo")),
         KeyBinding::new("secondary-0", RevealHead, Some("Repo")),
         KeyBinding::new("secondary-f", SearchCommits, Some("Repo")),
         KeyBinding::new("ctrl-f", SearchCommits, Some("Repo")),
@@ -98,6 +101,8 @@ pub fn init(cx: &mut gpui_kit::App) {
 pub enum Mode {
     History,
     Changes,
+    /// Who works on the default branch, and when (commits only).
+    Stats,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,6 +205,8 @@ pub struct RepoView {
     pushed: Option<(String, usize)>,
     /// Branch just deleted (name, sequence): its chip is slashed before it goes.
     slashed: Option<(String, usize)>,
+    /// Stats view (computed on demand, kept per tab).
+    stats: stats_panel::StatsState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -314,6 +321,7 @@ impl RepoView {
             menu_open: false,
             pushed: None,
             slashed: None,
+            stats: Default::default(),
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
                 if order != this.commit_order {
@@ -1095,6 +1103,7 @@ impl Render for RepoView {
         if std::mem::take(&mut self.adopt_layout) {
             self.adopt_shared_layout(window, cx);
         }
+        self.ensure_stats(cx);
         // Keep keyboard shortcuts working in the Changes view (⌘A, ⌘S…).
         if self.focused
             && self.mode == Mode::Changes
@@ -1135,6 +1144,7 @@ impl Render for RepoView {
                     )
                     .into_any_element(),
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
+                Mode::Stats => self.render_stats(cx),
             };
             // The content floats as a frosted card over the window glass.
             let card = div()
@@ -1235,6 +1245,7 @@ impl Render for RepoView {
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.reload(cx)))
             .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.set_mode(Mode::History, cx)))
             .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))
+            .on_action(cx.listener(|this, _: &ShowStats, _, cx| this.set_mode(Mode::Stats, cx)))
             .child(self.render_toolbar(cx))
             .child(
                 div()

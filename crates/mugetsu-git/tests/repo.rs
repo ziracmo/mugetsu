@@ -307,3 +307,53 @@ fn out(dir: &Path, args: &[&str]) -> String {
     assert!(o.status.success(), "git {args:?}");
     String::from_utf8(o.stdout).unwrap().trim().to_string()
 }
+
+#[test]
+fn stats_merge_identities_and_count_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    git(p, &["init", "-q", "-b", "main"]);
+    commit_file(p, "a.txt", "1\n2\n3\n", "first");
+    std::fs::write(p.join("a.txt"), "1\n2\n").unwrap();
+    git(p, &["add", "a.txt"]);
+    git(
+        p,
+        &[
+            "-c",
+            "user.name=Jane Doe",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "--author=Jane Doe <test@example.com>",
+            "-m",
+            "second\n\nReviewed-by: Bob <bob@x.org>\nCo-authored-by: Al <al@x.org>",
+        ],
+    );
+    let repo = Repo::open(p).unwrap();
+    assert_eq!(repo.default_branch(), "main");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 60;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut partial = 0;
+    let stats = repo
+        .stats("main", Some(now - 30 * 86_400), now, &cancel, |_| {
+            partial += 1
+        })
+        .unwrap();
+    assert!(partial >= 1, "metadata reported before line counts");
+    assert!(stats.lines_done);
+    assert_eq!(stats.commits, 2);
+    // "Test" and "Jane Doe" share an email: one person.
+    assert_eq!(stats.authors.len(), 1);
+    assert_eq!(stats.authors[0].name, "Jane Doe");
+    assert_eq!((stats.additions, stats.deletions), (3, 1));
+    assert_eq!(stats.reviewers[0].name, "Bob");
+    assert_eq!(stats.coauthors[0].name, "Al");
+    assert_eq!(stats.files[0].path, "a.txt");
+    assert_eq!(stats.files[0].commits, 2);
+    assert_eq!(stats.activity.iter().sum::<u32>(), 2);
+}

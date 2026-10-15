@@ -821,6 +821,61 @@ fn command_f_finds_branch_names_and_sidebar_has_a_prs_tab(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
+fn stats_view_ranks_authors_of_the_default_branch(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::write(dir.path().join("c.txt"), "c\n").unwrap();
+    git(dir.path(), &["add", "c.txt"]);
+    git(
+        dir.path(),
+        &[
+            "commit",
+            "-q",
+            "--author=Alice <alice@x.org>",
+            "-m",
+            "by alice",
+        ],
+    );
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("mode-stats", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let wait_stats = |cx: &mut TestAppContext| {
+        for _ in 0..500 {
+            // The tab polls the background work on a timer.
+            cx.executor().advance_clock(Duration::from_millis(100));
+            cx.run_until_parked();
+            if let Some((stats, false)) = cx.read(|cx| view.read(cx).stats_snapshot()) {
+                return stats;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("stats never finished");
+    };
+    let stats = wait_stats(cx);
+    assert_eq!(stats.branch, "main");
+    // c1, c2, f1, the merge and Alice's commit; `topic` is not on main.
+    assert_eq!(stats.commits, 5);
+    assert_eq!(stats.merges, 1);
+    let authors: Vec<_> = stats.authors.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(authors, ["Test", "Alice"]);
+    assert!(stats.lines_done);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("stats-authors-0").is_some());
+        window.click("stats-period-all", cx);
+    })
+    .unwrap();
+    let all = wait_stats(cx);
+    assert_eq!(all.commits, 5);
+    cx.read(|cx| assert_eq!(view.read(cx).mode(), Mode::Stats));
+}
+
+#[gpui_kit::test]
 fn control_tab_shows_a_switcher_until_released(cx: &mut TestAppContext) {
     init(cx);
     let (a, b, c) = (
