@@ -249,6 +249,7 @@ impl RepoView {
         let waiting = pr.state == PrState::Open && awaits(pr, self.pr_me.as_deref());
         let card = pr.clone();
         let open_url = pr.url.clone();
+        let click_url = pr.url.clone();
         let head = pr.head.clone();
         let show_head = pr.head.clone();
         let view = cx.entity().downgrade();
@@ -318,6 +319,12 @@ impl RepoView {
             }))
             .on_click(
                 cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
+                    // ⌃/⌘-click: straight to GitHub.
+                    let m = ev.modifiers();
+                    if m.control || m.platform {
+                        cx.open_url(&click_url);
+                        return;
+                    }
                     // Select the branch tip (local, else remote), double-click checks out.
                     let remote_name = remote.as_ref().map(|r| format!("{r}/{head}"));
                     if let Some(tip) = this.pr_tip(&head) {
