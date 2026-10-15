@@ -130,7 +130,9 @@ On Windows, use Ctrl instead of ⌘.
 | New window | ⇧⌘N |
 | Switch tab | ⌃Tab / ⌃⇧Tab |
 | Toggle sidebar | ⌃⌘S |
-| Refresh | ⌘R |
+| Refresh | ⌘R (F5 on Windows / Linux) |
+| Fetch every repository in the window | ⌃R |
+| Reload the app (replays the opening eclipse) | ⌃⇧R |
 | Settings | ⌘, |
 
 In Changes, ⌘A stages everything and ⌘S stashes.

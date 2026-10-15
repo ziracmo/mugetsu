@@ -1496,3 +1496,54 @@ fn stopped_interactive_rebase_opens_the_resolver(cx: &mut TestAppContext) {
     assert_eq!(git(p, &["rev-parse", "HEAD"]), head);
     cx.read(|cx| assert!(view.read(cx).data().operation.is_none()));
 }
+
+#[gpui_kit::test]
+fn control_r_fetches_every_tab_and_control_shift_r_replays_the_opening(cx: &mut TestAppContext) {
+    init(cx);
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    fixture(a.path());
+    fixture(b.path());
+    let session = session_of(vec![a.path().to_path_buf(), b.path().to_path_buf()], 0);
+    let (handle, ws) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| Workspace::new(session, false, window, cx))
+        })
+        .unwrap()
+    });
+    let views = cx.read(|cx| ws.read(cx).tabs());
+    for v in &views {
+        settle(cx, v);
+    }
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("ctrl-r");
+    for v in &views {
+        settle(cx, v);
+        cx.read(|cx| assert_eq!(v.read(cx).op_flash().map(|f| f.0), Some("Fetch")));
+    }
+
+    assert_eq!(cx.read(|cx| ws.read(cx).intro()), None);
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("ctrl-shift-r");
+    assert_eq!(cx.read(|cx| ws.read(cx).intro()), Some(1));
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("eclipse").is_some());
+    })
+    .unwrap();
+    // A second reload restarts it rather than stacking.
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("ctrl-shift-r");
+    assert_eq!(cx.read(|cx| ws.read(cx).intro()), Some(2));
+    for v in &views {
+        settle(cx, v);
+    }
+    cx.executor().advance_clock(crate::welcome::ECLIPSE);
+    cx.run_until_parked();
+    assert_eq!(cx.read(|cx| ws.read(cx).intro()), None);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("eclipse").is_none());
+    })
+    .unwrap();
+}
