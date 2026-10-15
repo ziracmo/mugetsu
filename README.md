@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>A fast, GPU-rendered Git client for macOS and Windows, written in Rust.</b><br>
-  The density of Fork, the colourful graph of GitKraken, a dark frosted-glass look.
+  Dense and keyboard-driven, with a colourful graph and a dark frosted-glass look.
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 - **Many repositories at once.** Tabs, workspaces, a ⌃Tab switcher, and background fetches that tell you
   when a remote moved.
 - **GitHub built in.** Pull requests, CI status and reviews right on your branches.
-- **Fork's muscle memory.** Same layout ideas, same shortcuts where they exist.
+- **Keyboard first.** Every common action has a shortcut.
 
 ## Download
 
@@ -59,7 +59,7 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
 
 - Branches grouped into folders (`feat/…`, `fix/…`), with ahead/behind counts and a GitHub icon when pushed.
 - Remotes, tags, stashes and worktrees, with a filter field and sections you can reorder by dragging.
-- **Double-click to checkout**, Fork-style: keep, stash or discard local changes, name the local branch.
+- **Double-click to checkout**: keep, stash or discard local changes, name the local branch.
   The new HEAD shows instantly.
 - **Right-click menus** everywhere: checkout (or as worktree), fast-forward, push, rename, delete,
   reset, cherry-pick, revert, save as patch, create or open a pull request…
@@ -105,7 +105,7 @@ history.
 
 ## Keyboard shortcuts
 
-Fork's shortcuts where they exist. On Windows, use Ctrl instead of ⌘.
+On Windows, use Ctrl instead of ⌘.
 
 | Action | Keys |
 | --- | --- |
