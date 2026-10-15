@@ -7,12 +7,14 @@ mod compact;
 mod conflicts;
 pub(crate) mod forms;
 mod history;
+pub(crate) mod links;
 mod menus;
 mod particles;
 mod pr_panel;
 mod pr_tip;
 mod pr_view;
 mod rebase;
+mod restack;
 mod search;
 mod shimmer;
 mod sidebar;
@@ -67,7 +69,8 @@ gpui_kit::actions!(
         Commit,
         CommitAndPush,
         StageAll,
-        StashChanges
+        StashChanges,
+        CopyGithubLink
     ]
 );
 
@@ -92,6 +95,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-3", ShowStats, Some("Repo")),
         KeyBinding::new("secondary-0", RevealHead, Some("Repo")),
         KeyBinding::new("secondary-shift-k", ToggleCompact, Some("Repo")),
+        KeyBinding::new("secondary-alt-c", CopyGithubLink, Some("Repo")),
         KeyBinding::new("secondary-f", SearchCommits, Some("Repo")),
         KeyBinding::new("ctrl-f", SearchCommits, Some("Repo")),
         KeyBinding::new("secondary-b", CheckoutBranch, Some("Repo")),
@@ -147,6 +151,8 @@ pub struct RepoView {
     history_scroll: UniformListScrollHandle,
     history_focus: FocusHandle,
     changes_focus: FocusHandle,
+    /// Stats, Stack and PR views (no list to hold the focus).
+    root_focus: FocusHandle,
     commit_diff: Entity<DiffState>,
     commit_message: SharedString,
     commit_files: usize,
@@ -158,6 +164,13 @@ pub struct RepoView {
     shimmer: Option<(Arc<HashSet<ObjectId>>, usize)>,
     /// Long commit bodies start collapsed.
     body_expanded: bool,
+    /// Lines picked in the commit diff's gutter (GitHub link pill).
+    line_selection: Option<gpui_kit::component::diff::DiffLineRange>,
+    /// Bumped when a new selection appears, to replay the pill's entrance.
+    line_selection_seq: usize,
+    /// "Link copied" flourish: where, and its sequence.
+    link_copied: Option<(links::LinkSpot, usize)>,
+    _diff_events: Subscription,
 
     // Changes
     selected_change: Option<SelectedChange>,
@@ -188,6 +201,8 @@ pub struct RepoView {
     folders: HashMap<String, bool>,
     sidebar_search: Entity<InputState>,
     prs: PrCache,
+    /// Diffs PR listings into system notifications.
+    pr_watcher: crate::notify::Watcher,
 
     // Fetch
     focused: bool,
@@ -227,6 +242,8 @@ pub struct RepoView {
     stack_focus: Option<String>,
     /// Restarts the stack view's entrance animation.
     stack_seq: usize,
+    /// Restack running or just finished (stack view card).
+    restack: Option<restack::RestackRun>,
     /// GitHub login of the user.
     pr_me: Option<String>,
     sidebar_tab: SidebarTab,
@@ -285,6 +302,22 @@ impl RepoView {
                     _ => {}
                 },
             );
+        let _diff_events = cx.subscribe(
+            &commit_diff,
+            |this, _, event: &gpui_kit::component::diff::DiffEvent, cx| {
+                use gpui_kit::component::diff::DiffEvent;
+                let range = match event {
+                    DiffEvent::SelectionChanged(r) => r.clone(),
+                    DiffEvent::SelectionEnded(r) => Some(r.clone()),
+                    _ => return,
+                };
+                if this.line_selection.is_none() && range.is_some() {
+                    this.line_selection_seq += 1;
+                }
+                this.line_selection = range;
+                cx.notify();
+            },
+        );
         if let Some(avatars) = crate::avatars::store(cx) {
             cx.observe(&avatars, |_, _, cx| cx.notify()).detach();
         }
@@ -300,6 +333,7 @@ impl RepoView {
             history_scroll: UniformListScrollHandle::new(),
             history_focus: cx.focus_handle().tab_stop(true),
             changes_focus: cx.focus_handle(),
+            root_focus: cx.focus_handle(),
             commit_diff,
             commit_message: SharedString::default(),
             commit_files: 0,
@@ -307,6 +341,10 @@ impl RepoView {
             copied: None,
             shimmer: None,
             body_expanded: false,
+            line_selection: None,
+            line_selection_seq: 0,
+            link_copied: None,
+            _diff_events,
             selected_change: None,
             change_diff,
             change_hunks: None,
@@ -331,6 +369,7 @@ impl RepoView {
             sidebar_collapsed: false,
             sidebar_search,
             prs: PrCache::default(),
+            pr_watcher: Default::default(),
             focused: false,
             fetching: false,
             last_fetch: None,
@@ -357,6 +396,7 @@ impl RepoView {
             compact_cache: None,
             stack_focus: None,
             stack_seq: 0,
+            restack: None,
             pr_me: None,
             sidebar_tab: if crate::settings::get().shared_layout
                 && crate::settings::get().sidebar_prs
@@ -558,7 +598,7 @@ impl RepoView {
         if self.search_open {
             self.run_search(cx);
         }
-        self.refresh_prs(cx);
+        self.refresh_prs(true, cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
             let upstream = self
                 .data
@@ -587,6 +627,7 @@ impl RepoView {
         }
         self.selected = Some(id);
         self.body_expanded = false;
+        self.line_selection = None;
         self.commit_file = None;
         self.commit_message = SharedString::default();
         let repo = self.repo.clone();
@@ -640,21 +681,27 @@ impl RepoView {
     // ---- Pull requests -----------------------------------------------------
 
     /// Lists the repository's recent PRs so every branch shows its chip.
-    fn refresh_prs(&mut self, cx: &mut Context<Self>) {
-        let Some(gh) = self.data.github.clone() else {
+    fn refresh_prs(&mut self, focused: bool, cx: &mut Context<Self>) {
+        let Some(forge) = self.data.forge.clone() else {
             return;
         };
         let now = Instant::now();
-        if !self.prs.needs_bulk(now) {
+        if !self.prs.needs_bulk(now, focused) {
             return;
         }
         self.prs.mark_bulk(now);
+        let repo_name = forge.name.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { pr::recent(&gh) }).await;
+            let result = cx.background_spawn(async move { pr::recent(&forge) }).await;
             if let Ok(prs) = result {
                 let _ = this.update(cx, |this, cx| {
-                    this.prs
-                        .set_bulk(mugetsu_forge::by_branch(&prs.list), Instant::now());
+                    let now = Instant::now();
+                    let prefs = crate::settings::get().notifications;
+                    let notes =
+                        this.pr_watcher
+                            .diff(&repo_name, &prs.list, prs.me.as_deref(), prefs, now);
+                    notes.iter().for_each(crate::notify::show);
+                    this.prs.set_bulk(mugetsu_forge::by_branch(&prs.list), now);
                     this.pr_list = Arc::new(prs.list);
                     this.pr_me = prs.me;
                     cx.notify();
@@ -671,7 +718,7 @@ impl RepoView {
         is_remote: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(gh) = self.data.github.clone() else {
+        let Some(forge) = self.data.forge.clone() else {
             return;
         };
         let forge_branch = pr::forge_branch(branch, upstream, is_remote);
@@ -683,7 +730,7 @@ impl RepoView {
         cx.spawn(async move |this, cx| {
             let key = forge_branch.clone();
             let result = cx
-                .background_spawn(async move { pr::lookup(&gh, &key) })
+                .background_spawn(async move { pr::lookup(&forge, &key) })
                 .await;
             let lookup = match result {
                 Ok(Some(found)) => PrLookup::Found(Box::new(found)),
@@ -722,8 +769,9 @@ impl RepoView {
 
     /// Called every second by the workspace scheduler.
     pub fn tick(&mut self, focused: bool, now: Instant, cx: &mut Context<Self>) {
-        if focused && !self.loading {
-            self.refresh_prs(cx);
+        // Background tabs keep listing PRs only when notifications want them.
+        if !self.loading && (focused || crate::settings::get().notifications.any()) {
+            self.refresh_prs(focused, cx);
         }
         if self.fetching || self.loading || self.data.refs.remotes.is_empty() {
             return;
@@ -1206,6 +1254,25 @@ impl RepoView {
         self.history_focus.clone()
     }
 
+    /// Where keyboard actions should land: the list of the current view.
+    pub fn focus_target(&self) -> FocusHandle {
+        match self.mode {
+            Mode::Changes => self.changes_focus.clone(),
+            Mode::History => self.history_focus.clone(),
+            Mode::Stats | Mode::Stack | Mode::Pr => self.root_focus.clone(),
+        }
+    }
+
+    /// Local branch names, and whether each is HEAD.
+    pub fn local_branches(&self) -> Vec<(String, bool)> {
+        self.data
+            .refs
+            .branches
+            .iter()
+            .map(|b| (b.name.clone(), b.is_head))
+            .collect()
+    }
+
     #[cfg(test)]
     pub fn prs_tab_open(&self) -> bool {
         self.sidebar_tab == SidebarTab::Prs
@@ -1235,6 +1302,13 @@ impl Render for RepoView {
             && (window.focused(cx).is_none() || self.history_focus.is_focused(window))
         {
             self.changes_focus.focus(window, cx);
+        }
+        // Stats, Stack and PR draw no list: keep keys on the tab.
+        if self.focused
+            && matches!(self.mode, Mode::Stats | Mode::Stack | Mode::Pr)
+            && (window.focused(cx).is_none() || self.history_focus.is_focused(window))
+        {
+            self.root_focus.focus(window, cx);
         }
         let body = if let Some(err) = &self.load_error {
             v_flex()
@@ -1286,9 +1360,15 @@ impl Render for RepoView {
                     )
                     .into_any_element(),
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
-                Mode::Stats => self.render_stats(cx),
-                Mode::Stack => self.render_stack(cx),
-                Mode::Pr => self.render_pr_page(cx),
+                Mode::Stats | Mode::Stack | Mode::Pr => div()
+                    .size_full()
+                    .track_focus(&self.root_focus)
+                    .child(match self.mode {
+                        Mode::Stats => self.render_stats(cx),
+                        Mode::Stack => self.render_stack(cx),
+                        _ => self.render_pr_page(cx),
+                    })
+                    .into_any_element(),
             };
             // The content floats as a frosted card over the window glass.
             let card = div()
@@ -1391,6 +1471,7 @@ impl Render for RepoView {
                 }
             }))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.reload(cx)))
+            .on_action(cx.listener(|this, _: &CopyGithubLink, _, cx| this.copy_github_link(cx)))
             .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.set_mode(Mode::History, cx)))
             .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))
             .on_action(cx.listener(|this, _: &ShowStats, _, cx| this.set_mode(Mode::Stats, cx)))

@@ -348,6 +348,7 @@ pub fn empty_state(recent: &[PathBuf], on_open: OnOpen, on_recent: OnRecent) -> 
                 .gap_5()
                 .text_xs()
                 .text_color(theme::muted())
+                .child(shortcut("⌘K", tr("Commandes", "Commands")))
                 .child(shortcut("⌘O", tr("Ouvrir", "Open")))
                 .child(shortcut("⇧⌘N", tr("Nouvelle fenêtre", "New window")))
                 .child(shortcut("⌃Tab", tr("Changer d'onglet", "Switch tab")))

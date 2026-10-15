@@ -358,6 +358,94 @@ fn stats_merge_identities_and_count_lines() {
     assert_eq!(stats.activity.iter().sum::<u32>(), 2);
 }
 
+/// origin: main ← a ← b (a stack of two PRs); main then moves on.
+fn stack_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let origin = dir.path().join("origin");
+    std::fs::create_dir(&origin).unwrap();
+    git(&origin, &["init", "-q", "-b", "main"]);
+    git(&origin, &["config", "user.name", "Test"]);
+    git(&origin, &["config", "user.email", "test@example.com"]);
+    commit_file(&origin, "base.txt", "base\n", "base");
+    git(&origin, &["switch", "-q", "-c", "a"]);
+    commit_file(&origin, "a.txt", "a\n", "a1");
+    git(&origin, &["switch", "-q", "-c", "b"]);
+    commit_file(&origin, "b.txt", "b\n", "b1");
+    git(&origin, &["switch", "-q", "main"]);
+    commit_file(&origin, "main.txt", "main\n", "main moved");
+    git(&origin, &["config", "receive.denyCurrentBranch", "ignore"]);
+    git(dir.path(), &["clone", "-q", origin.to_str().unwrap(), "c"]);
+    let clone = dir.path().join("c");
+    git(&clone, &["config", "user.name", "Test"]);
+    git(&clone, &["config", "user.email", "test@example.com"]);
+    (dir, origin, clone)
+}
+
+fn links() -> Vec<mugetsu_git::StackLink> {
+    vec![
+        mugetsu_git::StackLink {
+            branch: "a".into(),
+            parent: None,
+        },
+        mugetsu_git::StackLink {
+            branch: "b".into(),
+            parent: Some("a".into()),
+        },
+    ]
+}
+
+#[test]
+fn restack_rebases_each_branch_on_its_parent_and_pushes() {
+    let (_dir, origin, clone_path) = stack_fixture();
+    let clone = Repo::open(&clone_path).unwrap();
+    let plan = clone.restack_prepare("origin", "main", links()).unwrap();
+    for i in 0..plan.len() {
+        clone.restack_step(&plan, i).unwrap();
+    }
+    assert_eq!(clone.restack_push(&plan).unwrap(), 2);
+
+    let o = Repo::open(&origin).unwrap();
+    let is_ancestor = |a: &str, b: &str| o.git().run(["merge-base", "--is-ancestor", a, b]).is_ok();
+    assert!(is_ancestor("main", "a"));
+    assert!(is_ancestor("a", "b"));
+    // b carries only its own commit on top of a.
+    let count = o.git().run(["rev-list", "--count", "a..b"]).unwrap();
+    assert_eq!(count.trim(), "1");
+    // HEAD is back on main.
+    assert_eq!(clone.refs().unwrap().head_branch.as_deref(), Some("main"));
+
+    // A second run has nothing to push.
+    let plan = clone.restack_prepare("origin", "main", links()).unwrap();
+    for i in 0..plan.len() {
+        clone.restack_step(&plan, i).unwrap();
+    }
+    assert_eq!(clone.restack_push(&plan).unwrap(), 0);
+}
+
+#[test]
+fn restack_conflict_puts_everything_back() {
+    let (_dir, origin, clone_path) = stack_fixture();
+    // main now conflicts with a.
+    commit_file(&origin, "a.txt", "conflict\n", "main touches a.txt");
+    let clone = Repo::open(&clone_path).unwrap();
+    let plan = clone.restack_prepare("origin", "main", links()).unwrap();
+    let before = clone.git().run(["rev-parse", "a", "b"]).unwrap();
+    let err = clone.restack_step(&plan, 0).unwrap_err();
+    assert!(format!("{err:#}").contains("'a'"), "{err:#}");
+    clone.restack_undo(&plan).unwrap();
+    assert_eq!(clone.git().run(["rev-parse", "a", "b"]).unwrap(), before);
+    assert_eq!(clone.refs().unwrap().head_branch.as_deref(), Some("main"));
+    assert!(!clone.is_dirty().unwrap());
+}
+
+#[test]
+fn restack_refuses_uncommitted_changes() {
+    let (_dir, _origin, clone_path) = stack_fixture();
+    std::fs::write(clone_path.join("base.txt"), "dirty\n").unwrap();
+    let clone = Repo::open(&clone_path).unwrap();
+    assert!(clone.restack_prepare("origin", "main", links()).is_err());
+}
+
 /// main and `topic` both change line 2 of a.txt; `topic` also deletes gone.txt
 /// that main edits.
 fn conflicting() -> (tempfile::TempDir, Repo) {

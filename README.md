@@ -91,6 +91,8 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
 - **PR view**: click a PR to see it in the main pane: CI, review and conversations, description, commits and
   diff against its base. Double-click jumps to its branch.
 - **Stack view**: click a stack to see its progress, which PRs are ready, and the next step to unblock it.
+  **Restack** (there, or from a branch / PR menu) rebases each branch onto its parent, bottom up, then
+  force-pushes them all with lease; on a conflict nothing changes.
 - **AI review**: right-click a PR to run Claude Code (`/code-review`), Codex or your own command on it, in a
   Terminal inside the repository (Settings › AI).
 

@@ -198,6 +198,7 @@ impl RepoView {
             view: cx.entity().downgrade(),
             root: self.repo.root().to_path_buf(),
             github: self.data.github.clone(),
+            forge: self.data.forge.clone(),
             default_remote: default_remote(&self.data.refs),
             head_branch: self.data.refs.head_branch.clone(),
             head: self.data.refs.head,
@@ -206,6 +207,7 @@ impl RepoView {
     }
 
     pub(super) fn branch_menu_info(&self, b: &Branch) -> BranchMenu {
+        let pr = menus::found_pr(self.pr_for(&b.name, b.upstream.as_deref(), false));
         BranchMenu {
             name: b.name.clone(),
             upstream: b.upstream.clone(),
@@ -213,7 +215,13 @@ impl RepoView {
             behind: b.behind,
             is_head: b.is_head,
             gone: b.upstream_gone,
-            pr: menus::found_pr(self.pr_for(&b.name, b.upstream.as_deref(), false)),
+            pr: pr.clone(),
+            in_stack: pr.is_some_and(|pr| {
+                mugetsu_forge::stacks(&self.pr_list)
+                    .iter()
+                    .flatten()
+                    .any(|p| p.number == pr.number)
+            }),
         }
     }
 

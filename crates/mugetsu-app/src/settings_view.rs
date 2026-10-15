@@ -1,11 +1,13 @@
 //! The Settings window (⌘,): sections listed on the left (general,
-//! appearance, history, repositories, PRs, AI), applied live.
+//! appearance, history, repositories, PRs, notifications, forge accounts,
+//! AI), applied live.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, TitleBar, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, Global,
@@ -15,7 +17,7 @@ use gpui_kit::{
 };
 
 use crate::i18n::tr;
-use crate::settings::{self, ACCENTS, AiTool, CommitSort, Lang, MERGED_DAYS};
+use crate::settings::{self, ACCENTS, AiTool, CommitSort, Lang, MERGED_DAYS, Notifications};
 use crate::theme;
 
 struct OpenSettingsWindow(AnyWindowHandle);
@@ -51,16 +53,20 @@ pub enum Section {
     History,
     Repositories,
     PullRequests,
+    Notifications,
+    Accounts,
     Ai,
 }
 
 impl Section {
-    const ALL: [Section; 6] = [
+    const ALL: [Section; 8] = [
         Section::General,
         Section::Appearance,
         Section::History,
         Section::Repositories,
         Section::PullRequests,
+        Section::Notifications,
+        Section::Accounts,
         Section::Ai,
     ];
 
@@ -71,6 +77,8 @@ impl Section {
             Section::History => "history",
             Section::Repositories => "repositories",
             Section::PullRequests => "prs",
+            Section::Notifications => "notifications",
+            Section::Accounts => "accounts",
             Section::Ai => "ai",
         }
     }
@@ -82,6 +90,8 @@ impl Section {
             Section::History => tr("Historique", "History"),
             Section::Repositories => tr("Dépôts", "Repositories"),
             Section::PullRequests => "Pull requests",
+            Section::Notifications => "Notifications",
+            Section::Accounts => tr("Comptes", "Accounts"),
             Section::Ai => tr("IA", "AI"),
         }
     }
@@ -93,6 +103,8 @@ impl Section {
             Section::History => Lucide::GitCommitVertical,
             Section::Repositories => Lucide::FolderGit2,
             Section::PullRequests => Lucide::GitPullRequest,
+            Section::Notifications => Lucide::Bell,
+            Section::Accounts => Lucide::KeyRound,
             Section::Ai => Lucide::Sparkles,
         }
     }
@@ -103,6 +115,9 @@ pub struct SettingsView {
     name: Entity<InputState>,
     email: Entity<InputState>,
     ai_command: Entity<InputState>,
+    gitlab_token: Entity<InputState>,
+    gitlab_hosts: Entity<InputState>,
+    bitbucket_token: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -124,6 +139,31 @@ impl SettingsView {
         let ai_command = input(
             settings::get().ai_command,
             "claude \"/code-review {url}\"",
+            window,
+            cx,
+        );
+        let current = settings::get();
+        let secret = |value: String,
+                      placeholder: &'static str,
+                      window: &mut Window,
+                      cx: &mut Context<Self>| {
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(placeholder)
+                    .masked(true)
+                    .default_value(value)
+            })
+        };
+        let gitlab_token = secret(current.gitlab_token, "glpat-…", window, cx);
+        let gitlab_hosts = input(
+            current.gitlab_hosts.join(", "),
+            "git.example.com",
+            window,
+            cx,
+        );
+        let bitbucket_token = secret(
+            current.bitbucket_token,
+            tr("utilisateur:mot-de-passe-app", "user:app-password"),
             window,
             cx,
         );
@@ -149,12 +189,33 @@ impl SettingsView {
                     cx.notify();
                 }
             }),
+            cx.subscribe(&gitlab_token, |_, input, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    let token = input.read(cx).value().trim().to_string();
+                    settings::remember(|s| s.gitlab_token = token);
+                }
+            }),
+            cx.subscribe(&gitlab_hosts, |_, input, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    let hosts = parse_hosts(&input.read(cx).value());
+                    settings::remember(|s| s.gitlab_hosts = hosts);
+                }
+            }),
+            cx.subscribe(&bitbucket_token, |_, input, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    let token = input.read(cx).value().trim().to_string();
+                    settings::remember(|s| s.bitbucket_token = token);
+                }
+            }),
         ];
         Self {
             section: Section::General,
             name,
             email,
             ai_command,
+            gitlab_token,
+            gitlab_hosts,
+            bitbucket_token,
             _subscriptions,
         }
     }
@@ -191,6 +252,20 @@ impl SettingsView {
     pub fn section(&self) -> Section {
         self.section
     }
+}
+
+/// `"a.io, https://b.io/"` → `["a.io", "b.io"]`.
+fn parse_hosts(text: &str) -> Vec<String> {
+    text.split([',', ' ', '\n'])
+        .map(|h| {
+            h.trim()
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_end_matches('/')
+                .to_lowercase()
+        })
+        .filter(|h| !h.is_empty())
+        .collect()
 }
 
 fn add_folder(cx: &mut App) {
@@ -472,6 +547,129 @@ impl Render for SettingsView {
                 )
                 .into_any_element(),
             ],
+            Section::Notifications => {
+                let prefs = current.notifications;
+                let switch = |id: &'static str,
+                              label: &'static str,
+                              checked: bool,
+                              set: fn(&mut Notifications, bool)| {
+                    Switch::new(id)
+                        .checked(checked)
+                        .color(theme::accent())
+                        .label(label)
+                        .on_click(move |on: &bool, _, cx| {
+                            let on = *on;
+                            settings::update(cx, |s| set(&mut s.notifications, on))
+                        })
+                };
+                vec![
+                    row(
+                        tr("Me prévenir quand", "Notify me when"),
+                        v_flex()
+                            .gap_2p5()
+                            .child(switch(
+                                "notify-ci",
+                                tr("La CI d'une PR est terminée", "A PR's CI finishes"),
+                                prefs.ci,
+                                |n, on| n.ci = on,
+                            ))
+                            .child(switch(
+                                "notify-review",
+                                tr("Ma review est demandée", "My review is requested"),
+                                prefs.review,
+                                |n, on| n.review = on,
+                            ))
+                            .child(switch(
+                                "notify-merged",
+                                tr("Une PR est mergée", "A PR is merged"),
+                                prefs.merged,
+                                |n, on| n.merged = on,
+                            )),
+                    )
+                    .into_any_element(),
+                    row(
+                        tr("Portée", "Scope"),
+                        switch(
+                            "notify-others",
+                            tr(
+                                "CI et merges des PRs des autres aussi",
+                                "CI and merges of other people's PRs too",
+                            ),
+                            prefs.others,
+                            |n, on| n.others = on,
+                        ),
+                    )
+                    .into_any_element(),
+                    row(
+                        "",
+                        Button::new("notify-test")
+                            .outline()
+                            .xsmall()
+                            .icon(Icon::new(Lucide::BellRing))
+                            .label(tr("Envoyer un test", "Send a test"))
+                            .on_click(|_, _, _| {
+                                crate::notify::show(&crate::notify::Note {
+                                    title: "Mugetsu".into(),
+                                    body: tr(
+                                        "Les notifications fonctionnent.",
+                                        "Notifications work.",
+                                    )
+                                    .into(),
+                                    url: String::new(),
+                                })
+                            }),
+                    )
+                    .into_any_element(),
+                    hint(tr(
+                        "Pour les dépôts ouverts en onglet, avec un token (voir Comptes). Les onglets en arrière-plan vérifient leurs PRs toutes les 3 min.",
+                        "For repositories open in a tab, with a token (see Accounts). Background tabs check their PRs every 3 min.",
+                    )),
+                ]
+            }
+            Section::Accounts => {
+                let field = |input: &Entity<InputState>| {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(input).small().mask_toggle())
+                };
+                vec![
+                    row(
+                        "GitHub",
+                        div().text_sm().text_color(theme::muted()).child(tr(
+                            "Connexion de la CLI gh, ou GH_TOKEN.",
+                            "The gh CLI login, or GH_TOKEN.",
+                        )),
+                    )
+                    .into_any_element(),
+                    row(
+                        tr("Token GitLab", "GitLab token"),
+                        field(&self.gitlab_token),
+                    )
+                    .into_any_element(),
+                    row(
+                        tr("Serveurs GitLab", "GitLab servers"),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Input::new(&self.gitlab_hosts).small()),
+                    )
+                    .into_any_element(),
+                    hint(tr(
+                        "Token personnel (scope read_api). Vide : GITLAB_TOKEN ou la connexion glab. Serveurs : vos instances GitLab auto-hébergées, séparées par des virgules (gitlab.com et gitlab.* sont reconnus d'office).",
+                        "Personal access token (read_api scope). Empty: GITLAB_TOKEN or the glab login. Servers: your self-hosted GitLab instances, comma-separated (gitlab.com and gitlab.* are recognised already).",
+                    )),
+                    row(
+                        tr("Token Bitbucket", "Bitbucket token"),
+                        field(&self.bitbucket_token),
+                    )
+                    .into_any_element(),
+                    hint(tr(
+                        "« utilisateur:mot-de-passe-app » (ou « e-mail:token API »), ou un access token de dépôt / workspace. Vide : BITBUCKET_TOKEN. Les dépôts publics marchent sans token.",
+                        "“user:app-password” (or “email:API token”), or a repository / workspace access token. Empty: BITBUCKET_TOKEN. Public repositories work without one.",
+                    )),
+                ]
+            }
             Section::Ai => {
                 let tools =
                     AiTool::ALL.iter().map(|&tool| {
@@ -611,4 +809,16 @@ fn hint(text: &'static str) -> AnyElement {
         .text_color(theme::muted())
         .child(text)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parses_gitlab_hosts() {
+        assert_eq!(
+            super::parse_hosts("git.acme.io, https://GitLab.Corp:8443/ \n"),
+            ["git.acme.io", "gitlab.corp:8443"]
+        );
+        assert!(super::parse_hosts(" , ").is_empty());
+    }
 }

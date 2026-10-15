@@ -8,8 +8,11 @@ use gix::ObjectId;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{Icon, WindowExt as _};
-use gpui_kit::{App, AppContext as _, ClickEvent, ClipboardItem, Context, WeakEntity, Window};
-use mugetsu_forge::{GithubRepo, PullRequest};
+use gpui_kit::{
+    App, AppContext as _, ClickEvent, ClipboardItem, Context, WeakEntity, Window,
+    prelude::FluentBuilder as _,
+};
+use mugetsu_forge::{ForgeRepo, GithubRepo, PullRequest};
 use mugetsu_git::{RefLabel, ResetMode};
 
 use super::{RepoEvent, RepoView};
@@ -44,7 +47,9 @@ fn copy(text: String) -> Handler {
 pub struct MenuContext {
     pub view: WeakEntity<RepoView>,
     pub root: PathBuf,
+    /// Set for GitHub remotes only (GitHub links).
     pub github: Option<GithubRepo>,
+    pub forge: Option<ForgeRepo>,
     pub default_remote: Option<String>,
     pub head_branch: Option<String>,
     pub head: Option<ObjectId>,
@@ -62,6 +67,8 @@ pub struct BranchMenu {
     pub is_head: bool,
     pub gone: bool,
     pub pr: Option<PullRequest>,
+    /// The branch heads a PR of a stack: it can be restacked.
+    pub in_stack: bool,
 }
 
 pub fn found_pr(lookup: Option<&PrLookup>) -> Option<PullRequest> {
@@ -71,35 +78,35 @@ pub fn found_pr(lookup: Option<&PrLookup>) -> Option<PullRequest> {
     }
 }
 
-/// `https://github.com/o/r/compare/branch?expand=1`, or the PR itself when it exists.
+/// The forge's "new pull / merge request" page, or the PR itself when it exists.
 fn pr_item(
     ctx: &MenuContext,
     remote: &str,
     branch: &str,
     pr: Option<&PullRequest>,
 ) -> PopupMenuItem {
-    match (pr, &ctx.github) {
-        (Some(pr), _) => {
+    let noun = ctx
+        .forge
+        .as_ref()
+        .map_or("Pull Request", |f| f.kind.pr_noun());
+    match (pr, &ctx.forge) {
+        (Some(pr), forge) => {
             let url = pr.url.clone();
+            let number = forge
+                .as_ref()
+                .map_or_else(|| format!("#{}", pr.number), |f| f.kind.pr_ref(pr.number));
             item(
-                trf!(
-                    "Ouvrir la Pull Request #{}",
-                    "Open Pull Request #{}",
-                    pr.number
-                ),
+                trf!("Ouvrir la {noun} {number}", "Open {noun} {number}"),
                 Lucide::GitPullRequest,
             )
             .on_click(move |_, _, cx| cx.open_url(&url))
         }
-        (None, Some(gh)) => {
-            let url = format!(
-                "https://github.com/{}/{}/compare/{branch}?expand=1",
-                gh.owner, gh.name
-            );
+        (None, Some(forge)) => {
+            let url = forge.new_pr_url(branch);
             item(
                 trf!(
-                    "Créer une Pull Request sur '{remote}'",
-                    "Create Pull Request on '{remote}'"
+                    "Créer une {noun} sur '{remote}'",
+                    "Create {noun} on '{remote}'"
                 ),
                 Lucide::GitPullRequestCreateArrow,
             )
@@ -107,8 +114,8 @@ fn pr_item(
         }
         (None, None) => item(
             trf!(
-                "Créer une Pull Request sur '{remote}'",
-                "Create Pull Request on '{remote}'"
+                "Créer une {noun} sur '{remote}'",
+                "Create {noun} on '{remote}'"
             ),
             Lucide::GitPullRequestCreateArrow,
         )
@@ -280,6 +287,17 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             this.confirm_reset(name, upstream, is_head, window, cx);
         }))
     };
+    let restack = {
+        let head = b.pr.as_ref().map(|p| p.head.clone()).unwrap_or_default();
+        item(
+            tr("Restacker la stack…", "Restack the stack…"),
+            Lucide::RefreshCw,
+        )
+        .disabled(!b.in_stack)
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            this.confirm_restack(head.clone(), window, cx)
+        }))
+    };
     let rename = {
         let name = name.clone();
         item(tr("Renommer…", "Rename…"), Lucide::Pencil).on_click(act(
@@ -327,7 +345,8 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             }))
     };
 
-    menu.item(checkout)
+    let menu = menu
+        .item(checkout)
         .item(worktree)
         .separator()
         .item(merge)
@@ -341,18 +360,15 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             remote.as_deref().unwrap_or("origin"),
             &forge_branch,
             b.pr.as_ref(),
-        ))
-        .separator()
-        .item(rename)
-        .item(delete)
-        .separator()
-        .item(
-            item(
-                tr("Copier le nom de la branche", "Copy branch name"),
-                Lucide::Copy,
-            )
-            .on_click(copy(name)),
+        ));
+    let menu = if b.in_stack { menu.item(restack) } else { menu };
+    menu.separator().item(rename).item(delete).separator().item(
+        item(
+            tr("Copier le nom de la branche", "Copy branch name"),
+            Lucide::Copy,
         )
+        .on_click(copy(name)),
+    )
 }
 
 /// `remote_branch` is `origin/feat/x`.
@@ -704,7 +720,32 @@ pub fn commit_menu(
     .item(simple("Revert", Lucide::Undo2, |r, s, m| r.revert(s, m)))
     .item(save_patch)
     .separator()
-    .item(item(tr("Copier le SHA", "Copy SHA"), Lucide::Copy).on_click(copy(sha)))
+    .item(item(tr("Copier le SHA", "Copy SHA"), Lucide::Copy).on_click(copy(sha.clone())))
+    .when_some(ctx.github.clone(), |menu, gh| {
+        let url = gh.commit_url(&sha);
+        menu.item(
+            item(
+                tr("Copier le lien GitHub", "Copy GitHub Link"),
+                Lucide::Link,
+            )
+            .on_click(act(&ctx.view, move |this, _, cx| {
+                if this.selected != Some(id) {
+                    this.select_commit(id, false, cx);
+                }
+                this.copy_link(super::links::LinkSpot::Commit, url.clone(), cx)
+            })),
+        )
+        .item(
+            item(
+                tr("Ouvrir sur GitHub", "Open on GitHub"),
+                Lucide::ExternalLink,
+            )
+            .on_click({
+                let url = gh.commit_url(&sha);
+                move |_, _, cx| cx.open_url(&url)
+            }),
+        )
+    })
 }
 
 impl RepoView {

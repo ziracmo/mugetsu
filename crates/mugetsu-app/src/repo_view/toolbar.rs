@@ -82,7 +82,7 @@ pub fn pr_card(pr: &PullRequest, cx: &mut gpui_kit::App) -> AnyElement {
             s.child(
                 h_flex()
                     .gap_1p5()
-                    .child(crate::avatars::github(&pr.author, 16., cx))
+                    .child(crate::avatars::pr_author(pr, 16., cx))
                     .child(div().text_color(theme::muted()).child(pr.author.clone())),
             )
         });

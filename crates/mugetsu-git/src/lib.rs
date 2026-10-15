@@ -12,6 +12,7 @@ pub mod log;
 pub mod ops;
 pub mod rebase;
 pub mod refs;
+pub mod restack;
 pub mod stats;
 pub mod status;
 
@@ -25,6 +26,7 @@ pub use log::{Commit, CommitOrder, History};
 pub use ops::{LocalChanges, PushOptions, ResetMode};
 pub use rebase::{RebaseAction, RebaseCommit, RebaseStep};
 pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};
+pub use restack::{Restack, StackLink};
 pub use stats::{FileHeat, Person, RepoStats};
 pub use status::{Change, FileStatus, Status};
 

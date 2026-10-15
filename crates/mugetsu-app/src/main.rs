@@ -14,7 +14,9 @@ mod fmt;
 mod i18n;
 mod graph_view;
 mod model;
+mod notify;
 mod open_repo;
+mod palette;
 mod pr;
 mod repo_icon;
 mod repo_view;
@@ -114,6 +116,7 @@ fn main() {
             workspace::init(cx);
             repo_view::init(cx);
             app_menu::init(cx);
+            palette::init(cx);
             let main =
                 open_workspace_window(session, true, cx).expect("failed to open the main window");
             cx.set_global(app_menu::MainWorkspace(main.0, main.1.clone()));

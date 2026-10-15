@@ -85,6 +85,34 @@ pub struct Settings {
     pub ai_tool: AiTool,
     /// Shell command run in a terminal for that review; see [`crate::ai_review`].
     pub ai_command: String,
+    /// System notifications about pull requests (all off by default).
+    pub notifications: Notifications,
+    /// GitLab personal access token (else `GITLAB_TOKEN` or the `glab` login).
+    pub gitlab_token: String,
+    /// Self-hosted GitLab hosts, besides gitlab.com and `gitlab.*` ones.
+    pub gitlab_hosts: Vec<String>,
+    /// Bitbucket `user:app-password` or access token (else `BITBUCKET_TOKEN`).
+    pub bitbucket_token: String,
+}
+
+/// Which pull request events raise a system notification.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Notifications {
+    /// CI finished (passed or failed).
+    pub ci: bool,
+    /// My review is requested.
+    pub review: bool,
+    /// PR merged.
+    pub merged: bool,
+    /// CI and merge events of other people's PRs too, not only mine.
+    pub others: bool,
+}
+
+impl Notifications {
+    pub fn any(self) -> bool {
+        self.ci || self.review || self.merged
+    }
 }
 
 /// AI coding tool a PR review is started with.
@@ -154,6 +182,10 @@ impl Default for Settings {
             history_compact: false,
             ai_tool: AiTool::Claude,
             ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),
+            notifications: Notifications::default(),
+            gitlab_token: String::new(),
+            gitlab_hosts: Vec::new(),
+            bitbucket_token: String::new(),
         }
     }
 }
@@ -323,5 +355,6 @@ mod tests {
         assert_eq!(s.lang, Lang::En);
         assert_eq!(s.commit_order, CommitSort::Topological);
         assert_eq!(s.sections().len(), 5);
+        assert!(!s.notifications.any(), "notifications start switched off");
     }
 }

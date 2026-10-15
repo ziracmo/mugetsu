@@ -22,6 +22,7 @@ use gpui_kit::{
 use mugetsu_git::Repo;
 
 use crate::i18n::tr;
+use crate::palette::{Palette, PaletteEvent, TogglePalette};
 use crate::repo_view::{RepoEvent, RepoView};
 use crate::session::{RepoSet, Session};
 use crate::theme;
@@ -64,6 +65,9 @@ pub struct Workspace {
     refocus: bool,
     /// ⌃Tab switcher: highlighted tab while the modifier is held.
     switcher: Option<usize>,
+    /// ⌘K palette while shown, and where focus goes back afterwards.
+    palette: Option<(Entity<Palette>, Subscription)>,
+    palette_return: Option<gpui_kit::FocusHandle>,
 }
 
 /// Height of the title bar holding the tabs.
@@ -100,6 +104,8 @@ impl Workspace {
             _activation: activation,
             refocus: true,
             switcher: None,
+            palette: None,
+            palette_return: None,
         };
         if this.intro {
             crate::settings::remember(|s| s.intro_seen = true);
@@ -300,6 +306,85 @@ impl Workspace {
         if self.persist {
             Session::new(self.sets.clone(), self.current).save();
         }
+    }
+
+    /// ⌘K: shows the command palette, or closes it.
+    pub fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((palette, _)) = &self.palette {
+            palette.update(cx, |p, cx| p.dismiss(cx));
+            return;
+        }
+        self.palette_return = window.focused(cx);
+        let entries = crate::palette::entries(self, window, cx);
+        let palette = cx.new(|cx| Palette::new(entries, window, cx));
+        let sub = cx.subscribe_in(
+            &palette,
+            window,
+            |this, palette, event: &PaletteEvent, window, cx| match event {
+                PaletteEvent::Run(run) => {
+                    this.restore_focus(window, cx);
+                    run(this, window, cx);
+                }
+                PaletteEvent::Dismissed => this.restore_focus(window, cx),
+                PaletteEvent::Closed => {
+                    if this.palette.as_ref().is_some_and(|(p, _)| p == palette) {
+                        this.palette = None;
+                        cx.notify();
+                    }
+                }
+            },
+        );
+        palette.update(cx, |p, cx| p.focus_input(window, cx));
+        self.palette = Some((palette, sub));
+        cx.notify();
+    }
+
+    fn restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = self
+            .palette_return
+            .take()
+            .or_else(|| self.active().map(|v| v.read(cx).focus_target()));
+        match handle {
+            Some(h) => h.focus(window, cx),
+            None => window.blur(cx),
+        }
+    }
+
+    /// Runs `action` where the user was before opening the palette (the
+    /// active tab), so repository shortcuts' actions reach it.
+    pub fn dispatch(
+        &mut self,
+        action: Box<dyn gpui_kit::Action>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.focused(cx).is_none()
+            && let Some(view) = self.active()
+        {
+            view.read(cx).focus_target().focus(window, cx);
+        }
+        window.dispatch_action(action, cx);
+    }
+
+    #[cfg(test)]
+    pub fn palette(&self) -> Option<Entity<Palette>> {
+        self.palette.as_ref().map(|(p, _)| p.clone())
+    }
+
+    /// Roots of the open tabs, in order.
+    pub fn tab_roots(&self, cx: &gpui_kit::App) -> Vec<PathBuf> {
+        self.tabs
+            .iter()
+            .map(|t| t.view.read(cx).repo().root().to_path_buf())
+            .collect()
+    }
+
+    /// Workspace names and the current one.
+    pub fn workspace_list(&self) -> (Vec<String>, usize) {
+        (
+            self.sets.iter().map(|s| s.name.clone()).collect(),
+            self.current,
+        )
     }
 
     /// Opens `path`, or shows why it can't be.
@@ -687,6 +772,9 @@ impl Render for Workspace {
             )
             .on_action(cx.listener(|this, _: &CloseTab, _, cx| this.close(this.active, cx)))
             .on_action(
+                cx.listener(|this, _: &TogglePalette, window, cx| this.toggle_palette(window, cx)),
+            )
+            .on_action(
                 cx.listener(|this, _: &NextTab, window, cx| this.step_switcher(true, window, cx)),
             )
             .on_action(cx.listener(|this, _: &PreviousTab, window, cx| {
@@ -734,6 +822,7 @@ impl Render for Workspace {
             .child(div().flex_1().min_h_0().child(body))
             .children(switcher)
             .when(self.intro, |s| s.child(crate::welcome::eclipse()))
+            .children(self.palette.as_ref().map(|(p, _)| p.clone()))
     }
 }
 
