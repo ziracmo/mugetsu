@@ -43,7 +43,7 @@ fn inherit_shell_path() {
     #[cfg(target_os = "macos")]
     {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        if let Ok(out) = std::process::Command::new(shell)
+        if let Ok(out) = mugetsu_git::process::command(shell)
             .args(["-l", "-c", "printf %s \"$PATH\""])
             .output()
             && out.status.success()

@@ -2,9 +2,9 @@
 //! details filled in, run in a new terminal window inside the repository.
 
 use std::path::Path;
-use std::process::Command;
 
 use mugetsu_forge::PullRequest;
+use mugetsu_git::process::command;
 
 /// Fills `{url}`, `{number}`, `{branch}`, `{base}` and `{title}` in `template`.
 pub fn expand(template: &str, pr: &PullRequest) -> String {
@@ -44,7 +44,7 @@ fn spawn_terminal(line: &str) -> anyhow::Result<()> {
     let escaped = line.replace('\\', "\\\\").replace('"', "\\\"");
     let script =
         format!("tell application \"Terminal\"\nactivate\ndo script \"{escaped}\"\nend tell");
-    let status = Command::new("osascript").args(["-e", &script]).status()?;
+    let status = command("osascript").args(["-e", &script]).status()?;
     anyhow::ensure!(status.success(), "osascript failed");
     Ok(())
 }
@@ -53,7 +53,7 @@ fn spawn_terminal(line: &str) -> anyhow::Result<()> {
 fn spawn_terminal(line: &str) -> anyhow::Result<()> {
     // Keeps the window open once the tool exits.
     let keep = format!("{line}; exec $SHELL");
-    Command::new("x-terminal-emulator")
+    command("x-terminal-emulator")
         .args(["-e", "sh", "-c", &keep])
         .spawn()?;
     Ok(())

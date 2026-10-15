@@ -32,7 +32,7 @@ impl Git {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut cmd = Command::new(git_binary());
+        let mut cmd = crate::process::command(git_binary());
         cmd.current_dir(&self.cwd)
             // Never block a background job on an interactive prompt.
             .env("GIT_TERMINAL_PROMPT", "0")

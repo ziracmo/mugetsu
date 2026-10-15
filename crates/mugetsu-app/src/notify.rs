@@ -231,7 +231,7 @@ mod mac {
             quote(&note.body),
             quote(&note.title)
         );
-        let _ = std::process::Command::new("osascript")
+        let _ = mugetsu_git::process::command("osascript")
             .args(["-e", &script])
             .spawn();
     }

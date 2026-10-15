@@ -2,6 +2,7 @@
 
 use std::process::Command;
 
+#[allow(clippy::disallowed_methods)] // build script, no window concerns
 fn git(args: &[&str]) -> Option<String> {
     let out = Command::new("git").args(args).output().ok()?;
     out.status
