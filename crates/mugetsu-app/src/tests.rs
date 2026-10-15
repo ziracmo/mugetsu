@@ -189,7 +189,12 @@ fn double_clicking_a_branch_checks_it_out(cx: &mut TestAppContext) {
         assert_eq!(
             view.read(cx).data().refs.head_branch.as_deref(),
             Some("topic")
-        )
+        );
+        assert_eq!(
+            view.read(cx).celebrating(),
+            view.read(cx).data().refs.head,
+            "the new HEAD row celebrates"
+        );
     });
 }
 

@@ -155,8 +155,8 @@ pub struct RepoView {
     search_hits: HashSet<usize>,
     search_pos: usize,
 
-    /// Branch that was just checked out, for the particle burst (name, sequence).
-    celebrate: Option<(String, usize)>,
+    /// Commit row celebrating a checkout (tip, sequence): sweep and particles.
+    celebrate: Option<(ObjectId, usize)>,
     celebrate_seq: usize,
 
     // Sidebar
@@ -877,9 +877,8 @@ impl RepoView {
         );
     }
 
-    /// Checks out a branch, then bursts particles around its label.
-    /// Switches branch (see [`Repo::switch_to`]) and celebrates with a particle
-    /// burst on the branch.
+    /// Switches branch (see [`Repo::switch_to`]) and celebrates on the
+    /// branch's commit row: a sweep with particles carried along.
     pub fn checkout_branch(
         &mut self,
         local: String,
@@ -898,10 +897,16 @@ impl RepoView {
         }
         self.celebrate_seq += 1;
         let seq = self.celebrate_seq;
-        self.celebrate = Some((local.clone(), seq));
+        self.celebrate = self
+            .data
+            .refs
+            .branches
+            .iter()
+            .find(|b| b.name == local)
+            .map(|b| (b.target, seq));
         cx.spawn(async move |this, cx| {
             cx.background_executor()
-                .timer(std::time::Duration::from_millis(1400))
+                .timer(std::time::Duration::from_millis(1600))
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.celebrate.as_ref().is_some_and(|(_, s)| *s == seq) {
@@ -920,7 +925,6 @@ impl RepoView {
         );
     }
 
-    /// Particle burst for a branch label, while its checkout is being celebrated.
     /// Shared layout: the sidebar tab and width other repositories left.
     fn adopt_shared_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let settings = crate::settings::get();
@@ -1024,11 +1028,9 @@ impl RepoView {
         self.copied.is_some()
     }
 
-    pub(super) fn burst_for(&self, branch: &str) -> Option<usize> {
-        self.celebrate
-            .as_ref()
-            .filter(|(name, _)| name == branch)
-            .map(|(_, seq)| *seq)
+    #[cfg(test)]
+    pub fn celebrating(&self) -> Option<ObjectId> {
+        self.celebrate.map(|(id, _)| id)
     }
 }
 

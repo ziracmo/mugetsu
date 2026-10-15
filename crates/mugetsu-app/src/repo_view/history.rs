@@ -30,7 +30,6 @@ struct ChipContext {
     /// Local branch → its upstream (`origin/x`).
     upstreams: HashMap<String, String>,
     github: bool,
-    burst: Option<(String, usize)>,
     view: gpui_kit::WeakEntity<RepoView>,
     /// ⌘F query, to ring the chips whose name matches.
     search: String,
@@ -197,17 +196,8 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     false,
                     ctx,
                 );
-                let el = match &ctx.pushed {
+                match &ctx.pushed {
                     Some((b, seq)) if b == name => super::shimmer::pushed(el, *seq),
-                    _ => el,
-                };
-                match &ctx.burst {
-                    Some((b, seq)) if b == name => div()
-                        .relative()
-                        .flex_none()
-                        .child(el)
-                        .child(super::particles::burst(*seq))
-                        .into_any_element(),
                     _ => el,
                 }
             }
@@ -360,7 +350,6 @@ impl RepoView {
                 .filter_map(|b| Some((b.name.clone(), b.upstream.clone()?)))
                 .collect(),
             github: data.github.is_some(),
-            burst: self.celebrate.clone(),
             view: cx.entity().downgrade(),
             search: search.clone(),
             worktrees: self.other_worktrees(),
@@ -368,6 +357,7 @@ impl RepoView {
         });
         let hits = Rc::new(self.search_hits.clone());
         let shimmer = self.shimmer.clone();
+        let celebrate = self.celebrate;
         let list = if data.history.is_empty() {
             v_flex()
                 .size_full()
@@ -432,6 +422,14 @@ impl RepoView {
                                     if focused { 0.16 } else { 0.1 },
                                 ))
                             })
+                            .when_some(
+                                celebrate.filter(|(c, _)| *c == id).map(|(_, seq)| seq),
+                                |s, seq| {
+                                    s.relative()
+                                        .overflow_hidden()
+                                        .child(super::shimmer::checkout(seq))
+                                },
+                            )
                             .when_some(
                                 shimmer
                                     .as_ref()

@@ -48,8 +48,6 @@ struct Row {
     bold: bool,
     /// main / develop / …: brighter than the other branches.
     strong: bool,
-    /// Particle burst sequence after a checkout.
-    burst: Option<usize>,
     tooltip: Option<String>,
     suffix: Vec<AnyElement>,
     on_click: Click,
@@ -91,21 +89,16 @@ fn render_row(row: Row) -> AnyElement {
             row.icon_color
         }))
         .child(
-            div()
-                .relative()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .truncate()
-                        .when(row.strong, |s| {
-                            s.text_color(gpui_kit::white())
-                                .font_weight(gpui_kit::FontWeight::BOLD)
-                        })
-                        .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::BOLD))
-                        .child(row.label),
-                )
-                .children(row.burst.map(super::particles::burst)),
+            div().relative().flex_1().min_w_0().child(
+                div()
+                    .truncate()
+                    .when(row.strong, |s| {
+                        s.text_color(gpui_kit::white())
+                            .font_weight(gpui_kit::FontWeight::BOLD)
+                    })
+                    .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::BOLD))
+                    .child(row.label),
+            ),
         )
         .children(row.suffix)
         .when_some(tooltip, |s, tip| {
@@ -468,7 +461,6 @@ impl RepoView {
                 selected: self.selected_ref.as_ref() == Some(&id),
                 bold: b.is_head,
                 strong: theme::is_main_branch(&b.name),
-                burst: self.burst_for(&b.name),
                 tooltip: Some(match &b.upstream {
                     Some(u) if !b.upstream_gone => {
                         trf!("{}\nPoussée sur {u}", "{}\nPushed to {u}", b.name)
@@ -592,7 +584,6 @@ impl RepoView {
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
                     strong: theme::is_main_branch(&b.name),
-                    burst: None,
                     tooltip: Some(b.name.clone()),
                     suffix,
                     on_click: Box::new(move |ev, window, cx| {
@@ -647,7 +638,6 @@ impl RepoView {
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
                     strong: false,
-                    burst: None,
                     tooltip: None,
                     suffix: vec![],
                     on_click: Box::new(move |_, _, cx| {
@@ -701,7 +691,6 @@ impl RepoView {
                     selected: false,
                     bold: is_current,
                     strong: false,
-                    burst: None,
                     tooltip: Some(format!(
                         "{}{}",
                         w.path,
@@ -752,7 +741,6 @@ impl RepoView {
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
                     strong: false,
-                    burst: None,
                     tooltip: Some(format!("stash@{{{}}}", s.index)),
                     suffix: vec![],
                     on_click: Box::new(move |_, _, cx| {
