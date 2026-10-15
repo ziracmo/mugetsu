@@ -128,7 +128,14 @@ fn paint(row: &GraphRow, style: NodeStyle, bounds: Bounds<Pixels>, window: &mut 
         );
     }
     if style.is_merge {
-        circle(window, center, NODE_RADIUS - 0.5, theme::panel(), color, 2.);
+        circle(
+            window,
+            center,
+            NODE_RADIUS - 0.5,
+            theme::node_fill(),
+            color,
+            2.,
+        );
     } else {
         let r = if style.is_head {
             NODE_RADIUS + 1.

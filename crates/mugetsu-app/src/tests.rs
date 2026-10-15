@@ -463,3 +463,70 @@ fn branch_context_menu_renames(cx: &mut TestAppContext) {
     assert!(names.contains(&"feat/renamed".to_string()), "{names:?}");
     assert!(!names.contains(&"topic".to_string()));
 }
+
+#[gpui_kit::test]
+fn command_f_finds_commits_by_message_and_sha(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let (topic, f1) = cx.read(|cx| {
+        let d = view.read(cx).data().clone();
+        let find = |s: &str| {
+            d.history
+                .commits
+                .iter()
+                .find(|c| c.summary == s)
+                .unwrap()
+                .id
+        };
+        (find("topic work"), find("f1"))
+    });
+    let head = cx.read(|cx| view.read(cx).data().refs.head.unwrap());
+
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(gpui_kit::SharedString::from(head.to_string()), cx);
+        window.press("secondary-f", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("commit-search").is_some());
+        window.input("topic", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+    cx.read(|cx| assert_eq!(view.read(cx).selected_commit(), Some(topic)));
+
+    // A SHA prefix jumps too.
+    let prefix = f1.to_hex_with_len(7).to_string();
+    cx.update_window(handle, |_, window, cx| {
+        window.press("secondary-a", cx);
+        window.input(&prefix, cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+    cx.read(|cx| assert_eq!(view.read(cx).selected_commit(), Some(f1)));
+
+    cx.update_window(handle, |_, window, cx| {
+        window.press("escape", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("commit-search").is_none());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn sidebar_can_be_collapsed(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("sidebar-search").is_some());
+        window.click("toggle-sidebar", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("sidebar-search").is_none());
+    })
+    .unwrap();
+    assert!(cx.read(|cx| view.read(cx).sidebar_collapsed()));
+}

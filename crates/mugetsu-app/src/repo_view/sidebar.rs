@@ -32,6 +32,10 @@ struct Row {
     label: String,
     selected: bool,
     bold: bool,
+    /// main / develop / …: brighter than the other branches.
+    strong: bool,
+    /// Particle burst sequence after a checkout.
+    burst: Option<usize>,
     tooltip: Option<String>,
     suffix: Vec<AnyElement>,
     on_click: Click,
@@ -61,11 +65,20 @@ fn render_row(row: Row) -> AnyElement {
         .child(Icon::new(row.icon).xsmall().text_color(row.icon_color))
         .child(
             div()
+                .relative()
                 .flex_1()
                 .min_w_0()
-                .truncate()
-                .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::SEMIBOLD))
-                .child(row.label),
+                .child(
+                    div()
+                        .truncate()
+                        .when(row.strong, |s| {
+                            s.text_color(gpui_kit::white())
+                                .font_weight(gpui_kit::FontWeight::BOLD)
+                        })
+                        .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::SEMIBOLD))
+                        .child(row.label),
+                )
+                .children(row.burst.map(super::particles::burst)),
         )
         .children(row.suffix)
         .when_some(tooltip, |s, tip| {
@@ -349,6 +362,8 @@ impl RepoView {
                 label: node.label.clone(),
                 selected: self.selected_ref.as_ref() == Some(&id),
                 bold: b.is_head,
+                strong: theme::is_main_branch(&b.name),
+                burst: self.burst_for(&b.name),
                 tooltip: Some(match &b.upstream {
                     Some(u) if !b.upstream_gone => format!("{}\nPoussée sur {u}", b.name),
                     Some(u) => format!("{}\n{u} supprimée du remote", b.name),
@@ -362,8 +377,7 @@ impl RepoView {
                         this.select_commit(target, true, cx);
                         this.lookup_pr(&name, upstream.as_deref(), false, cx);
                         if double {
-                            let name = name.clone();
-                            this.run_op("Checkout", move |r| r.checkout(&name), window, cx);
+                            this.checkout_with_burst(name.clone(), false, window, cx);
                         }
                     });
                 }),
@@ -466,6 +480,8 @@ impl RepoView {
                     label: node.label.clone(),
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
+                    strong: theme::is_main_branch(&b.name),
+                    burst: None,
                     tooltip: Some(b.name.clone()),
                     suffix,
                     on_click: Box::new(move |ev, window, cx| {
@@ -475,13 +491,7 @@ impl RepoView {
                             this.select_commit(target, true, cx);
                             this.lookup_pr(&name, None, true, cx);
                             if double {
-                                let name = name.clone();
-                                this.run_op(
-                                    "Checkout",
-                                    move |r| r.checkout_remote(&name),
-                                    window,
-                                    cx,
-                                );
+                                this.checkout_with_burst(name.clone(), true, window, cx);
                             }
                         });
                     }),
@@ -525,6 +535,8 @@ impl RepoView {
                     label: t.name.clone(),
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
+                    strong: false,
+                    burst: None,
                     tooltip: None,
                     suffix: vec![],
                     on_click: Box::new(move |_, _, cx| {
@@ -574,6 +586,8 @@ impl RepoView {
                     ),
                     selected: false,
                     bold: is_current,
+                    strong: false,
+                    burst: None,
                     tooltip: Some(format!(
                         "{}{}",
                         w.path,
@@ -620,6 +634,8 @@ impl RepoView {
                     label: s.message.clone(),
                     selected: self.selected_ref.as_ref() == Some(&id),
                     bold: false,
+                    strong: false,
+                    burst: None,
                     tooltip: Some(format!("stash@{{{}}}", s.index)),
                     suffix: vec![],
                     on_click: Box::new(move |_, _, cx| {
@@ -693,9 +709,7 @@ impl RepoView {
         v_flex()
             .id("sidebar")
             .size_full()
-            .bg(theme::panel())
-            .border_r_1()
-            .border_color(theme::hairline())
+            // Pure window glass: the blur shows through the sidebar.
             .child(
                 div().flex_none().p_2().child(
                     Input::new(&self.sidebar_search)

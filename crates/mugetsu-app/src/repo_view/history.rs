@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -25,36 +26,126 @@ pub const ROW_HEIGHT: f32 = 26.;
 /// Commit body lines shown before "Afficher plus".
 const BODY_PREVIEW_LINES: usize = 3;
 
-fn label_chip(label: &RefLabel) -> AnyElement {
-    let (text, color, icon) = match label {
-        RefLabel::Branch { name, head } => (
-            name.clone(),
-            if *head { theme::cyan() } else { theme::lime() },
-            Lucide::GitBranch,
-        ),
-        RefLabel::Remote(name) => (name.clone(), theme::violet(), Lucide::Cloud),
-        RefLabel::Tag(name) => (name.clone(), theme::amber(), Lucide::Tag),
-        RefLabel::DetachedHead => ("HEAD".into(), theme::magenta(), Lucide::CircleDot),
-    };
-    let head = matches!(
-        label,
-        RefLabel::Branch { head: true, .. } | RefLabel::DetachedHead
-    );
-    h_flex()
+/// What the history needs to draw ref chips, captured once per frame.
+struct ChipContext {
+    /// Local branch → its upstream (`origin/x`).
+    upstreams: HashMap<String, String>,
+    github: bool,
+    burst: Option<(String, usize)>,
+}
+
+fn chip(
+    text: String,
+    color: gpui_kit::Hsla,
+    icon: Lucide,
+    strong: bool,
+    pushed: Option<Lucide>,
+) -> gpui_kit::Div {
+    let base = h_flex()
         .flex_none()
-        .max_w(px(220.))
+        .max_w(px(240.))
         .h(px(18.))
-        .gap_1()
-        .px_1p5()
-        .rounded_sm()
+        .rounded_md()
+        .overflow_hidden()
         .border_1()
-        .border_color(theme::alpha(color, if head { 0.9 } else { 0.45 }))
-        .bg(theme::alpha(color, if head { 0.2 } else { 0.1 }))
-        .text_color(color)
-        .text_xs()
-        .child(Icon::new(icon).xsmall())
-        .child(div().truncate().child(text))
-        .into_any_element()
+        .text_xs();
+    let base = if strong {
+        // main / develop / …: filled, bold, unmistakable.
+        base.border_color(color)
+            .bg(theme::alpha(color, 0.85))
+            .text_color(gpui_kit::rgb(0x111111))
+            .font_weight(gpui_kit::FontWeight::BOLD)
+    } else {
+        base.border_color(theme::alpha(color, 0.45))
+            .bg(theme::alpha(color, 0.12))
+            .text_color(color)
+    };
+    base.map(|s| match pushed {
+        // Pushed and identical on the remote: dark icon cell, one chip for both.
+        Some(remote_icon) => s.child(
+            div()
+                .h_full()
+                .px_1()
+                .flex()
+                .items_center()
+                .bg(gpui_kit::rgba(0x000000b3))
+                .child(Icon::new(remote_icon).xsmall().text_color(color)),
+        ),
+        None => s.child(div().pl_1p5().child(Icon::new(icon).xsmall())),
+    })
+    .child(div().px_1().truncate().child(text))
+}
+
+fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
+    let remotes: HashSet<&str> = labels
+        .iter()
+        .filter_map(|l| match l {
+            RefLabel::Remote(n) => Some(n.as_str()),
+            _ => None,
+        })
+        .collect();
+    let mut merged = HashSet::new();
+    let mut out = Vec::new();
+    for label in labels {
+        let element = match label {
+            RefLabel::Branch { name, head } => {
+                let synced = ctx
+                    .upstreams
+                    .get(name)
+                    .filter(|u| remotes.contains(u.as_str()));
+                if let Some(u) = synced {
+                    merged.insert(u.clone());
+                }
+                let color = if *head { theme::cyan() } else { theme::lime() };
+                let remote_icon = if ctx.github {
+                    Lucide::Github
+                } else {
+                    Lucide::Cloud
+                };
+                let el = chip(
+                    name.clone(),
+                    color,
+                    Lucide::GitBranch,
+                    theme::is_main_branch(name),
+                    synced.map(|_| remote_icon),
+                )
+                .when(*head, |s| s.shadow_sm());
+                match &ctx.burst {
+                    Some((b, seq)) if b == name => div()
+                        .relative()
+                        .flex_none()
+                        .child(el)
+                        .child(super::particles::burst(*seq))
+                        .into_any_element(),
+                    _ => el.into_any_element(),
+                }
+            }
+            RefLabel::Remote(_) => continue,
+            RefLabel::Tag(name) => {
+                chip(name.clone(), theme::amber(), Lucide::Tag, false, None).into_any_element()
+            }
+            RefLabel::DetachedHead => chip(
+                "HEAD".into(),
+                theme::magenta(),
+                Lucide::CircleDot,
+                false,
+                None,
+            )
+            .into_any_element(),
+        };
+        out.push(element);
+    }
+    // Remote branches not merged into a local chip (ahead/behind or remote-only).
+    for label in labels {
+        if let RefLabel::Remote(name) = label
+            && !merged.contains(name)
+        {
+            out.push(
+                chip(name.clone(), theme::violet(), Lucide::Cloud, false, None).into_any_element(),
+            );
+        }
+    }
+    out
 }
 
 impl RepoView {
@@ -136,6 +227,17 @@ impl RepoView {
                 .collect(),
         );
 
+        let chip_ctx = Rc::new(ChipContext {
+            upstreams: data
+                .refs
+                .branches
+                .iter()
+                .filter_map(|b| Some((b.name.clone(), b.upstream.clone()?)))
+                .collect(),
+            github: data.github.is_some(),
+            burst: self.celebrate.clone(),
+        });
+        let hits = Rc::new(self.search_hits.clone());
         let list = if data.history.is_empty() {
             v_flex()
                 .size_full()
@@ -168,8 +270,9 @@ impl RepoView {
                         let labels = data
                             .decorations
                             .get(&commit.id)
-                            .map(|l| l.iter().map(label_chip).collect::<Vec<_>>())
+                            .map(|l| chips(l, &chip_ctx))
                             .unwrap_or_default();
+                        let is_hit = hits.contains(&ix);
                         let id = commit.id;
                         let entity = entity.clone();
                         let is_merge = commit.parents.len() > 1;
@@ -190,6 +293,9 @@ impl RepoView {
                             .text_sm()
                             .cursor_pointer()
                             .hover(|s| s.bg(theme::raised()))
+                            .when(is_hit && !is_selected, |s| {
+                                s.bg(theme::alpha(theme::amber(), 0.08))
+                            })
                             .when(is_selected, |s| {
                                 s.bg(theme::alpha(
                                     theme::cyan(),
@@ -220,13 +326,19 @@ impl RepoView {
                                     ),
                             )
                             .child(
-                                div()
+                                h_flex()
                                     .flex_none()
-                                    .w(px(130.))
-                                    .truncate()
+                                    .w(px(150.))
+                                    .gap_1p5()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(commit.author.clone()),
+                                    .child(crate::avatars::avatar(
+                                        &commit.email,
+                                        &commit.author,
+                                        16.,
+                                        cx,
+                                    ))
+                                    .child(div().min_w_0().truncate().child(commit.author.clone())),
                             )
                             .child(
                                 div()
@@ -390,7 +502,17 @@ impl RepoView {
                             .gap_3()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("{} <{}>", commit.author, commit.email))
+                            .child(
+                                h_flex()
+                                    .gap_1p5()
+                                    .child(crate::avatars::avatar(
+                                        &commit.email,
+                                        &commit.author,
+                                        20.,
+                                        cx,
+                                    ))
+                                    .child(format!("{} <{}>", commit.author, commit.email)),
+                            )
                             .child(fmt::absolute_time(commit.time))
                             .child(
                                 h_flex()

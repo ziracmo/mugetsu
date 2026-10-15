@@ -3,7 +3,7 @@ use std::time::Duration;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, h_flex};
+use gpui_kit::component::{Disableable as _, Icon, Sizable as _, h_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, div,
@@ -108,7 +108,7 @@ impl RepoView {
         };
         let tip = match &self.fetch_error {
             Some(e) => format!("Dernier fetch en échec : {e}"),
-            None => "Fetch (auto toutes les 10 s)".into(),
+            None => "Fetch, auto toutes les 10 s (⇧⌘F)".into(),
         };
         h_flex()
             .id("fetch")
@@ -147,12 +147,29 @@ impl RepoView {
             )
         });
 
-        let tab = |id: &'static str, label: String, active: bool| {
-            Button::new(id)
-                .small()
-                .label(label)
-                .when(active, |b| b.primary())
-                .when(!active, |b| b.ghost())
+        // macOS-style segmented control.
+        let tab = |id: &'static str, label: String, keys: &'static str, active: bool| {
+            h_flex()
+                .id(id)
+                .h(px(24.))
+                .px_3()
+                .gap_1p5()
+                .rounded_md()
+                .cursor_pointer()
+                .text_sm()
+                .when(active, |s| {
+                    s.bg(theme::alpha(gpui_kit::white(), 0.14))
+                        .border_1()
+                        .border_color(theme::glass_edge())
+                        .shadow_sm()
+                        .text_color(gpui_kit::white())
+                })
+                .when(!active, |s| {
+                    s.text_color(theme::muted())
+                        .hover(|s| s.text_color(gpui_kit::white()))
+                })
+                .child(label)
+                .tooltip(move |window, cx| Tooltip::new(keys).build(window, cx))
         };
 
         h_flex()
@@ -160,9 +177,18 @@ impl RepoView {
             .flex_none()
             .px_3()
             .gap_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(theme::panel())
+            .child(
+                Button::new("toggle-sidebar")
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(if self.sidebar_collapsed {
+                        Lucide::PanelLeftOpen
+                    } else {
+                        Lucide::PanelLeftClose
+                    }))
+                    .tooltip("Afficher / masquer la barre latérale (⌃⌘S)")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
+            )
             .child(
                 h_flex()
                     .gap_2()
@@ -200,11 +226,20 @@ impl RepoView {
             .child(div().w(px(12.)))
             .child(
                 h_flex()
-                    .gap_1()
+                    .p(px(2.))
+                    .gap_0p5()
+                    .rounded_lg()
+                    .bg(theme::alpha(gpui_kit::white(), 0.05))
+                    .border_1()
+                    .border_color(theme::hairline())
                     .child(
-                        tab("mode-history", "Historique".into(), mode == Mode::History).on_click(
-                            cx.listener(|this, _, _, cx| this.set_mode(Mode::History, cx)),
-                        ),
+                        tab(
+                            "mode-history",
+                            "Historique".into(),
+                            "⌘2",
+                            mode == Mode::History,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::History, cx))),
                     )
                     .child(
                         tab(
@@ -214,6 +249,7 @@ impl RepoView {
                             } else {
                                 "Changements".into()
                             },
+                            "⌘1",
                             mode == Mode::Changes,
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Changes, cx))),
@@ -228,10 +264,8 @@ impl RepoView {
                     .icon(Icon::new(Lucide::ArrowDownToLine))
                     .label("Pull")
                     .disabled(busy)
-                    .tooltip("Pull (fast-forward uniquement)")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.run_op("Pull", |r| r.pull(), window, cx)
-                    })),
+                    .tooltip("Pull, fast-forward uniquement (⇧⌘L)")
+                    .on_click(cx.listener(|this, _, window, cx| this.pull(window, cx))),
             )
             .child(
                 Button::new("push")
@@ -239,28 +273,9 @@ impl RepoView {
                     .small()
                     .icon(Icon::new(Lucide::ArrowUpFromLine))
                     .label("Push")
+                    .tooltip("Push (⇧⌘P)")
                     .disabled(busy)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let upstream = this
-                            .data
-                            .refs
-                            .branches
-                            .iter()
-                            .find(|b| b.is_head)
-                            .map(|b| (b.name.clone(), b.upstream.is_some()));
-                        let remote = this.data.refs.remotes.first().map(|r| r.name.clone());
-                        this.run_op(
-                            "Push",
-                            move |r| match (upstream, remote) {
-                                (Some((branch, false)), Some(remote)) => {
-                                    r.push(Some((&remote, &branch)))
-                                }
-                                _ => r.push(None),
-                            },
-                            window,
-                            cx,
-                        )
-                    })),
+                    .on_click(cx.listener(|this, _, window, cx| this.push_head(window, cx))),
             )
             .child(
                 Button::new("stash")

@@ -4,6 +4,8 @@
 mod changes;
 mod history;
 mod menus;
+mod particles;
+mod search;
 mod sidebar;
 mod toolbar;
 
@@ -21,6 +23,7 @@ use gpui_kit::{
     AnimationExt as _, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollStrategy, SharedString,
     Styled as _, Subscription, Task, UniformListScrollHandle, Window, div,
+    prelude::FluentBuilder as _,
 };
 use mugetsu_git::{FileDiff, Repo};
 
@@ -36,7 +39,19 @@ gpui_kit::actions!(
         Fetch,
         Refresh,
         ShowHistory,
-        ShowChanges
+        ShowChanges,
+        Pull,
+        Push,
+        NewBranch,
+        NewTag,
+        Stash,
+        RevealHead,
+        SearchCommits,
+        CloseSearch,
+        CheckoutBranch,
+        ToggleSidebar,
+        Commit,
+        CommitAndPush
     ]
 );
 
@@ -47,10 +62,24 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("k", SelectNewer, Some("History")),
         KeyBinding::new("down", SelectOlder, Some("History")),
         KeyBinding::new("j", SelectOlder, Some("History")),
+        // Same shortcuts as Fork on macOS.
         KeyBinding::new("secondary-shift-f", Fetch, Some("Repo")),
+        KeyBinding::new("secondary-shift-l", Pull, Some("Repo")),
+        KeyBinding::new("secondary-shift-p", Push, Some("Repo")),
+        KeyBinding::new("secondary-shift-b", NewBranch, Some("Repo")),
+        KeyBinding::new("secondary-shift-g", NewTag, Some("Repo")),
+        KeyBinding::new("secondary-shift-h", Stash, Some("Repo")),
         KeyBinding::new("secondary-r", Refresh, Some("Repo")),
-        KeyBinding::new("secondary-1", ShowHistory, Some("Repo")),
-        KeyBinding::new("secondary-2", ShowChanges, Some("Repo")),
+        KeyBinding::new("secondary-1", ShowChanges, Some("Repo")),
+        KeyBinding::new("secondary-2", ShowHistory, Some("Repo")),
+        KeyBinding::new("secondary-0", RevealHead, Some("Repo")),
+        KeyBinding::new("secondary-f", SearchCommits, Some("Repo")),
+        KeyBinding::new("ctrl-f", SearchCommits, Some("Repo")),
+        KeyBinding::new("secondary-b", CheckoutBranch, Some("Repo")),
+        KeyBinding::new("secondary-ctrl-s", ToggleSidebar, Some("Repo")),
+        KeyBinding::new("secondary-enter", Commit, Some("Repo")),
+        KeyBinding::new("secondary-shift-enter", CommitAndPush, Some("Repo")),
+        KeyBinding::new("escape", CloseSearch, Some("CommitSearch")),
     ]);
 }
 
@@ -101,7 +130,19 @@ pub struct RepoView {
     message: Entity<TextareaState>,
     amend: bool,
 
+    // Commit search (⌘F)
+    search_open: bool,
+    search_input: Entity<InputState>,
+    search_matches: Vec<usize>,
+    search_hits: HashSet<usize>,
+    search_pos: usize,
+
+    /// Branch that was just checked out, for the particle burst (name, sequence).
+    celebrate: Option<(String, usize)>,
+    celebrate_seq: usize,
+
     // Sidebar
+    sidebar_collapsed: bool,
     collapsed: HashSet<&'static str>,
     /// Folder open state by key; absent means the default (open if it holds HEAD).
     folders: HashMap<String, bool>,
@@ -121,6 +162,7 @@ pub struct RepoView {
     _fetch: Task<()>,
     _op: Task<()>,
     _search: Subscription,
+    _commit_search: Subscription,
 }
 
 impl EventEmitter<RepoEvent> for RepoView {}
@@ -140,6 +182,21 @@ impl RepoView {
                 cx.notify();
             }
         });
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Rechercher un commit, un auteur ou un SHA")
+        });
+        let _commit_search =
+            cx.subscribe(
+                &search_input,
+                |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => this.run_search(cx),
+                    InputEvent::PressEnter { shift, .. } => this.step_search(*shift, cx),
+                    _ => {}
+                },
+            );
+        if let Some(avatars) = crate::avatars::store(cx) {
+            cx.observe(&avatars, |_, _, cx| cx.notify()).detach();
+        }
         let mut this = Self {
             repo,
             data: Arc::default(),
@@ -162,6 +219,14 @@ impl RepoView {
             amend: false,
             collapsed: HashSet::from(["tags"]),
             folders: HashMap::new(),
+            search_open: false,
+            search_input,
+            search_matches: Vec::new(),
+            search_hits: HashSet::new(),
+            search_pos: 0,
+            celebrate: None,
+            celebrate_seq: 0,
+            sidebar_collapsed: false,
             sidebar_search,
             prs: PrCache::default(),
             focused: false,
@@ -175,6 +240,7 @@ impl RepoView {
             _fetch: Task::ready(()),
             _op: Task::ready(()),
             _search,
+            _commit_search,
         };
         this.reload(cx);
         this
@@ -191,6 +257,17 @@ impl RepoView {
     #[cfg(test)]
     pub fn data(&self) -> &Arc<RepoData> {
         &self.data
+    }
+
+    /// Current branch, or the short SHA when detached.
+    pub fn head_label(&self) -> String {
+        self.data.refs.head_branch.clone().unwrap_or_else(|| {
+            self.data
+                .refs
+                .head
+                .map(|h| h.to_hex_with_len(7).to_string())
+                .unwrap_or_default()
+        })
     }
 
     pub fn has_updates(&self) -> bool {
@@ -308,6 +385,9 @@ impl RepoView {
                 self.selected_change = None;
                 self.select_first_change(cx);
             }
+        }
+        if self.search_open {
+            self.run_search(cx);
         }
         self.refresh_prs(cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
@@ -556,6 +636,184 @@ impl RepoView {
     }
 }
 
+impl RepoView {
+    // ---- Shortcut actions ------------------------------------------------
+
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn sidebar_collapsed(&self) -> bool {
+        self.sidebar_collapsed
+    }
+
+    pub fn pull(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.run_op("Pull", |r| r.pull(), window, cx);
+    }
+
+    /// Pushes HEAD, setting its upstream on the default remote the first time.
+    pub fn push_head(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let upstream = self
+            .data
+            .refs
+            .branches
+            .iter()
+            .find(|b| b.is_head)
+            .map(|b| (b.name.clone(), b.upstream.is_some() && !b.upstream_gone));
+        let remote = sidebar::default_remote(&self.data.refs);
+        self.run_op(
+            "Push",
+            move |r| match (upstream, remote) {
+                (Some((branch, false)), Some(remote)) => r.push_branch(&remote, &branch, true),
+                _ => r.push(None),
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub fn stash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.data.uncommitted() > 0 {
+            self.run_op("Stash", |r| r.stash_push(None), window, cx);
+        }
+    }
+
+    fn reveal_head(&mut self, cx: &mut Context<Self>) {
+        if let Some(head) = self.data.refs.head {
+            self.set_mode(Mode::History, cx);
+            self.select_commit(head, true, cx);
+        }
+    }
+
+    fn new_branch_at_head(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prompt(
+            "Nouvelle branche depuis HEAD".into(),
+            "Nom de la branche",
+            String::new(),
+            "Créer et checkout",
+            |this, name, window, cx| {
+                this.run_op(
+                    "Nouvelle branche",
+                    move |r| r.create_branch(&name, None, true),
+                    window,
+                    cx,
+                )
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn new_tag_at_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(target) = self.selected.or(self.data.refs.head) else {
+            return;
+        };
+        let sha = target.to_string();
+        self.prompt(
+            format!("Nouveau tag sur {}", &sha[..7]),
+            "Nom du tag",
+            String::new(),
+            "Créer",
+            move |this, name, window, cx| {
+                let sha = sha.clone();
+                this.run_op(
+                    "Nouveau tag",
+                    move |r| r.create_tag(&name, &sha, None),
+                    window,
+                    cx,
+                )
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn checkout_branch_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let names: Vec<String> = self
+            .data
+            .refs
+            .branches
+            .iter()
+            .map(|b| b.name.clone())
+            .collect();
+        self.prompt(
+            "Checkout d'une branche".into(),
+            "Nom exact de la branche locale",
+            String::new(),
+            "Checkout",
+            move |this, name, window, cx| {
+                if names.contains(&name) {
+                    this.checkout_with_burst(name, false, window, cx);
+                } else {
+                    window.push_notification(
+                        gpui_kit::component::notification::Notification::error(format!(
+                            "Branche introuvable : {name}"
+                        )),
+                        cx,
+                    );
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Checks out a branch, then bursts particles around its label.
+    pub fn checkout_with_burst(
+        &mut self,
+        name: String,
+        is_remote: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let local = if is_remote {
+            name.split_once('/')
+                .map_or(name.clone(), |(_, b)| b.to_string())
+        } else {
+            name.clone()
+        };
+        self.run_op_then(
+            "Checkout",
+            move |r| {
+                if is_remote {
+                    r.checkout_remote(&name)
+                } else {
+                    r.checkout(&name)
+                }
+            },
+            move |this, _, cx| {
+                this.celebrate_seq += 1;
+                let seq = this.celebrate_seq;
+                this.celebrate = Some((local, seq));
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(1400))
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.celebrate.as_ref().is_some_and(|(_, s)| *s == seq) {
+                            this.celebrate = None;
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Particle burst for a branch label, while its checkout is being celebrated.
+    pub(super) fn burst_for(&self, branch: &str) -> Option<usize> {
+        self.celebrate
+            .as_ref()
+            .filter(|(name, _)| name == branch)
+            .map(|(_, seq)| *seq)
+    }
+}
+
 impl Render for RepoView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rem = window.rem_size();
@@ -594,19 +852,52 @@ impl Render for RepoView {
                     .into_any_element(),
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
             };
-            h_resizable("repo-split")
+            // The content floats as a frosted card over the window glass.
+            let card = div()
+                .id("content-card")
+                .size_full()
+                .p_1p5()
+                .when(!self.sidebar_collapsed, |s| s.pl_0())
                 .child(
-                    resizable_panel()
-                        .size(rem * 17.)
-                        .size_range(rem * 12. ..rem * 32.)
-                        .child(self.render_sidebar(cx)),
-                )
-                .child(
-                    resizable_panel()
-                        .size_range(rem * 30. ..rem * 400.)
-                        .child(main),
-                )
-                .into_any_element()
+                    div()
+                        .relative()
+                        .size_full()
+                        .overflow_hidden()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(crate::theme::hairline())
+                        .bg(crate::theme::card())
+                        .shadow_xl()
+                        // Light catching the top rim of the glass.
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_4()
+                                .right_4()
+                                .h(gpui_kit::px(1.))
+                                .bg(crate::theme::glass_edge()),
+                        )
+                        .child(main)
+                        .children(self.render_search(cx)),
+                );
+            if self.sidebar_collapsed {
+                card.into_any_element()
+            } else {
+                h_resizable("repo-split")
+                    .child(
+                        resizable_panel()
+                            .size(rem * 17.)
+                            .size_range(rem * 12. ..rem * 32.)
+                            .child(self.render_sidebar(cx)),
+                    )
+                    .child(
+                        resizable_panel()
+                            .size_range(rem * 30. ..rem * 400.)
+                            .child(card),
+                    )
+                    .into_any_element()
+            }
         };
         let generation = self.generation.min(1);
         v_flex()
@@ -614,8 +905,35 @@ impl Render for RepoView {
             .key_context("Repo")
             .size_full()
             .min_h_0()
-            .bg(cx.theme().background)
             .on_action(cx.listener(|this, _: &Fetch, _, cx| this.fetch(cx)))
+            .on_action(cx.listener(|this, _: &Pull, window, cx| this.pull(window, cx)))
+            .on_action(cx.listener(|this, _: &Push, window, cx| this.push_head(window, cx)))
+            .on_action(cx.listener(|this, _: &Stash, window, cx| this.stash(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &NewBranch, window, cx| this.new_branch_at_head(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &NewTag, window, cx| this.new_tag_at_selection(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &CheckoutBranch, window, cx| {
+                this.checkout_branch_prompt(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RevealHead, _, cx| this.reveal_head(cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &SearchCommits, window, cx| {
+                this.set_mode(Mode::History, cx);
+                this.open_search(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &Commit, window, cx| {
+                if this.mode == Mode::Changes {
+                    this.commit(false, window, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &CommitAndPush, window, cx| {
+                if this.mode == Mode::Changes {
+                    this.commit(true, window, cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.reload(cx)))
             .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.set_mode(Mode::History, cx)))
             .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))

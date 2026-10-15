@@ -1,3 +1,4 @@
+mod avatars;
 mod branch_tree;
 mod fetch_policy;
 mod fmt;
@@ -48,6 +49,7 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             theme::init(cx);
+            avatars::init(cx);
             workspace::init(cx);
             repo_view::init(cx);
             let options = WindowOptions {

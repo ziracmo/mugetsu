@@ -30,6 +30,7 @@ pub fn init(cx: &mut gpui_kit::App) {
     use gpui_kit::KeyBinding;
     cx.bind_keys([
         KeyBinding::new("secondary-o", OpenRepository, Some("Workspace")),
+        KeyBinding::new("secondary-t", OpenRepository, Some("Workspace")),
         KeyBinding::new("secondary-w", CloseTab, Some("Workspace")),
         KeyBinding::new("ctrl-tab", NextTab, Some("Workspace")),
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Workspace")),
@@ -229,89 +230,142 @@ impl Workspace {
         .detach();
     }
 
+    /// Safari-like tab: equal widths, frosted pill for the active one,
+    /// close button on hover, repository + current branch.
     fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let view = self.tabs[index].view.read(cx);
         let active = index == self.active;
         let name = view.name();
+        let branch = view.head_label();
         let updates = view.has_updates();
         let fetching = view.is_fetching();
         let path = view.repo().root().display().to_string();
+        let group = SharedString::from(format!("tab-group-{index}"));
+        // A thin divider between two inactive neighbours, like macOS tabs.
+        let divider = index > 0 && !active && index != self.active + 1;
         h_flex()
             .id(SharedString::from(format!("tab-{name}")))
             .test_support()
+            .group(group.clone())
+            .relative()
             .h(px(30.))
-            .px_3()
+            .flex_1()
+            .min_w(px(110.))
+            .max_w(px(260.))
+            .px_2()
             .gap_2()
-            .flex_none()
-            .rounded_t_md()
+            .rounded_lg()
             .cursor_pointer()
             .text_sm()
-            .border_b_2()
             .when(active, |s| {
-                s.bg(cx.theme().background)
-                    .border_color(theme::cyan())
-                    .text_color(cx.theme().foreground)
+                s.bg(theme::alpha(gpui_kit::white(), 0.11))
+                    .border_1()
+                    .border_color(theme::glass_edge())
+                    .shadow_md()
+                    .text_color(gpui_kit::white())
             })
             .when(!active, |s| {
-                s.border_color(gpui_kit::transparent_black())
-                    .text_color(cx.theme().muted_foreground)
-                    .hover(|s| s.bg(theme::raised()))
+                s.text_color(theme::muted())
+                    .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.05)))
             })
-            .child(
-                Icon::new(Lucide::FolderGit2)
-                    .xsmall()
-                    .text_color(if active {
-                        theme::cyan()
-                    } else {
-                        theme::muted()
-                    }),
-            )
-            .child(name.clone())
-            // Remote changes found by a background fetch: pulsing neon dot.
-            .when(updates, |s| {
+            .when(divider, |s| {
                 s.child(
                     div()
-                        .id(SharedString::from(format!("updates-{name}")))
-                        .test_support()
-                        .size(px(7.))
-                        .rounded_full()
-                        .bg(theme::magenta())
-                        .with_animation(
-                            "updates-pulse",
-                            Animation::new(Duration::from_millis(1200))
-                                .repeat()
-                                .with_easing(gpui_kit::pulsating_between(0.35, 1.)),
-                            |el, t| el.opacity(t),
-                        ),
+                        .absolute()
+                        .left(px(-2.))
+                        .top(px(8.))
+                        .h(px(14.))
+                        .w(px(1.))
+                        .bg(theme::hairline()),
                 )
             })
-            .when(fetching && active, |s| {
-                s.child(
-                    div()
-                        .size(px(5.))
-                        .rounded_full()
-                        .bg(theme::cyan())
-                        .with_animation(
-                            "fetch-blink",
-                            Animation::new(Duration::from_millis(700))
-                                .repeat()
-                                .with_easing(gpui_kit::pulsating_between(0.2, 1.)),
-                            |el, t| el.opacity(t),
-                        ),
-                )
-            })
+            // Close button: always on the active tab, on hover elsewhere.
             .child(
                 div()
                     .id(SharedString::from(format!("close-{name}")))
                     .test_support()
+                    .flex_none()
+                    .size(px(16.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .rounded_sm()
+                    .when(!active, |s| {
+                        s.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.))
+                    })
                     .text_color(theme::muted())
-                    .hover(|s| s.text_color(theme::red()).bg(theme::raised()))
+                    .hover(|s| s.bg(theme::raised()).text_color(gpui_kit::white()))
                     .child(Icon::new(Lucide::X).xsmall())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         this.close(index, cx);
                     })),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .justify_center()
+                    .gap_1p5()
+                    .child(
+                        div()
+                            .flex_none()
+                            .truncate()
+                            .font_weight(if active {
+                                gpui_kit::FontWeight::SEMIBOLD
+                            } else {
+                                gpui_kit::FontWeight::NORMAL
+                            })
+                            .child(name.clone()),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(theme::muted())
+                            .child(branch),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(16.))
+                    .flex()
+                    .justify_center()
+                    // Remote changes found by a background fetch: pulsing dot.
+                    .when(updates, |s| {
+                        s.child(
+                            div()
+                                .id(SharedString::from(format!("updates-{name}")))
+                                .test_support()
+                                .size(px(7.))
+                                .rounded_full()
+                                .bg(theme::magenta())
+                                .with_animation(
+                                    "updates-pulse",
+                                    Animation::new(Duration::from_millis(1200))
+                                        .repeat()
+                                        .with_easing(gpui_kit::pulsating_between(0.35, 1.)),
+                                    |el, t| el.opacity(t),
+                                ),
+                        )
+                    })
+                    .when(fetching && active && !updates, |s| {
+                        s.child(
+                            div()
+                                .size(px(5.))
+                                .rounded_full()
+                                .bg(theme::cyan())
+                                .with_animation(
+                                    "fetch-blink",
+                                    Animation::new(Duration::from_millis(700))
+                                        .repeat()
+                                        .with_easing(gpui_kit::pulsating_between(0.2, 1.)),
+                                    |el, t| el.opacity(t),
+                                ),
+                        )
+                    }),
             )
             .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx))
             .on_click(cx.listener(move |this, _, _, cx| this.activate(index, cx)))
@@ -356,7 +410,6 @@ impl Render for Workspace {
             .id("workspace")
             .key_context("Workspace")
             .size_full()
-            .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_action(
                 cx.listener(|this, _: &OpenRepository, window, cx| this.prompt_open(window, cx)),
@@ -376,8 +429,9 @@ impl Render for Workspace {
                 TitleBar::new().child(
                     h_flex()
                         .size_full()
+                        .pr_2()
                         .gap_1()
-                        .items_end()
+                        .items_center()
                         .children(tabs)
                         .child(
                             Button::new("open")

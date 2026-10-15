@@ -1,51 +1,79 @@
+<p align="center"><img src="crates/mugetsu-app/assets/icon/mugetsu.png" width="128" alt="Mugetsu icon"></p>
+
 # 月 Mugetsu
 
-Client Git de bureau pour macOS, en Rust, pensé pour la vitesse. Inspiré de Fork (densité, efficacité) et de GitKraken (graphe coloré), avec un thème « cyber dark » animé.
+A fast desktop Git client for macOS, written in Rust. Inspired by Fork (density, efficiency) and GitKraken (colourful graph), with a dark, frosted-glass look.
 
-## Fonctionnalités
+## Features
 
-- **Onglets multi-dépôts** : seul l'onglet actif est rendu, les autres gardent leurs données en mémoire sans coût d'affichage. Session restaurée au lancement.
-- **Graphe de commits** rendu GPU (GPUI), lanes néon, liste virtualisée : seules les lignes visibles sont dessinées, même sur 100k+ commits.
-- **Sidebar** : branches (ahead/behind, upstream disparu), remotes et leurs branches, worktrees (clic pour l'ouvrir dans un onglet), tags, stashes.
-- **Diff** unifié avec coloration syntaxique et changements intra-ligne.
-- **Changements** : indexer ou désindexer par fichier ou par hunk, commit, amend.
-- **Fetch automatique** toutes les 10 s sur le dépôt actif et toutes les 5 min sur les autres (et sur tous quand l'app est en arrière-plan). Une pastille magenta pulse sur l'onglet quand un remote a bougé.
-- **Pull requests GitHub** : un clic sur une branche affiche sa PR (#numéro, couleur selon l'état) ; un clic sur la puce ouvre la PR.
-- Pull (fast-forward), push (crée l'upstream si besoin), stash et pop, checkout par double-clic.
+- **Multi-repository tabs**: only the active tab is rendered; the others keep their data in memory at no drawing cost. Open repositories are restored at launch.
+- **Commit graph** rendered on the GPU (GPUI) in a virtualized list: only visible rows are drawn, even with 100k+ commits.
+- **Sidebar**: branches grouped into folders like Fork (`feat/…`, `fix/…`), main/develop/master/staging highlighted, GitHub icon on pushed branches, ahead/behind counts, remotes, worktrees (click to open in a tab), tags, stashes, and a filter field. Collapsible with ⌃⌘S.
+- **Ref chips**: a local branch identical to its remote counterpart shows as a single chip with a dark remote icon.
+- **Right-click menus** on branches, remote branches, tags and commits: checkout, checkout as worktree, fast-forward, push, create/open pull request, rename, delete, new branch/tag here, reset (soft/mixed/hard), cherry-pick, revert, save as patch, copy name/SHA.
+- **Commit search** (⌘F / Ctrl+F) by message, author or SHA, with next/previous match.
+- **Author avatars** from GitHub (noreply addresses) or Gravatar, cached on disk, with initials as a fallback.
+- **Diff** view with syntax highlighting and intra-line changes.
+- **Changes**: stage/unstage per file or per hunk, commit, amend, commit and push.
+- **Automatic fetch** every 10 s for the focused repository and every 5 min for the others. A pulsing dot appears on a tab when one of its remotes moved.
+- **GitHub pull requests**: each branch with a PR shows a `#123` chip coloured by state; clicking it opens the PR.
+- Pull (fast-forward only), push (sets the upstream when needed), stash and pop, double-click a branch to check it out (with a small particle burst).
 
-## Raccourcis
+## Keyboard shortcuts
 
-| Action | Touche |
+Same as Fork on macOS where they exist.
+
+| Action | Keys |
 | --- | --- |
-| Ouvrir un dépôt | ⌘O |
-| Fermer l'onglet | ⌘W |
-| Onglet suivant / précédent | ⌃Tab / ⌃⇧Tab |
-| Historique / Changements | ⌘1 / ⌘2 |
-| Fetch | ⌘⇧F |
-| Rafraîchir | ⌘R |
-| Commit précédent / suivant | ↑ ↓ (ou k j) |
+| Commit / Commit and push | ⌘↩ / ⇧⌘↩ |
+| Fetch | ⇧⌘F |
+| Pull | ⇧⌘L |
+| Push | ⇧⌘P |
+| New branch / New tag | ⇧⌘B / ⇧⌘G |
+| Stash | ⇧⌘H |
+| Show changes / All commits | ⌘1 / ⌘2 |
+| Reveal HEAD | ⌘0 |
+| Search commits | ⌘F (or ⌃F) |
+| Checkout branch | ⌘B |
+| Refresh | ⌘R |
+| Open repository / New tab | ⌘O / ⌘T |
+| Close tab | ⌘W |
+| Next / previous tab | ⌃Tab / ⌃⇧Tab |
+| Toggle sidebar | ⌃⌘S |
+| Previous / next commit | ↑ ↓ (or k j) |
 
-## Lancer
+## Install as a macOS app
 
 ```sh
-cargo run --release -p mugetsu-app -- ~/code/mon-depot ~/code/autre-depot
-scripts/bundle-macos.sh   # produit target/release/Mugetsu.app
+scripts/bundle-macos.sh
 ```
 
-Prérequis : Rust stable récent, Xcode Command Line Tools (`git`). Pour les PR : `gh auth login` ou une variable `GITHUB_TOKEN`.
+This builds `Mugetsu.app` with its icon, signs it ad hoc and copies it to `/Applications`, so it shows up in Launchpad, Spotlight and the Dock. Use `--no-install` to only build `target/release/Mugetsu.app`.
+
+Every push to `main` also produces a downloadable `Mugetsu-macos` artifact (zipped app) on the CI run.
+
+## Run from source
+
+```sh
+cargo run --release -p mugetsu-app -- ~/code/my-repo ~/code/another-repo
+```
+
+Paths given on the command line are added to the previously open repositories.
+
+Requirements: a recent stable Rust and the Xcode Command Line Tools (`git`). For pull requests: `gh auth login` or a `GITHUB_TOKEN` variable.
 
 ## Architecture
 
 ```
 crates/
-  mugetsu-git    moteur Git : historique via gix (in-process, décodage parallèle),
-                 tout le reste via le CLI git (config, hooks, credentials, fsmonitor)
-                 graph.rs : placement des lanes en O(n log n), mémoire O(n)
-  mugetsu-forge  GitHub : URL de remote → owner/repo, PR d'une branche
-  mugetsu-app    UI GPUI (gpui-kit) : workspace, onglets, vues
+  mugetsu-git    Git engine: history through gix (in-process, parallel decoding),
+                 everything else through the git CLI (config, hooks, credentials, fsmonitor)
+                 graph.rs: lane layout in O(n log n) time, O(n) memory
+  mugetsu-forge  GitHub: remote URL → owner/repo, pull requests, avatars
+  mugetsu-app    GPUI UI (gpui-kit): workspace, tabs, views
 ```
 
-Ordres de grandeur mesurés sur git.git (85 593 commits, 1 017 refs, 4 cœurs) : refs en 40 ms, historique complet en 0,66 s avec commit-graph, placement du graphe en 13 ms, segments de 60 lignes visibles en 0,1 ms.
+Measured on git.git (85,593 commits, 1,017 refs, 4 cores): refs in 40 ms, full history in 0.66 s with a commit-graph, graph layout in 13 ms, segments for 60 visible rows in 0.1 ms.
 
 ## Tests
 
@@ -53,5 +81,6 @@ Ordres de grandeur mesurés sur git.git (85 593 commits, 1 017 refs, 4 cœurs) :
 cargo test --workspace
 ```
 
-- `mugetsu-git` : tests unitaires (parsers, graphe, tri) et tests d'intégration sur de vrais dépôts temporaires.
-- `mugetsu-app` : tests d'intégration UI dans des fenêtres headless (clic sur une branche, double-clic pour checkout, navigation au clavier) et parcours de bout en bout (indexer puis commiter depuis l'UI, pastille d'un onglet en arrière-plan après un fetch).
+- `mugetsu-git`: unit tests (parsers, graph, ordering) and integration tests against real temporary repositories.
+- `mugetsu-forge`: URL parsing, PR state mapping and grouping, avatar URLs.
+- `mugetsu-app`: UI integration tests in headless windows (branch click and double-click checkout, keyboard navigation, folders and sidebar filter, right-click rename, collapsible commit body, commit search, sidebar toggle) and end-to-end flows (stage then commit from the UI, background tab dot after a fetch).

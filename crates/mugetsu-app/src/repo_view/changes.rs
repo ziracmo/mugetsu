@@ -405,9 +405,9 @@ impl RepoView {
                                         format!("Commit {} fichier(s)", staged.len())
                                     })
                                     .disabled(!can_commit)
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.commit(window, cx)),
-                                    ),
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.commit(false, window, cx)
+                                    })),
                             ),
                     ),
             );
@@ -446,7 +446,8 @@ impl RepoView {
         h_flex().size_full().min_h_0().child(left).child(right)
     }
 
-    fn commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Commits the staged changes; `push` also pushes HEAD afterwards (⇧⌘↩).
+    pub(super) fn commit(&mut self, push: bool, window: &mut Window, cx: &mut Context<Self>) {
         let message = self.message.read(cx).value().to_string();
         if message.trim().is_empty() {
             window.push_notification(
@@ -459,9 +460,16 @@ impl RepoView {
         self.run_op_then(
             "Commit",
             move |r| r.commit(&message, amend),
-            |this, window, cx| {
+            move |this, window, cx| {
                 this.message.update(cx, |m, cx| m.set_value("", window, cx));
                 this.amend = false;
+                if push {
+                    // run_op_then reloads after this callback; queue the push behind it.
+                    let entity = cx.entity().downgrade();
+                    window.defer(cx, move |window, cx| {
+                        let _ = entity.update(cx, |this, cx| this.push_head(window, cx));
+                    });
+                }
             },
             window,
             cx,

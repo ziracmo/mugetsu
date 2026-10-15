@@ -30,3 +30,19 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+
+  app:
+    name: Mugetsu.app (macOS)
+    runs-on: macos-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/bundle-macos.sh --no-install
+      - name: Zip the app
+        run: cd target/release && ditto -c -k --keepParent Mugetsu.app Mugetsu.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mugetsu-macos
+          path: target/release/Mugetsu.zip

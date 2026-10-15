@@ -296,3 +296,53 @@ mod tests {
         assert_eq!(map["feat/x"].number, 3);
     }
 }
+
+/// Where to find an author's picture: GitHub for `…@users.noreply.github.com`
+/// addresses, Gravatar (404 when unset) otherwise.
+pub fn avatar_url(email: &str, size: u32) -> String {
+    let email = email.trim().to_lowercase();
+    if let Some(local) = email.strip_suffix("@users.noreply.github.com") {
+        // `12345+login` or plain `login`.
+        let login = local.split_once('+').map_or(local, |(_, l)| l);
+        return format!("https://github.com/{login}.png?size={size}");
+    }
+    use sha2::Digest as _;
+    let hash = sha2::Sha256::digest(email.as_bytes());
+    let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+    format!("https://www.gravatar.com/avatar/{hex}?s={size}&d=404")
+}
+
+/// Downloads an avatar; `Ok(None)` when the person has none.
+pub fn fetch_avatar(email: &str, size: u32) -> anyhow::Result<Option<Vec<u8>>> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(10)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut resp = agent
+        .get(&avatar_url(email, size))
+        .header("User-Agent", "mugetsu")
+        .call()?;
+    if resp.status() != 200 {
+        return Ok(None);
+    }
+    Ok(Some(resp.body_mut().read_to_vec()?))
+}
+
+#[cfg(test)]
+mod avatar_tests {
+    use super::*;
+
+    #[test]
+    fn avatar_urls() {
+        assert_eq!(
+            avatar_url("123+octo@users.noreply.github.com", 64),
+            "https://github.com/octo.png?size=64"
+        );
+        // sha256("test@example.com")
+        assert_eq!(
+            avatar_url(" Test@Example.com ", 32),
+            "https://www.gravatar.com/avatar/973dfe463ec85785f5f95af5ba3906eedb2d931c24e69824a89ea65dba4e813b?s=32&d=404"
+        );
+    }
+}

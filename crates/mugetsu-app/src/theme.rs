@@ -26,9 +26,17 @@ pub fn red() -> Hsla {
 pub fn violet() -> Hsla {
     rgb(0x9d8fe8).into()
 }
-/// Frosted surface: translucent so the window blur shows through.
+/// Light frosting over the window glass (headers, sidebar).
 pub fn panel() -> Hsla {
-    alpha(rgb(0x1f1f1f).into(), 0.6)
+    alpha(rgb(0xffffff).into(), 0.025)
+}
+/// Floating content card: darker frosted glass above the blurred window.
+pub fn card() -> Hsla {
+    alpha(rgb(0x141416).into(), 0.72)
+}
+/// Bright top edge of glass surfaces (light catching the rim).
+pub fn glass_edge() -> Hsla {
+    alpha(rgb(0xffffff).into(), 0.13)
 }
 /// Hover / raised overlay, works on any surface.
 pub fn raised() -> Hsla {
@@ -70,4 +78,20 @@ pub fn init(cx: &mut App) {
         theme.mode = ThemeMode::Dark;
     });
     Theme::change(ThemeMode::Dark, None, cx);
+}
+
+/// Inside of graph nodes (opaque so lines don't show through).
+pub fn node_fill() -> Hsla {
+    rgb(0x161618).into()
+}
+
+/// Long-lived branches (main, develop, …) get a stronger look everywhere.
+/// Accepts local (`main`) and remote (`origin/main`) names.
+pub fn is_main_branch(name: &str) -> bool {
+    let short = name.rsplit('/').next().unwrap_or(name);
+    name.matches('/').count() <= 1
+        && matches!(
+            short,
+            "main" | "master" | "develop" | "dev" | "staging" | "production" | "trunk"
+        )
 }
