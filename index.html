@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mugetsu, a Git client that cuts through</title>
+<meta name="description" content="Mugetsu is a native Git client written in Rust and drawn on the GPU. Fork's density, a colourful commit graph, and history that opens in under a second. macOS now, Windows next.">
+<meta name="theme-color" content="#09060a">
+<meta property="og:title" content="Mugetsu, a Git client that cuts through">
+<meta property="og:description" content="A native Git client for macOS, written in Rust and drawn on the GPU.">
+<meta property="og:image" content="assets/banner.jpg">
+<link rel="icon" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Stack+Sans+Headline:wght@300&family=Stack+Sans+Text:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script>document.documentElement.classList.add('js');try{var a=localStorage.getItem('mugetsu-accent');if(a){var r=document.documentElement.style;r.setProperty('--accent',a);var n=parseInt(a.slice(1),16);if((.299*(n>>16)+.587*(n>>8&255)+.114*(n&255))/255>.55)r.setProperty('--on-accent','#09060a')}}catch(e){}</script>
+</head>
+<body>
+
+<header class="nav wrap" id="nav">
+  <a class="nav__mark" href="#top" aria-label="Mugetsu, back to top"><img src="assets/icon.png" width="32" height="32" alt=""><span>Mugetsu</span></a>
+  <nav class="nav__links" aria-label="Sections">
+    <a class="link" href="#features">Features</a>
+    <a class="link" href="#speed">Speed</a>
+    <a class="link" href="#compare">Compare</a>
+    <a class="link" href="releases.html">Releases</a>
+    <a class="button button--small" href="#download">Download</a>
+  </nav>
+</header>
+
+<main id="top">
+
+<!-- HERO -->
+<section class="hero" aria-labelledby="hero-title">
+  <canvas id="eclipse" class="hero__canvas" aria-hidden="true"></canvas>
+  <div class="hero__sky" aria-hidden="true">
+    <span class="dust"></span>
+    <span class="beam"></span>
+    <div class="eclipse"><span class="ring ring--1"></span><span class="ring ring--2"></span><span class="disc"></span></div>
+    <p class="shas shas--l">3fce3b5 5055264 020687a 7525479 5ed408e 435f59f dffd776 f9c05a9 3fce3b5 5055264 020687a 7525479 5ed408e 435f59f dffd776 f9c05a9</p>
+    <p class="shas shas--r">d3f2e2a 8372866 d99ac34 d57de83 2ed0c00 59e318f a9dc222 be739c7 d3f2e2a 8372866 d99ac34 d57de83 2ed0c00 59e318f a9dc222 be739c7</p>
+  </div>
+  <div class="hero__copy wrap" id="hero-copy">
+    <h1 id="hero-title" class="hero__title">
+      <span class="hero__word" data-rise style="--i:0" aria-label="Mugetsu"><span class="hero__ch" style="--c:0" aria-hidden="true">M</span><span class="hero__ch" style="--c:1" aria-hidden="true">u</span><span class="hero__ch" style="--c:2" aria-hidden="true">g</span><span class="hero__ch" style="--c:3" aria-hidden="true">e</span><span class="hero__ch" style="--c:4" aria-hidden="true">t</span><span class="hero__ch" style="--c:5" aria-hidden="true">s</span><span class="hero__ch" style="--c:6" aria-hidden="true">u</span></span>
+      <span class="hero__tag" data-rise style="--i:1">A Git client that cuts through</span>
+    </h1>
+    <div class="horizon" data-rise style="--i:2"><span></span></div>
+    <p class="hero__lead" data-rise style="--i:3">A native Git client written in Rust and drawn on the GPU. Fork's density, a colourful graph, and a history that opens before you blink.</p>
+    <div class="hero__actions" data-rise style="--i:4">
+      <a class="button" href="#download" data-dl="mac"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M11.5 8.4c0-1.5 1.2-2.2 1.3-2.3-.7-1-1.8-1.2-2.2-1.2-.9-.1-1.8.5-2.3.5-.5 0-1.2-.5-2-.5-1 0-2 .6-2.5 1.5-1.1 1.9-.3 4.7.8 6.2.5.8 1.1 1.6 1.9 1.6.8 0 1.1-.5 2-.5s1.2.5 2 .5c.8 0 1.4-.8 1.9-1.5.6-.9.8-1.7.8-1.8 0 0-1.7-.6-1.7-2.5zM10 3.9c.4-.5.7-1.2.6-1.9-.6 0-1.3.4-1.7.9-.4.4-.7 1.1-.6 1.8.7.1 1.3-.3 1.7-.8z"/></svg>Download for macOS</a>
+      <a class="button button--ghost" href="#download" data-dl="win">Windows build, soon</a>
+    </div>
+  </div>
+  <p class="hud hud--l">Version 0.1 · MIT</p>
+  <p class="hud hud--r">macOS · Rust · GPUI</p>
+</section>
+
+<!-- MANIFESTO -->
+<section class="manifesto" aria-labelledby="manifesto-title">
+  <div class="wrap">
+    <h2 id="manifesto-title" class="manifesto__title lines" data-lines>
+      <span class="line"><span data-line>Git clients got boring.</span></span>
+      <span class="line"><span data-line>This one has a pulse.</span></span>
+    </h2>
+    <div class="manifesto__cols">
+      <p data-reveal style="--i:0">Most Git apps are a list of commits inside a web view: a browser wearing a trench coat, waiting on the command line for every click. Mugetsu is an instrument. Native Rust, drawn by the GPU, every frame earned.</p>
+      <p data-reveal style="--i:1">The graph is alive: lanes glide, chips light up, a branch bursts into particles when you check it out. The sidebar is dense like Fork, the graph colourful like GitKraken, and nothing waits. Dark glass, one accent of your choosing, and the keys your hands already know.</p>
+    </div>
+    <ul class="manifesto__claims" aria-label="What sets it apart">
+      <li data-reveal style="--i:0"><b>Native</b><span>No Electron, no web view. A Rust process talking to Metal.</span></li>
+      <li data-reveal style="--i:1"><b>Instant</b><span>History read in process by gix. 85,593 commits in 0.66 s.</span></li>
+      <li data-reveal style="--i:2"><b>Alive</b><span>Particles, pulsing dots, glass. A UI that answers your hand.</span></li>
+      <li data-reveal style="--i:3"><b>Yours</b><span>Eight accents, Fork's shortcuts, FR or EN, applied live.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- GRAPH -->
+<section class="window" aria-labelledby="window-title">
+  <div class="wrap window__grid">
+    <div class="window__copy">
+      <h2 id="window-title" class="window__title lines" data-lines><span class="line"><span data-line>History,</span></span><span class="line"><span data-line>without the wait</span></span></h2>
+      <p data-reveal>The graph is laid out once and painted by the GPU, row by row, only where you are looking. Branch, tag and remote chips sit on the commit they point to; the checked-out branch takes your accent.</p>
+    </div>
+    <div class="window__stage" data-reveal>
+      <div class="ui-graph" data-ui role="img" aria-label="Mugetsu's commit graph on the ripgrep repository, with the master branch checked out">
+      <div class="ui-graph__bar">
+        <span class="ui-tab is-on">History</span><span class="ui-tab">Changes · 2</span>
+        <span class="ui-graph__tools"><span>Fetch</span><span>Pull</span><span>Push</span></span>
+      </div>
+      <div class="ui-graph__body">
+        <svg class="ui-graph__lanes" width="40" height="416" viewBox="0 0 40 416" aria-hidden="true">
+          <path d="M14 13 V 416" stroke="#6cc7dc" stroke-width="2" fill="none"/>
+          <path d="M28 221 V 234 Q 28 247 14 260" stroke="#c48ad6" stroke-width="2" fill="none"/>
+          <circle class="ui-head" cx="14" cy="13" r="6"/>
+          <g fill="#161618" stroke="#6cc7dc" stroke-width="2">
+            <circle cx="14" cy="39" r="4"/><circle cx="14" cy="65" r="4"/><circle cx="14" cy="91" r="4"/><circle cx="14" cy="117" r="4"/><circle cx="14" cy="143" r="4"/><circle cx="14" cy="169" r="4"/><circle cx="14" cy="195" r="4"/><circle cx="14" cy="247" r="4"/><circle cx="14" cy="273" r="4"/><circle cx="14" cy="299" r="4"/><circle cx="14" cy="325" r="4"/><circle cx="14" cy="351" r="4"/><circle cx="14" cy="377" r="4"/><circle cx="14" cy="403" r="4"/>
+          </g>
+          <circle cx="28" cy="221" r="4" fill="#161618" stroke="#c48ad6" stroke-width="2"/>
+        </svg>
+        <ol class="ui-rows" data-rows>
+          <li class="is-sel"><span class="ui-msg"><b class="chip chip--head">master</b><b class="chip chip--tag">ignore-0.4.33</b>ignore-0.4.33</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">3fce3b5</span></li>
+          <li><span class="ui-msg"><b class="chip chip--tag">globset-0.4.20</b>globset-0.4.20</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">5055264</span></li>
+          <li><span class="ui-msg">ignore,globset: increase pool capacity</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">020687a</span></li>
+          <li><span class="ui-msg"><b class="chip chip--br">feat/search-ui</b><b class="chip chip--br">+4</b>ci: fix binary discovery</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">7525479</span></li>
+          <li><span class="ui-msg"><b class="chip chip--tag">ignore-0.4.32</b>ignore-0.4.32</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">5ed408e</span></li>
+          <li><span class="ui-msg">ignore: skip loading unreachable ignore files</span><span class="ui-who">jlf</span><span class="ui-sha">435f59f</span></li>
+          <li><span class="ui-msg">ci: attest build provenance for release archives</span><span class="ui-who">Kobi Hikri</span><span class="ui-sha">dffd776</span></li>
+          <li><span class="ui-msg">index: remove incorrect README</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">f9c05a9</span></li>
+          <li><span class="ui-msg ui-msg--lane2"><b class="chip chip--remote">origin/ag/index-design-wip</b>wip</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">d3f2e2a</span></li>
+          <li><span class="ui-msg">index: add some initial indexing scaffolding</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">8372866</span></li>
+          <li><span class="ui-msg">core: add `index` module</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">d99ac34</span></li>
+          <li><span class="ui-msg">nvim: enable all Cargo features</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">d57de83</span></li>
+          <li><span class="ui-msg">flags: disable many flags when indexing is enabled</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">2ed0c00</span></li>
+          <li><span class="ui-msg"><b class="chip chip--tag">ignore-0.4.31</b>ignore-0.4.31</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">59e318f</span></li>
+          <li><span class="ui-msg">cargo: set `rust-version` on all crates</span><span class="ui-who">Chris Brown</span><span class="ui-sha">a9dc222</span></li>
+          <li><span class="ui-msg">index: add grep-index crate</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">be739c7</span></li>
+        </ol>
+      </div>
+    </div>
+    </div>
+  </div>
+</section>
+
+<!-- SPEED -->
+<section id="speed" class="speed" aria-labelledby="speed-title">
+  <div class="wrap">
+    <div class="speed__head">
+      <h2 id="speed-title" class="speed__q" data-reveal>How many commits?</h2>
+      <div class="ui-slider" data-ui data-reveal>
+        <label for="commits">Commits in your repository</label>
+        <output id="commits-out" for="commits" class="nums">85,593</output>
+        <input id="commits" type="range" min="0" max="1000" step="1" value="644" aria-describedby="speed-how">
+      </div>
+      <button class="button button--ghost speed__replay" id="replay" type="button">Run the race again</button>
+    </div>
+    <div class="race" id="race" aria-label="Opening the history">
+      <div class="lane lane--mugetsu" data-lane="mugetsu">
+        <div class="lane__who"><b>Mugetsu</b><small>gix in process, GPU graph</small></div>
+        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time nums" id="speed-figure"><span id="speed-num">0.71</span><span id="speed-unit">s</span></span></div>
+      </div>
+      <div class="lane" data-lane="fork">
+        <div class="lane__who"><b>Fork</b><small>spawns git, parses text</small></div>
+        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">not measured</span></div>
+      </div>
+      <div class="lane" data-lane="kraken">
+        <div class="lane__who"><b>GitKraken</b><small>JavaScript git, DOM rows</small></div>
+        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">not measured</span></div>
+      </div>
+      <div class="lane" data-lane="ghd">
+        <div class="lane__who"><b>GitHub Desktop</b><small>spawns git, loads pages of commits</small></div>
+        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">not measured</span></div>
+      </div>
+    </div>
+    <p class="speed__how" id="speed-how">Mugetsu's lane is real: on git.git, 85,593 commits read in 0.66&nbsp;s with a commit-graph, refs in 40&nbsp;ms, the graph laid out in 13&nbsp;ms, on four cores, scaled to your count. The other lanes show how those clients read history and keep running until you measure them on your machine; we have not, and we will not make their numbers up.</p>
+  </div>
+</section>
+
+<!-- ACCENT SHOWCASE -->
+<section id="interface" class="accent" aria-labelledby="accent-title">
+  <div class="wrap accent__grid">
+    <div class="accent__copy">
+      <h2 id="accent-title" class="accent__title" data-reveal>One accent,<br>everywhere at once</h2>
+      <p class="accent__text" data-reveal>Settings (⌘,) holds eight accents. Pick one and the HEAD chip, the checked-out branch, the caret, the selection and every primary button change in the same frame. This page follows too, down to the eclipse.</p>
+      <div class="ui-settings" data-ui role="group" aria-labelledby="accent-label">
+        <p class="ui-settings__title">Settings</p>
+        <div class="ui-settings__row"><span>Language</span><span class="ui-seg ui-seg--small"><b class="is-on">English</b><b>Français</b></span></div>
+        <div class="ui-settings__row ui-settings__row--accent"><span id="accent-label">Accent colour</span><span class="ui-accent__val" id="accent-name">Red</span></div>
+        <div class="ui-accent__row" role="radiogroup" aria-labelledby="accent-label">
+          <button class="sw" role="radio" aria-checked="true" data-c="#b5122f" data-n="Red" style="--c:#b5122f" aria-label="Red"></button>
+          <button class="sw" role="radio" aria-checked="false" data-c="#e8853d" data-n="Orange" style="--c:#e8853d" aria-label="Orange"></button>
+          <button class="sw" role="radio" aria-checked="false" data-c="#d9b26f" data-n="Amber" style="--c:#d9b26f" aria-label="Amber"></button>
+          <button class="sw" role="radio" aria-checked="false" data-c="#8ac46e" data-n="Green" style="--c:#8ac46e" aria-label="Green"></button>
+          <button class="sw" role="radio" aria-checked="false" data-c="#6cc7dc" data-n="Cyan" style="--c:#6cc7dc" aria-label="Cyan"></button>
+          <button class="sw" role="radio" aria-checked="false" data-c="#5b8def" data-n="Blue" style="--c:#5b8def" aria-label="Blue"></button>
+          <button class="sw" role="radio" aria-checked="false" data-c="#9d8fe8" data-n="Purple" style="--c:#9d8fe8" aria-label="Purple"></button>
+          <button class="sw" role="radio" aria-checked="false" data-c="#d96fa8" data-n="Pink" style="--c:#d96fa8" aria-label="Pink"></button>
+        </div>
+      </div>
+    </div>
+    <div class="accent__stage" data-reveal>
+      <div class="ui-preview" data-ui aria-label="Where the accent shows up">
+        <div class="ui-preview__row"><span class="ui-preview__label">HEAD chip</span><b class="chip chip--head">master</b><b class="chip chip--tag">v0.1.0</b></div>
+        <div class="ui-preview__row"><span class="ui-preview__label">Checked-out branch</span><span class="ui-branch"><i class="ui-branch__dot"></i>master<em>↑2</em></span></div>
+        <div class="ui-preview__row"><span class="ui-preview__label">Selection</span><span class="ui-sel">flags: disable many flags when indexing is enabled</span></div>
+        <div class="ui-preview__row"><span class="ui-preview__label">Caret and links</span><span class="ui-field">ignore-0.4.33<i class="ui-caret"></i></span><a class="ui-link">3fce3b5</a></div>
+        <div class="ui-preview__row"><span class="ui-preview__label">Primary button</span><span class="ui-btn">Commit and push</span><span class="ui-progress"><i></i></span></div>
+        <div class="ui-preview__row"><span class="ui-preview__label">Checkout burst</span><span class="burst" id="burst" aria-hidden="true"></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features" class="bento wrap" aria-labelledby="features-title">
+  <div class="bento__head">
+    <h2 id="features-title" class="bento__title lines" data-lines><span class="line"><span data-line>Everything Fork does,</span></span><span class="line"><span data-line>drawn by the GPU</span></span></h2>
+    <p data-reveal>Each tile below is a real part of the app. Hover one to see it move.</p>
+  </div>
+  <div class="bento__grid">
+    <article class="tile tile--graph" data-tile data-reveal style="--i:0">
+      <div class="tile__text">
+        <h3>A commit graph that scrolls like a list</h3>
+        <p>Lanes laid out once, rows painted only where you look. 100,000 commits move like 100.</p>
+      </div>
+      <div class="ui-mini" data-ui aria-hidden="true">
+        <svg class="ui-mini__lanes" width="34" height="196" viewBox="0 0 34 196">
+          <path d="M11 14 V 196" stroke="#6cc7dc" stroke-width="2" fill="none"/>
+          <path d="M25 98 V 112 Q 25 126 11 140" stroke="#c48ad6" stroke-width="2" fill="none"/>
+          <circle class="ui-head" cx="11" cy="14" r="5.5"/>
+          <g fill="#161618" stroke="#6cc7dc" stroke-width="2"><circle cx="11" cy="42" r="3.5"/><circle cx="11" cy="70" r="3.5"/><circle cx="11" cy="126" r="3.5"/><circle cx="11" cy="154" r="3.5"/><circle cx="11" cy="182" r="3.5"/></g>
+          <circle cx="25" cy="98" r="3.5" fill="#161618" stroke="#c48ad6" stroke-width="2"/>
+        </svg>
+        <ol class="ui-mini__rows">
+          <li class="is-sel"><span class="ui-msg"><b class="chip chip--head">master</b><b class="chip chip--tag">ignore-0.4.33</b>ignore-0.4.33</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">3fce3b5</span></li>
+          <li><span class="ui-msg"><b class="chip chip--tag">globset-0.4.20</b>globset-0.4.20</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">5055264</span></li>
+          <li><span class="ui-msg"><b class="chip chip--br">feat/search-ui</b><b class="chip chip--br">fix/regex-crash</b>ci: fix binary discovery</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">7525479</span></li>
+          <li><span class="ui-msg"><b class="chip chip--remote">origin/ag/index-design-wip</b>wip</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">d3f2e2a</span></li>
+          <li><span class="ui-msg">index: add some initial indexing scaffolding</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">8372866</span></li>
+          <li><span class="ui-msg">core: add `index` module</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">d99ac34</span></li>
+          <li><span class="ui-msg">flags: disable many flags when indexing is enabled</span><span class="ui-who">Andrew Gallant</span><span class="ui-sha">2ed0c00</span></li>
+        </ol>
+      </div>
+    </article>
+
+    <article class="tile tile--fetch" data-tile data-reveal style="--i:1">
+      <div class="tile__text">
+        <h3>Fetch on its own</h3>
+        <p>Every 10 s for the repository in front of you, every 5 min for the rest. A dot pulses on any tab whose remote moved.</p>
+      </div>
+      <div class="ui-tabs" data-ui aria-hidden="true">
+        <span class="ui-tabs__tab is-on">rg <small>master</small></span>
+        <span class="ui-tabs__tab"><i class="pulse"></i>gitoxide <small>main</small></span>
+        <span class="ui-tabs__tab">zed <small>feat/…</small></span>
+      </div>
+    </article>
+
+    <article class="tile tile--pr" data-tile data-reveal style="--i:2">
+      <div class="tile__text">
+        <h3>Pull requests on the branch</h3>
+        <p>A chip coloured by state. Hover it for CI checks, review decision and unresolved threads.</p>
+      </div>
+      <div class="ui-pr" data-ui aria-hidden="true">
+        <div class="ui-pr__row"><b class="chip chip--br">feat/search-ui</b><b class="chip chip--pr">#128</b></div>
+        <div class="ui-pr__card">
+          <p><span class="ok"></span>CI · 12 checks passed</p>
+          <p><span class="ok"></span>Approved by 2 reviewers</p>
+          <p><span class="warn"></span>1 unresolved conversation</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="tile tile--sidebar" data-tile data-reveal style="--i:3">
+      <div class="tile__text">
+        <h3>Branches in folders</h3>
+        <p><i>feat/</i> and <i>fix/</i> become folders. main, develop and staging stand out. Ahead and behind counts sit beside each branch; worktrees open in a tab.</p>
+      </div>
+      <ul class="ui-tree" data-ui aria-hidden="true">
+        <li class="ui-tree__h"><i class="tw">⌄</i>Branches<b>6</b></li>
+        <li class="ui-tree__i is-head"><i class="tw tw--on"></i>master<b class="ui-tree__sync">⇅</b></li>
+        <li class="ui-tree__i"><i class="tw">›</i><i class="fo"></i>feat<b>2</b></li>
+        <li class="ui-tree__i"><i class="tw">›</i><i class="fo"></i>feature<b>1</b></li>
+        <li class="ui-tree__i"><i class="tw">›</i><i class="fo"></i>fix<b>1</b></li>
+        <li class="ui-tree__i"><i class="tw">›</i><i class="fo"></i>tests<b>1</b></li>
+        <li class="ui-tree__h"><i class="tw">⌄</i>Remotes<b>16</b></li>
+        <li class="ui-tree__i ui-tree__i--remote"><i class="tw">⌄</i>origin</li>
+        <li class="ui-tree__i ui-tree__i--2"><i class="tw"></i>master<b class="ui-tree__sync">⇅</b></li>
+        <li class="ui-tree__i ui-tree__i--2"><i class="tw">›</i><i class="fo"></i>ag<b>15</b></li>
+        <li class="ui-tree__h"><i class="tw">⌄</i>Worktrees<b>1</b></li>
+        <li class="ui-tree__i is-wt"><i class="tw"></i>master · rg</li>
+        <li class="ui-tree__h"><i class="tw">›</i>Tags<b>272</b></li>
+      </ul>
+    </article>
+
+    <article class="tile tile--diff" data-tile data-reveal style="--i:4">
+      <div class="tile__text">
+        <h3>Diffs down to the character</h3>
+        <p>Syntax highlighting and intra-line changes. Stage by file or by hunk, commit, amend, or commit and push in one keystroke.</p>
+      </div>
+      <div class="ui-diff" data-ui aria-hidden="true">
+        <p class="ui-diff__file">⌄ Cargo.lock<b><span class="add">+1</span> <span class="del">−1</span></b></p>
+        <p class="ui-diff__hunk">@@ -258,7 +258,7 @@ dependencies = [</p>
+        <p><span class="n">260</span><span class="n">260</span><span class="c">name = "ignore"</span></p>
+        <p class="ui-diff__del"><span class="n">261</span><span class="n"></span><span class="c">− version = "0.4.<em>32</em>"</span></p>
+        <p class="ui-diff__add"><span class="n"></span><span class="n">261</span><span class="c">+ version = "0.4.<em>33</em>"</span></p>
+        <p><span class="n">262</span><span class="n">262</span><span class="c">dependencies = [</span></p>
+      </div>
+    </article>
+
+    <article class="tile tile--keys" data-tile data-reveal style="--i:5">
+      <div class="tile__text">
+        <h3>Fork's shortcuts</h3>
+        <p>Same keys where they exist, so your hands already know the app.</p>
+      </div>
+      <div class="ui-keys" aria-hidden="true"><kbd>⌘ ↩</kbd><kbd>⇧ ⌘ P</kbd><kbd>⇧ ⌘ F</kbd><kbd>⌘ B</kbd><kbd>⌘ F</kbd><kbd>⌘ T</kbd></div>
+    </article>
+
+    <article class="tile tile--menu" data-tile data-reveal style="--i:6">
+      <div class="tile__text">
+        <h3>Right-click everything</h3>
+        <p>Branches, remotes, tags and commits each have a full menu.</p>
+      </div>
+      <ul class="ui-menu" data-ui aria-hidden="true">
+        <li>Checkout</li><li>Checkout as worktree</li><li class="is-hot">Create pull request</li><li>Rebase onto…</li><li>Cherry-pick</li><li>Reset to here</li>
+      </ul>
+    </article>
+
+    <article class="tile tile--faces" data-tile data-reveal style="--i:7">
+      <div class="tile__text">
+        <h3>Faces, not hashes</h3>
+        <p>Avatars from GitHub or Gravatar, cached on disk, initials when there is none.</p>
+      </div>
+      <div class="ui-faces" aria-hidden="true"><span style="--h:12">AG</span><span style="--h:160">KH</span><span style="--h:280">CB</span><span style="--h:40">JL</span><span style="--h:200">MS</span></div>
+    </article>
+
+    <article class="tile tile--search" data-tile data-reveal style="--i:8">
+      <div class="tile__text">
+        <h3>Search the history</h3>
+        <p>By message, author or SHA, with next and previous match.</p>
+      </div>
+      <div class="ui-search" data-ui aria-hidden="true"><span class="ui-search__q">index: add grep-<em>index</em>|</span><span class="ui-search__n">3 of 14</span></div>
+    </article>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section id="compare" class="compare" aria-labelledby="compare-title">
+  <div class="wrap">
+    <div class="compare__head">
+      <h2 id="compare-title" class="compare__title lines" data-lines><span class="line"><span data-line>From your click</span></span><span class="line"><span data-line>to the pixels</span></span></h2>
+      <p data-reveal>Pick a client. The stack between your hand and the screen builds itself. Fewer layers, faster frames.</p>
+    </div>
+    <div class="compare__pick" role="tablist" aria-label="Git clients">
+      <button role="tab" aria-selected="true" data-client="mugetsu" id="ct-mugetsu">Mugetsu</button>
+      <button role="tab" aria-selected="false" data-client="fork" id="ct-fork" tabindex="-1">Fork</button>
+      <button role="tab" aria-selected="false" data-client="kraken" id="ct-kraken" tabindex="-1">GitKraken</button>
+      <button role="tab" aria-selected="false" data-client="ghd" id="ct-ghd" tabindex="-1">GitHub Desktop</button>
+    </div>
+    <div class="compare__body">
+      <div class="stack" id="stack" aria-live="polite">
+        <div class="stack__hand">Your click</div>
+        <ol class="stack__layers" id="stack-layers"></ol>
+        <div class="stack__screen">Pixels</div>
+      </div>
+      <dl class="facts" id="facts">
+        <div><dt>Runtime</dt><dd id="f-runtime"></dd></div>
+        <div><dt>Graph drawn by</dt><dd id="f-graph"></dd></div>
+        <div><dt>Git engine</dt><dd id="f-engine"></dd></div>
+        <div><dt>Price</dt><dd id="f-price"></dd></div>
+        <div><dt>Source</dt><dd id="f-source"></dd></div>
+      </dl>
+    </div>
+    <p class="compare__note">Facts about the other clients come from their public documentation; numbers on this page are measured on Mugetsu only.</p>
+  </div>
+</section>
+
+<!-- BAND -->
+<figure class="band">
+  <img class="drift" src="assets/banner.jpg" width="1672" height="941" alt="The Mugetsu window in front of a cut moon: commit graph, sidebar and diff of the ripgrep repository" loading="lazy">
+</figure>
+
+<!-- SHORTCUTS -->
+<section id="shortcuts" class="keys wrap" aria-labelledby="keys-title">
+  <div class="keys__head">
+    <h2 id="keys-title" class="keys__title"><span class="soft">Fork's shortcuts,</span> where they exist</h2>
+    <a class="button" href="https://github.com/ziracmo/mugetsu#keyboard-shortcuts">Full list on GitHub</a>
+  </div>
+  <div class="keys__body">
+    <div class="keys__tabs" role="tablist" aria-label="Shortcut groups">
+      <button role="tab" id="t-commit" aria-controls="p-commit" aria-selected="true">Commit<small>4 keys</small></button>
+      <button role="tab" id="t-remote" aria-controls="p-remote" aria-selected="false" tabindex="-1">Remote<small>3 keys</small></button>
+      <button role="tab" id="t-branch" aria-controls="p-branch" aria-selected="false" tabindex="-1">Branches<small>4 keys</small></button>
+      <button role="tab" id="t-move" aria-controls="p-move" aria-selected="false" tabindex="-1">Moving<small>5 keys</small></button>
+      <button role="tab" id="t-tabs" aria-controls="p-tabs" aria-selected="false" tabindex="-1">Tabs<small>4 keys</small></button>
+    </div>
+    <div class="keys__panels">
+      <ul class="keys__panel" role="tabpanel" id="p-commit" aria-labelledby="t-commit">
+        <li><kbd>⌘ ↩</kbd><span><b>Commit</b><small>Whatever is staged, with the message you typed.</small></span></li>
+        <li><kbd>⇧ ⌘ ↩</kbd><span><b>Commit and push</b><small>Sets the upstream if the branch has none.</small></span></li>
+        <li><kbd>⇧ ⌘ H</kbd><span><b>Stash</b><small>Pop it back from the toolbar.</small></span></li>
+        <li><kbd>⌘ 1</kbd><span><b>Show changes</b><small>Files and hunks, ready to stage.</small></span></li>
+      </ul>
+      <ul class="keys__panel" role="tabpanel" id="p-remote" aria-labelledby="t-remote" hidden>
+        <li><kbd>⇧ ⌘ F</kbd><span><b>Fetch</b><small>It also runs by itself every 10 seconds.</small></span></li>
+        <li><kbd>⇧ ⌘ L</kbd><span><b>Pull</b><small>Fast-forward only, never a surprise merge.</small></span></li>
+        <li><kbd>⇧ ⌘ P</kbd><span><b>Push</b><small>With force-with-lease when you ask for force.</small></span></li>
+      </ul>
+      <ul class="keys__panel" role="tabpanel" id="p-branch" aria-labelledby="t-branch" hidden>
+        <li><kbd>⇧ ⌘ B</kbd><span><b>New branch</b><small>From HEAD, or right-click any commit.</small></span></li>
+        <li><kbd>⇧ ⌘ G</kbd><span><b>New tag</b><small>On the selected commit.</small></span></li>
+        <li><kbd>⌘ B</kbd><span><b>Checkout branch</b><small>Or double-click it in the sidebar.</small></span></li>
+        <li><kbd>⌘ 0</kbd><span><b>Reveal HEAD</b><small>Scrolls the graph to the checked-out commit.</small></span></li>
+      </ul>
+      <ul class="keys__panel" role="tabpanel" id="p-move" aria-labelledby="t-move" hidden>
+        <li><kbd>⌘ 2</kbd><span><b>All commits</b><small>Back to the graph from Changes.</small></span></li>
+        <li><kbd>⌘ F</kbd><span><b>Search commits</b><small>By message, author or SHA.</small></span></li>
+        <li><kbd>↑ ↓</kbd><span><b>Previous or next commit</b><small>Or k and j, if your fingers live in Vim.</small></span></li>
+        <li><kbd>⌘ R</kbd><span><b>Refresh</b><small>Reads refs and status again.</small></span></li>
+        <li><kbd>⌃ ⌘ S</kbd><span><b>Toggle sidebar</b><small>Branches, remotes, worktrees, tags and stashes.</small></span></li>
+      </ul>
+      <ul class="keys__panel" role="tabpanel" id="p-tabs" aria-labelledby="t-tabs" hidden>
+        <li><kbd>⌘ O</kbd><span><b>Open repository</b><small>It opens in a new tab.</small></span></li>
+        <li><kbd>⌘ T</kbd><span><b>New tab</b><small>Background tabs cost no drawing.</small></span></li>
+        <li><kbd>⌘ W</kbd><span><b>Close tab</b><small>Open tabs return at the next launch.</small></span></li>
+        <li><kbd>⌃ Tab</kbd><span><b>Next or previous tab</b><small>Add ⇧ to go back.</small></span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="flow" aria-labelledby="flow-title" id="flow">
+  <div class="flow__stick">
+    <canvas id="particles" class="flow__canvas" aria-hidden="true"></canvas>
+    <div class="flow__intro wrap">
+      <h2 id="flow-title" class="flow__title lines" data-lines><span class="line"><span data-line>From pack</span></span><span class="line"><span data-line>to pixels</span></span></h2>
+      <p data-reveal>Three crates. mugetsu-git reads history through gix, in process, and calls the git CLI for config, hooks and credentials. mugetsu-forge talks to GitHub. mugetsu-app is the GPUI interface.</p>
+    </div>
+    <ol class="flow__steps wrap" role="list" id="flow-steps">
+      <li data-step="0" class="is-on"><b>Unpack</b><span>85,593 objects in a packfile. No order, no shape, just bytes.</span></li>
+      <li data-step="1"><b>Decode</b><span>gix decodes every object in parallel and lines them up: all of git.git in 0.66&nbsp;s.</span></li>
+      <li data-step="2"><b>Lay out</b><span>Branches get a lane, merges get a curve, in O(n log n) time: 13&nbsp;ms for the whole graph.</span></li>
+      <li data-step="3"><b>Draw</b><span>GPUI paints only what is on screen: segments for 60 rows in 0.1&nbsp;ms.</span></li>
+    </ol>
+    <p class="flow__hint" aria-hidden="true">Scroll</p>
+  </div>
+</section>
+
+<!-- DOWNLOAD -->
+<section id="download" class="dl" aria-labelledby="dl-title">
+  <div class="wrap">
+    <h2 id="dl-title" class="dl__title" data-reveal>Get Mugetsu</h2>
+    <p class="dl__lead" data-reveal>Signed builds land on <a class="link-plain" href="releases.html">the releases page</a>. This card checks GitHub for you.</p>
+    <div class="dl__cards">
+      <a class="dl__card" id="dl-mac" href="https://github.com/ziracmo/mugetsu/releases/latest" data-reveal>
+        <span class="dl__os">macOS</span>
+        <span class="dl__file">Mugetsu.dmg</span>
+        <span class="dl__meta" id="dl-mac-meta">Apple silicon and Intel · 13.0 or later</span>
+        <span class="dl__state" id="dl-mac-state">Checking releases…</span>
+      </a>
+      <a class="dl__card" id="dl-win" href="https://github.com/ziracmo/mugetsu/releases/latest" data-reveal>
+        <span class="dl__os">Windows</span>
+        <span class="dl__file">Mugetsu-Setup.exe</span>
+        <span class="dl__meta" id="dl-win-meta">Windows 10 and 11, 64-bit</span>
+        <span class="dl__state" id="dl-win-state">Checking releases…</span>
+      </a>
+    </div>
+    <p class="dl__alt" data-reveal>Until then, every push to main leaves a zipped app on the <a class="link-plain" href="https://github.com/ziracmo/mugetsu/actions">CI run</a>, or build it yourself below.</p>
+  </div>
+</section>
+
+<!-- INSTALL -->
+<section id="install" class="install" aria-labelledby="install-title">
+  <div class="wrap install__grid">
+    <div class="install__copy">
+      <h2 id="install-title" class="install__title">Or build it<br>yourself</h2>
+      <p>One script builds Mugetsu.app, signs it ad hoc and puts it in /Applications, so it shows up in Launchpad, Spotlight and the Dock. You need a stable Rust and the Xcode Command Line Tools.</p>
+    </div>
+    <form class="ui-dialog" data-ui id="install-form" aria-labelledby="dlg-title">
+      <p class="ui-dialog__title" id="dlg-title">Install Mugetsu</p>
+      <div class="ui-seg" role="radiogroup" aria-label="How to install">
+        <button type="button" role="radio" aria-checked="true" data-mode="app">App bundle</button>
+        <button type="button" role="radio" aria-checked="false" data-mode="src">From source</button>
+      </div>
+      <label class="ui-dialog__label" for="dir">Clone into</label>
+      <input class="ui-dialog__field" id="dir" name="dir" value="~/code/mugetsu" autocomplete="off" spellcheck="false">
+      <label class="ui-dialog__label" for="cmd" id="cmd-label">Paste in Terminal</label>
+      <pre class="ui-dialog__cmd" id="cmd"><code id="cmd-text">git clone https://github.com/ziracmo/mugetsu ~/code/mugetsu
+cd ~/code/mugetsu
+scripts/bundle-macos.sh</code></pre>
+      <div class="ui-dialog__actions">
+        <a class="ui-dialog__ghost" href="https://github.com/ziracmo/mugetsu">View on GitHub</a>
+        <button class="ui-dialog__primary" type="submit" id="copy">Copy command</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+</main>
+
+<!-- FOOTER -->
+<footer class="foot wrap" id="foot">
+  <div class="foot__mark" aria-hidden="true" id="foot-mark">
+    <canvas id="night" class="foot__night"></canvas>
+    <p class="foot__word" aria-label="Mugetsu"><span class="foot__ch" style="--c:0">M</span><span class="foot__ch" style="--c:1">u</span><span class="foot__ch" style="--c:2">g</span><span class="foot__ch" style="--c:3">e</span><span class="foot__ch" style="--c:4">t</span><span class="foot__ch" style="--c:5">s</span><span class="foot__ch" style="--c:6">u</span></p>
+  </div>
+  <p class="foot__name">Mugetsu: a night when clouds hide the moon.</p>
+  <div class="foot__cols">
+    <ul><li><a class="link" href="#features">Features</a></li><li><a class="link" href="#compare">Compare</a></li><li><a class="link" href="#shortcuts">Shortcuts</a></li><li><a class="link" href="#download">Download</a></li></ul>
+    <ul><li><a class="link" href="https://github.com/ziracmo/mugetsu">Source</a></li><li><a class="link" href="https://github.com/ziracmo/mugetsu#readme">README</a></li><li><a class="link" href="releases.html">Releases</a></li><li><a class="link" href="https://github.com/ziracmo/mugetsu/issues">Issues</a></li></ul>
+    <ul><li><a class="link" href="https://www.rust-lang.org">Rust</a></li><li><a class="link" href="https://www.gpui.rs">GPUI</a></li><li><a class="link" href="https://github.com/GitoxideLabs/gitoxide">gitoxide</a></li></ul>
+    <ul class="foot__contact"><li>macOS today, Windows next</li><li>MIT licence, version 0.1</li></ul>
+  </div>
+  <div class="foot__last">
+    <p>© 2026 Mugetsu</p>
+    <a class="button button--small" href="#top">Back to top</a>
+  </div>
+</footer>
+
+<script src="assets/vendor/three-0.160.1.min.js"></script>
+<script src="assets/vendor/motion-11.11.17.js"></script>
+<script src="eclipse.js"></script>
+<script src="particles.js"></script>
+<script src="night.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

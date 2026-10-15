@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mugetsu releases</title>
+<meta name="description" content="Every Mugetsu release, with what changed and a build to download.">
+<meta name="theme-color" content="#09060a">
+<link rel="icon" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Stack+Sans+Headline:wght@300&family=Stack+Sans+Text:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="releases.css">
+<script>document.documentElement.classList.add('js');try{var a=localStorage.getItem('mugetsu-accent');if(a){var r=document.documentElement.style;r.setProperty('--accent',a);var n=parseInt(a.slice(1),16);if((.299*(n>>16)+.587*(n>>8&255)+.114*(n&255))/255>.55)r.setProperty('--on-accent','#09060a')}}catch(e){}</script>
+</head>
+<body>
+
+<header class="nav wrap" id="nav">
+  <a class="nav__mark" href="index.html" aria-label="Mugetsu, home"><img src="assets/icon.png" width="32" height="32" alt=""><span>Mugetsu</span></a>
+  <nav class="nav__links" aria-label="Sections">
+    <a class="link" href="index.html#features">Features</a>
+    <a class="link" href="index.html#compare">Compare</a>
+    <a class="link is-here" href="releases.html" aria-current="page">Releases</a>
+    <a class="button button--small" href="index.html#download">Download</a>
+  </nav>
+</header>
+
+<main id="top">
+
+<section class="rel-hero" aria-labelledby="rel-title">
+  <div class="wrap">
+    <h1 id="rel-title" class="rel-hero__title lines"><span class="line"><span data-line style="--i:0">Every release,</span></span><span class="line"><span data-line style="--i:1">drawn.</span></span></h1>
+    <p class="rel-hero__lead" data-rise style="--i:2">Each version gets a scene of its own, built from the feature that defines it. Fixes and polish get their scene too. Notes come straight from GitHub: <span id="rel-count">reading them now.</span></p>
+  </div>
+</section>
+
+<div id="releases" class="releases" aria-live="polite"></div>
+
+<section class="rel-end" aria-labelledby="rel-end-title">
+  <div class="wrap">
+    <h2 id="rel-end-title" class="rel-end__title" data-reveal>That is the whole history.</h2>
+    <p data-reveal>Older builds live on <a class="link-plain" href="https://github.com/ziracmo/mugetsu/releases">the GitHub releases page</a>. Found a bug? <a class="link-plain" href="https://github.com/ziracmo/mugetsu/issues">Open an issue</a>, it will show up here once fixed.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot foot--plain wrap">
+  <div class="foot__cols">
+    <ul><li><a class="link" href="index.html#features">Features</a></li><li><a class="link" href="index.html#compare">Compare</a></li><li><a class="link" href="index.html#shortcuts">Shortcuts</a></li><li><a class="link" href="index.html#download">Download</a></li></ul>
+    <ul><li><a class="link" href="https://github.com/ziracmo/mugetsu">Source</a></li><li><a class="link" href="https://github.com/ziracmo/mugetsu#readme">README</a></li><li><a class="link" href="https://github.com/ziracmo/mugetsu/releases">Releases on GitHub</a></li><li><a class="link" href="https://github.com/ziracmo/mugetsu/issues">Issues</a></li></ul>
+    <ul><li><a class="link" href="https://www.rust-lang.org">Rust</a></li><li><a class="link" href="https://www.gpui.rs">GPUI</a></li><li><a class="link" href="https://github.com/GitoxideLabs/gitoxide">gitoxide</a></li></ul>
+    <ul class="foot__contact"><li>macOS today, Windows next</li><li>MIT licence</li></ul>
+  </div>
+  <div class="foot__last">
+    <p>© 2026 Mugetsu</p>
+    <a class="button button--small" href="#top">Back to top</a>
+  </div>
+</footer>
+
+<template id="tpl-release">
+  <article class="rel" data-reveal>
+    <div class="rel__scene"><canvas class="rel__canvas" aria-hidden="true"></canvas><p class="rel__scene-label"></p></div>
+    <div class="rel__text">
+      <h2 class="rel__title"></h2>
+      <p class="rel__meta"><span class="rel__tag"></span><time class="rel__date"></time><span class="rel__pre">Pre-release</span></p>
+      <p class="rel__lead"></p>
+      <div class="rel__groups"></div>
+      <div class="rel__assets"></div>
+    </div>
+  </article>
+</template>
+
+<script src="assets/vendor/three-0.160.1.min.js"></script>
+<script src="assets/vendor/motion-11.11.17.js"></script>
+<script src="releases.js"></script>
+</body>
+</html>
