@@ -250,6 +250,11 @@ impl RepoView {
         let card = pr.clone();
         let open_url = pr.url.clone();
         let click_url = pr.url.clone();
+        let forge_name = self
+            .data
+            .forge
+            .as_ref()
+            .map_or("GitHub", |f| f.kind.label());
         let head = pr.head.clone();
         let number = pr.number;
         let active = self.mode == super::Mode::Pr
@@ -323,7 +328,7 @@ impl RepoView {
                 }
             }))
             .on_click(cx.listener(move |this, ev: &gpui_kit::ClickEvent, _, cx| {
-                // ⌃/⌘-click: straight to GitHub.
+                // ⌃/⌘-click: straight to the forge.
                 let m = ev.modifiers();
                 if m.control || m.platform {
                     cx.open_url(&click_url);
@@ -351,7 +356,7 @@ impl RepoView {
                             }),
                     )
                     .item(
-                        PopupMenuItem::new(tr("Ouvrir sur GitHub", "Open on GitHub"))
+                        PopupMenuItem::new(trf!("Ouvrir sur {forge_name}", "Open on {forge_name}"))
                             .icon(Icon::new(Lucide::ExternalLink))
                             .on_click(move |_, _, cx| cx.open_url(&url)),
                     )
@@ -408,15 +413,15 @@ impl RepoView {
     /// Sections of the PRs tab.
     pub(super) fn pr_sections(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let searching = !query.is_empty();
-        if self.data.github.is_none() {
+        if self.data.forge.is_none() {
             return vec![
                 div()
                     .p_4()
                     .text_sm()
                     .text_color(theme::muted())
                     .child(tr(
-                        "Pas de remote GitHub pour ce dépôt.",
-                        "No GitHub remote for this repository.",
+                        "Pas de remote GitHub, GitLab ou Bitbucket pour ce dépôt.",
+                        "No GitHub, GitLab or Bitbucket remote for this repository.",
                     ))
                     .into_any_element(),
             ];

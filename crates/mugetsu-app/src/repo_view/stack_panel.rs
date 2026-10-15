@@ -418,7 +418,7 @@ impl RepoView {
                 let (details_view, branch_view) = (view.clone(), view.clone());
                 let branch_head = head.clone();
                 let author = pr.author.clone();
-                let avatar = crate::avatars::github(&author, 18., cx);
+                let avatar = crate::avatars::pr_author(pr, 18., cx);
                 let node = div()
                     .size(px(28.))
                     .flex_none()

@@ -73,7 +73,7 @@ impl RepoView {
         let Some(pr) = self.focused_pr() else {
             return;
         };
-        let github = self.data.github.clone();
+        let forge = self.data.forge.clone();
         let range = match (self.pr_ref(&pr.base), self.pr_ref(&pr.head)) {
             (Some(base), Some(head)) => Ok(format!("{base}...{head}")),
             _ => Err(tr(
@@ -87,7 +87,7 @@ impl RepoView {
         self._pr_task = cx.spawn(async move |this, cx| {
             let (details, files) = cx
                 .background_spawn(async move {
-                    let details = github.map(|g| crate::pr::details(&g, number));
+                    let details = forge.map(|f| crate::pr::details(&f, number));
                     let files = range.and_then(|range| {
                         repo.git()
                             .run(["diff", "--no-ext-diff", "--patch", "--find-renames", &range])
@@ -155,7 +155,12 @@ impl RepoView {
         let seq = page.seq;
         let commits = self.pr_commits(&pr);
         let header = self.pr_header(&pr, page, cx);
-        let cards = status_cards(&pr, page.details.as_ref());
+        let forge = self
+            .data
+            .forge
+            .as_ref()
+            .map_or("GitHub", |f| f.kind.label());
+        let cards = status_cards(&pr, page.details.as_ref(), forge);
         let body = description(page.details.as_ref());
         let now = fmt::now();
         let commit_rows = commits.iter().enumerate().map(|(i, &r)| {
@@ -314,7 +319,7 @@ impl RepoView {
                     .gap_2()
                     .text_xs()
                     .text_color(soft())
-                    .child(crate::avatars::github(&pr.author, 18., cx))
+                    .child(crate::avatars::pr_author(pr, 18., cx))
                     .child(div().text_color(ink()).child(pr.author.clone()))
                     .child(tr("veut merger", "wants to merge"))
                     .child(branch_pill(&pr.head))
@@ -378,7 +383,11 @@ fn branch_pill(name: &str) -> AnyElement {
 }
 
 /// CI, review and conversations, side by side.
-fn status_cards(pr: &PullRequest, details: Option<&Result<PrDetails, String>>) -> AnyElement {
+fn status_cards(
+    pr: &PullRequest,
+    details: Option<&Result<PrDetails, String>>,
+    forge: &str,
+) -> AnyElement {
     let card = |id: &'static str, icon: Lucide, color: Hsla, title: String, sub: String| {
         h_flex()
             .id(id)
@@ -445,7 +454,7 @@ fn status_cards(pr: &PullRequest, details: Option<&Result<PrDetails, String>>) -
             theme::muted(),
             tr("Pas de CI", "No checks").into(),
             if pr.status.is_none() {
-                tr("Token GitHub requis", "GitHub token needed").into()
+                trf!("Token {forge} requis", "{forge} token needed")
             } else {
                 String::new()
             },

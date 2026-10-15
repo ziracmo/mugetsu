@@ -661,7 +661,7 @@ impl RepoView {
 
     /// Lists the repository's recent PRs so every branch shows its chip.
     fn refresh_prs(&mut self, focused: bool, cx: &mut Context<Self>) {
-        let Some(gh) = self.data.github.clone() else {
+        let Some(forge) = self.data.forge.clone() else {
             return;
         };
         let now = Instant::now();
@@ -669,16 +669,16 @@ impl RepoView {
             return;
         }
         self.prs.mark_bulk(now);
-        let gh_name = gh.name.clone();
+        let repo_name = forge.name.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { pr::recent(&gh) }).await;
+            let result = cx.background_spawn(async move { pr::recent(&forge) }).await;
             if let Ok(prs) = result {
                 let _ = this.update(cx, |this, cx| {
                     let now = Instant::now();
                     let prefs = crate::settings::get().notifications;
                     let notes =
                         this.pr_watcher
-                            .diff(&gh_name, &prs.list, prs.me.as_deref(), prefs, now);
+                            .diff(&repo_name, &prs.list, prs.me.as_deref(), prefs, now);
                     notes.iter().for_each(crate::notify::show);
                     this.prs.set_bulk(mugetsu_forge::by_branch(&prs.list), now);
                     this.pr_list = Arc::new(prs.list);
@@ -697,7 +697,7 @@ impl RepoView {
         is_remote: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(gh) = self.data.github.clone() else {
+        let Some(forge) = self.data.forge.clone() else {
             return;
         };
         let forge_branch = pr::forge_branch(branch, upstream, is_remote);
@@ -709,7 +709,7 @@ impl RepoView {
         cx.spawn(async move |this, cx| {
             let key = forge_branch.clone();
             let result = cx
-                .background_spawn(async move { pr::lookup(&gh, &key) })
+                .background_spawn(async move { pr::lookup(&forge, &key) })
                 .await;
             let lookup = match result {
                 Ok(Some(found)) => PrLookup::Found(Box::new(found)),

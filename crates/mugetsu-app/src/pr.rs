@@ -1,55 +1,95 @@
-//! Pull request lookup for branches (GitHub), cached per repository tab.
+//! Pull request lookup for branches (GitHub, GitLab, Bitbucket), cached per
+//! repository tab.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use mugetsu_forge::{Github, GithubRepo, PullRequest};
+use mugetsu_forge::{Forge, ForgeKind, ForgeRepo, PullRequest};
 
 const TTL: Duration = Duration::from_secs(120);
 /// Background tabs list their PRs only for notifications, less often (rate limits).
 const BACKGROUND_TTL: Duration = Duration::from_secs(180);
 
-fn github() -> &'static Github {
-    static GITHUB: OnceLock<Github> = OnceLock::new();
-    GITHUB.get_or_init(|| Github::new(mugetsu_forge::token("gh")))
+/// One forge's API client and who "me" is there.
+struct Client {
+    api: Box<dyn Forge>,
+    me: OnceLock<Option<String>>,
+}
+
+fn non_empty(s: String) -> Option<String> {
+    let s = s.trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// Client for `repo`'s forge. A token from Settings wins over the environment
+/// and CLI logins; changing it there makes a new client.
+fn client(repo: &ForgeRepo) -> Arc<Client> {
+    /// Forge, host and the token set in Settings.
+    type Key = (ForgeKind, String, Option<String>);
+    static CLIENTS: OnceLock<Mutex<HashMap<Key, Arc<Client>>>> = OnceLock::new();
+    let settings = crate::settings::get();
+    let configured = match repo.kind {
+        ForgeKind::Github => None,
+        ForgeKind::Gitlab => non_empty(settings.gitlab_token),
+        ForgeKind::Bitbucket => non_empty(settings.bitbucket_token),
+    };
+    let key = (repo.kind, repo.host.clone(), configured.clone());
+    let mut clients = CLIENTS.get_or_init(Default::default).lock().unwrap();
+    clients
+        .entry(key)
+        .or_insert_with(|| {
+            let token = configured.or_else(|| match repo.kind {
+                ForgeKind::Github => mugetsu_forge::token("gh"),
+                ForgeKind::Gitlab => mugetsu_forge::gitlab_token("glab", &repo.host),
+                ForgeKind::Bitbucket => mugetsu_forge::bitbucket_token(),
+            });
+            Arc::new(Client {
+                api: mugetsu_forge::client(repo, token),
+                me: OnceLock::new(),
+            })
+        })
+        .clone()
 }
 
 /// Blocking: call from a background task.
-pub fn lookup(repo: &GithubRepo, branch: &str) -> Result<Option<PullRequest>, String> {
-    github()
+pub fn lookup(repo: &ForgeRepo, branch: &str) -> Result<Option<PullRequest>, String> {
+    client(repo)
+        .api
         .pull_for_branch(repo, branch)
         .map_err(|e| e.to_string())
 }
 
 /// Blocking: description and size of one PR.
-pub fn details(repo: &GithubRepo, number: u64) -> Result<mugetsu_forge::PrDetails, String> {
-    github()
+pub fn details(repo: &ForgeRepo, number: u64) -> Result<mugetsu_forge::PrDetails, String> {
+    client(repo)
+        .api
         .pull_details(repo, number)
         .map_err(|e| e.to_string())
 }
 
-/// Blocking: recent PRs of the repository keyed by head branch.
-/// Recent PRs of a repository and who "me" is on GitHub.
+/// Recent PRs of a repository and who "me" is on its forge.
 pub struct RecentPrs {
     pub list: Vec<PullRequest>,
     pub me: Option<String>,
 }
 
-fn viewer() -> Option<String> {
-    static ME: OnceLock<Option<String>> = OnceLock::new();
-    ME.get_or_init(|| github().viewer_login().ok()).clone()
-}
-
 /// Blocking. With a token, open PRs also get their CI / review state.
-pub fn recent(repo: &GithubRepo) -> Result<RecentPrs, String> {
-    let mut list = github().recent_pulls(repo).map_err(|e| e.to_string())?;
-    if let Ok(statuses) = github().pr_statuses(repo) {
+pub fn recent(repo: &ForgeRepo) -> Result<RecentPrs, String> {
+    let client = client(repo);
+    let mut list = client.api.recent_pulls(repo).map_err(|e| e.to_string())?;
+    if let Ok(statuses) = client.api.pr_statuses(repo) {
         for pr in &mut list {
-            pr.status = statuses.get(&pr.number).cloned();
+            if let Some(status) = statuses.get(&pr.number) {
+                pr.status = Some(status.clone());
+            }
         }
     }
-    Ok(RecentPrs { list, me: viewer() })
+    let me = client
+        .me
+        .get_or_init(|| client.api.viewer_login().ok())
+        .clone();
+    Ok(RecentPrs { list, me })
 }
 
 #[derive(Clone, Debug)]

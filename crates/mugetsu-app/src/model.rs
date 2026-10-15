@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gix::ObjectId;
-use mugetsu_forge::GithubRepo;
+use mugetsu_forge::{ForgeRepo, GithubRepo};
 use mugetsu_git::{Graph, History, RefLabel, RefsSnapshot, Repo, Status};
 
 #[derive(Clone, Default)]
@@ -15,6 +15,9 @@ pub struct RepoData {
     pub graph: Arc<Graph>,
     pub decorations: HashMap<ObjectId, Vec<RefLabel>>,
     pub status: Status,
+    /// The remote's forge (GitHub, GitLab, Bitbucket).
+    pub forge: Option<ForgeRepo>,
+    /// Set when that forge is GitHub, for GitHub-only features.
     pub github: Option<GithubRepo>,
 }
 
@@ -25,18 +28,21 @@ impl RepoData {
         let graph = mugetsu_git::layout(&history.commits);
         let decorations = refs.decorations();
         let status = repo.status()?;
-        let github = refs
+        let gitlab_hosts = crate::settings::get().gitlab_hosts;
+        let forge = refs
             .remotes
             .iter()
             .find(|r| r.name == "origin")
             .or(refs.remotes.first())
-            .and_then(|r| GithubRepo::from_remote_url(&r.url));
+            .and_then(|r| ForgeRepo::from_remote_url(&r.url, &gitlab_hosts));
+        let github = forge.as_ref().and_then(ForgeRepo::github);
         Ok(Arc::new(Self {
             refs,
             history: Arc::new(history),
             graph: Arc::new(graph),
             decorations,
             status,
+            forge,
             github,
         }))
     }
