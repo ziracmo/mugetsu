@@ -9,6 +9,7 @@ mod menus;
 mod particles;
 mod pr_panel;
 mod search;
+mod shimmer;
 mod sidebar;
 mod toolbar;
 
@@ -20,7 +21,7 @@ use std::time::Instant;
 use gix::ObjectId;
 use gpui_kit::component::diff::{DiffFile as UiDiffFile, DiffMode, DiffState};
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
-use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::{ActiveTheme as _, WindowExt as _, v_flex};
 use gpui_kit::{
     AnimationExt as _, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
@@ -135,6 +136,8 @@ pub struct RepoView {
     commit_file: Option<SharedString>,
     /// "Copied" feedback on the SHA (sequence, restarts the burst).
     copied: Option<usize>,
+    /// Rows swept by a shimmer (new commits, a branch tip shown), with its sequence.
+    shimmer: Option<(Arc<HashSet<ObjectId>>, usize)>,
     /// Long commit bodies start collapsed.
     body_expanded: bool,
 
@@ -186,6 +189,13 @@ pub struct RepoView {
     /// GitHub login of the user.
     pr_me: Option<String>,
     sidebar_tab: SidebarTab,
+    /// Sidebar / content split, so a shared width can be applied.
+    sidebar_split: Entity<ResizableState>,
+    /// Apply the shared layout on the next frame (tab just shown).
+    adopt_layout: bool,
+    pr_filter: pr_panel::PrFilter,
+    /// A PR context menu is open: its info card stays hidden.
+    pr_menu_open: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,13 +258,19 @@ impl RepoView {
             commit_files: 0,
             commit_file: None,
             copied: None,
+            shimmer: None,
             body_expanded: false,
             selected_change: None,
             change_diff,
             change_hunks: None,
             message,
             amend: false,
-            collapsed: HashSet::from(["tags"]),
+            collapsed: crate::settings::get()
+                .collapsed_sections
+                .iter()
+                .filter_map(|k| sidebar::SECTION_KEYS.iter().find(|s| **s == k.as_str()))
+                .copied()
+                .collect(),
             folders: HashMap::new(),
             search_open: false,
             search_input,
@@ -281,7 +297,17 @@ impl RepoView {
             commit_order: crate::settings::get().commit_order,
             pr_list: Arc::default(),
             pr_me: None,
-            sidebar_tab: SidebarTab::Repo,
+            sidebar_tab: if crate::settings::get().shared_layout
+                && crate::settings::get().sidebar_prs
+            {
+                SidebarTab::Prs
+            } else {
+                SidebarTab::Repo
+            },
+            sidebar_split: cx.new(|_| ResizableState::default()),
+            adopt_layout: true,
+            pr_filter: Default::default(),
+            pr_menu_open: false,
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
                 if order != this.commit_order {
@@ -367,6 +393,9 @@ impl RepoView {
         if self.focused == focused {
             return;
         }
+        if focused {
+            self.adopt_layout = true;
+        }
         self.focused = focused;
         if focused && self.has_updates {
             self.has_updates = false;
@@ -412,7 +441,21 @@ impl RepoView {
     fn install(&mut self, data: Arc<RepoData>, cx: &mut Context<Self>) {
         self.load_error = None;
         let first_load = self.data.history.is_empty();
+        let fresh: HashSet<ObjectId> = if first_load {
+            HashSet::new()
+        } else {
+            data.history
+                .commits
+                .iter()
+                .take(200)
+                .map(|c| c.id)
+                .filter(|id| self.data.history.row_of(id).is_none())
+                .collect()
+        };
         self.data = data;
+        if !fresh.is_empty() {
+            self.flash_commits(fresh, cx);
+        }
         // Keep the selected commit if it still exists, else select HEAD.
         let keep = self
             .selected
@@ -864,6 +907,73 @@ impl RepoView {
     }
 
     /// Particle burst for a branch label, while its checkout is being celebrated.
+    /// Shared layout: the sidebar tab and width other repositories left.
+    fn adopt_shared_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = crate::settings::get();
+        self.collapsed = settings
+            .collapsed_sections
+            .iter()
+            .filter_map(|k| sidebar::SECTION_KEYS.iter().find(|s| **s == k.as_str()))
+            .copied()
+            .collect();
+        if !settings.shared_layout {
+            return;
+        }
+        self.sidebar_tab = if settings.sidebar_prs {
+            SidebarTab::Prs
+        } else {
+            SidebarTab::Repo
+        };
+        if let Some(w) = settings.sidebar_width {
+            let current = self.sidebar_split.read(cx).sizes().first().copied();
+            let w = w as f32;
+            if current.is_some_and(|c| (f32::from(c) - w).abs() > 1.) {
+                self.sidebar_split
+                    .update(cx, |s, cx| s.resize_panel(0, gpui_kit::px(w), window, cx));
+            }
+        }
+    }
+
+    /// Sweeps a shimmer over these commits' rows.
+    pub(super) fn flash_commits(&mut self, ids: HashSet<ObjectId>, cx: &mut Context<Self>) {
+        self.celebrate_seq += 1;
+        let seq = self.celebrate_seq;
+        self.shimmer = Some((Arc::new(ids), seq));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(1300))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.shimmer.as_ref().is_some_and(|(_, s)| *s == seq) {
+                    this.shimmer = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    #[cfg(test)]
+    pub fn shimmering(&self) -> usize {
+        self.shimmer.as_ref().map_or(0, |(ids, _)| ids.len())
+    }
+
+    /// Branches checked out in another worktree of the repository → its path.
+    pub fn other_worktrees(&self) -> HashMap<String, PathBuf> {
+        self.data
+            .refs
+            .worktrees
+            .iter()
+            .filter(|w| std::path::Path::new(&w.path) != self.repo.root())
+            .filter_map(|w| Some((w.branch.clone()?, PathBuf::from(&w.path))))
+            .collect()
+    }
+
+    pub fn history_focus_handle(&self) -> FocusHandle {
+        self.history_focus.clone()
+    }
+
     #[cfg(test)]
     pub fn prs_tab_open(&self) -> bool {
         self.sidebar_tab == SidebarTab::Prs
@@ -885,6 +995,9 @@ impl RepoView {
 impl Render for RepoView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rem = window.rem_size();
+        if std::mem::take(&mut self.adopt_layout) {
+            self.adopt_shared_layout(window, cx);
+        }
         // Keep keyboard shortcuts working in the Changes view (⌘A, ⌘S…).
         if self.focused
             && self.mode == Mode::Changes
@@ -959,9 +1072,21 @@ impl Render for RepoView {
                 card.into_any_element()
             } else {
                 h_resizable("repo-split")
+                    .with_state(&self.sidebar_split)
+                    .on_resize(|state, _, cx| {
+                        if let Some(w) = state.read(cx).sizes().first() {
+                            let w = f32::from(*w).round() as u32;
+                            crate::settings::remember(|s| s.sidebar_width = Some(w));
+                        }
+                    })
                     .child(
                         resizable_panel()
-                            .size(rem * 17.)
+                            .size(
+                                crate::settings::get()
+                                    .sidebar_width
+                                    .filter(|_| crate::settings::get().shared_layout)
+                                    .map_or(rem * 17., |w| gpui_kit::px(w as f32)),
+                            )
                             .size_range(rem * 12. ..rem * 32.)
                             .child(self.render_sidebar(cx)),
                     )

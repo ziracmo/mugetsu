@@ -68,7 +68,103 @@ pub fn stack_badge(pos: usize, total: usize) -> AnyElement {
         .into_any_element()
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PrFilter {
+    #[default]
+    All,
+    /// Authored by me.
+    Mine,
+    /// My review is requested.
+    Review,
+}
+
+pub fn keep(pr: &PullRequest, filter: PrFilter, me: Option<&str>) -> bool {
+    match filter {
+        PrFilter::All => true,
+        PrFilter::Mine => me.is_some_and(|me| pr.author == me),
+        PrFilter::Review => awaits(pr, me),
+    }
+}
+
 impl RepoView {
+    /// Tip of a PR's head branch: the local branch, else the remote one.
+    fn pr_tip(&self, head: &str) -> Option<gix::ObjectId> {
+        let refs = &self.data.refs;
+        let remote = super::sidebar::default_remote(refs).map(|r| format!("{r}/{head}"));
+        refs.branches
+            .iter()
+            .find(|b| b.name == head)
+            .or_else(|| {
+                refs.remote_branches
+                    .iter()
+                    .find(|b| Some(&b.name) == remote.as_ref())
+            })
+            .map(|b| b.target)
+    }
+
+    /// "Show branch": back to the repository tab, tip selected and shimmering.
+    pub fn show_pr_branch(&mut self, head: &str, cx: &mut Context<Self>) {
+        self.pr_menu_open = false;
+        let Some(tip) = self.pr_tip(head) else {
+            return;
+        };
+        self.sidebar_tab = SidebarTab::Repo;
+        if self.data.refs.branches.iter().any(|b| b.name == head) {
+            self.selected_ref = Some(SharedString::from(format!("branch:{head}")));
+        }
+        self.select_commit(tip, true, cx);
+        self.flash_commits(std::collections::HashSet::from([tip]), cx);
+    }
+
+    /// Quick filter above the PR sections.
+    fn render_pr_filter(&self, cx: &mut Context<Self>) -> AnyElement {
+        let chip = |id: &'static str, label: &'static str, filter: PrFilter| {
+            let active = self.pr_filter == filter;
+            div()
+                .id(id)
+                .test_support()
+                .px_2()
+                .h(px(20.))
+                .flex()
+                .items_center()
+                .rounded_full()
+                .text_xs()
+                .cursor_pointer()
+                .border_1()
+                .when(active, |s| {
+                    s.bg(theme::alpha(theme::accent(), 0.25))
+                        .border_color(theme::alpha(theme::accent(), 0.7))
+                        .text_color(gpui_kit::white())
+                })
+                .when(!active, |s| {
+                    s.border_color(theme::hairline())
+                        .text_color(theme::muted())
+                        .hover(|s| s.text_color(gpui_kit::white()))
+                })
+                .child(label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.pr_filter = filter;
+                    cx.notify();
+                }))
+        };
+        h_flex()
+            .px_2()
+            .pb_1()
+            .gap_1()
+            .child(chip("pr-filter-all", tr("Toutes", "All"), PrFilter::All))
+            .child(chip(
+                "pr-filter-mine",
+                tr("Les miennes", "Mine"),
+                PrFilter::Mine,
+            ))
+            .child(chip(
+                "pr-filter-review",
+                tr("À reviewer", "To review"),
+                PrFilter::Review,
+            ))
+            .into_any_element()
+    }
+
     /// Tabs at the top of the sidebar.
     pub(super) fn render_sidebar_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let waiting = self
@@ -103,9 +199,16 @@ impl RepoView {
                 .when(badge > 0, |s| {
                     s.child(
                         div()
+                            .flex_none()
+                            .h(px(16.))
+                            .min_w(px(16.))
                             .px_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .rounded_full()
                             .text_xs()
+                            .line_height(px(16.))
                             .bg(theme::accent())
                             .text_color(gpui_kit::white())
                             .child(badge.to_string()),
@@ -113,6 +216,8 @@ impl RepoView {
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sidebar_tab = which;
+                    let prs = which == SidebarTab::Prs;
+                    crate::settings::remember(|s| s.sidebar_prs = prs);
                     cx.notify();
                 }))
         };
@@ -152,6 +257,7 @@ impl RepoView {
         let card = pr.clone();
         let open_url = pr.url.clone();
         let head = pr.head.clone();
+        let show_head = pr.head.clone();
         let view = cx.entity().downgrade();
         let can_checkout = pr.same_repo && pr.state != PrState::Merged;
         let remote = super::sidebar::default_remote(&self.data.refs);
@@ -197,26 +303,31 @@ impl RepoView {
                     )
                 },
             )
-            .tooltip(move |window, cx| {
-                let card = card.clone();
-                Tooltip::element(move |_, _| pr_card(&card)).build(window, cx)
+            // No info card over the context menu.
+            .when(!self.pr_menu_open, |s| {
+                s.tooltip(move |window, cx| {
+                    let card = card.clone();
+                    Tooltip::element(move |_, _| pr_card(&card)).build(window, cx)
+                })
             })
+            .on_mouse_down(
+                gpui_kit::MouseButton::Right,
+                cx.listener(|this, _, _, cx| {
+                    this.pr_menu_open = true;
+                    cx.notify();
+                }),
+            )
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !*hovered && this.pr_menu_open {
+                    this.pr_menu_open = false;
+                    cx.notify();
+                }
+            }))
             .on_click(
                 cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
                     // Select the branch tip (local, else remote), double-click checks out.
-                    let refs = &this.data.refs;
                     let remote_name = remote.as_ref().map(|r| format!("{r}/{head}"));
-                    let tip = refs
-                        .branches
-                        .iter()
-                        .find(|b| b.name == head)
-                        .or_else(|| {
-                            refs.remote_branches
-                                .iter()
-                                .find(|b| Some(&b.name) == remote_name.as_ref())
-                        })
-                        .map(|b| b.target);
-                    if let Some(tip) = tip {
+                    if let Some(tip) = this.pr_tip(&head) {
                         this.select_commit(tip, true, cx);
                     }
                     if ev.click_count() >= 2
@@ -229,11 +340,21 @@ impl RepoView {
             )
             .context_menu(move |m, _, _| {
                 let url = open_url.clone();
-                let m = m.item(
-                    PopupMenuItem::new(tr("Ouvrir sur GitHub", "Open on GitHub"))
-                        .icon(Icon::new(Lucide::ExternalLink))
-                        .on_click(move |_, _, cx| cx.open_url(&url)),
-                );
+                let (show_view, show_head) = (view.clone(), show_head.clone());
+                let m = m
+                    .item(
+                        PopupMenuItem::new(tr("Montrer la branche", "Show branch"))
+                            .icon(Icon::new(Lucide::Eye))
+                            .on_click(move |_, _, cx| {
+                                let _ = show_view
+                                    .update(cx, |this, cx| this.show_pr_branch(&show_head, cx));
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new(tr("Ouvrir sur GitHub", "Open on GitHub"))
+                            .icon(Icon::new(Lucide::ExternalLink))
+                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                    );
                 match checkout_ref.clone().filter(|_| can_checkout) {
                     Some(r) => {
                         let view = view.clone();
@@ -269,7 +390,12 @@ impl RepoView {
                     .into_any_element(),
             ];
         }
-        let prs: Vec<&PullRequest> = self.pr_list.iter().filter(|p| matches(p, query)).collect();
+        let filter = self.pr_filter;
+        let prs: Vec<&PullRequest> = self
+            .pr_list
+            .iter()
+            .filter(|p| matches(p, query) && keep(p, filter, self.pr_me.as_deref()))
+            .collect();
         let stacks = stack_positions(&self.pr_list);
         let me = self.pr_me.as_deref();
         let mut open: Vec<&PullRequest> = prs
@@ -303,7 +429,10 @@ impl RepoView {
         let mut stack_rows = Vec::new();
         let mut stack_count = 0;
         for (i, stack) in mugetsu_forge::stacks(&self.pr_list).iter().enumerate() {
-            if searching && !stack.iter().any(|p| matches(p, query)) {
+            if !stack
+                .iter()
+                .any(|p| matches(p, query) && keep(p, filter, self.pr_me.as_deref()))
+            {
                 continue;
             }
             stack_count += 1;
@@ -330,7 +459,9 @@ impl RepoView {
             }
         }
         let merged_title: &'static str = tr("Mergées récemment", "Recently merged");
+        let filter_bar = self.render_pr_filter(cx);
         [
+            Some(filter_bar),
             self.section(
                 "pr-open",
                 tr("Ouvertes", "Open"),

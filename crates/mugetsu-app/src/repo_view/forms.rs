@@ -368,6 +368,11 @@ impl RepoView {
         } else {
             (name, None)
         };
+        // A local branch checked out in another worktree: open that worktree.
+        if !is_remote && let Some(path) = self.other_worktrees().remove(&local) {
+            cx.emit(super::RepoEvent::OpenWorktree(path));
+            return;
+        }
         let exists = self.data.refs.branches.iter().any(|b| b.name == local);
         // Double-click on the upstream of the checked-out branch: offer to
         // align the branch on it instead.

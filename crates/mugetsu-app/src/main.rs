@@ -68,6 +68,11 @@ fn main() {
                 app_id: Some("dev.mugetsu".into()),
                 // Glass look: the translucent theme lets the blurred desktop through.
                 window_background: WindowBackgroundAppearance::Blurred,
+                // Taller title bar (see workspace::TITLE_HEIGHT): lights centred in it.
+                titlebar: Some(gpui_kit::TitlebarOptions {
+                    traffic_light_position: Some(gpui_kit::point(px(14.), px(15.))),
+                    ..TitleBar::title_bar_options()
+                }),
                 ..TitleBar::window_options()
             };
             let main = gpui_kit::open_window(options, cx, |window, cx| {

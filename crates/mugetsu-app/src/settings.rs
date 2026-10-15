@@ -65,6 +65,14 @@ pub struct Settings {
     pub recent: Vec<PathBuf>,
     /// PRs tab: merged PRs younger than this many days are listed.
     pub merged_days: u32,
+    /// Every repository tab shares the sidebar width and open sidebar tab.
+    pub shared_layout: bool,
+    /// Sidebar width in pixels (shared layout), once resized.
+    pub sidebar_width: Option<u32>,
+    /// Sidebar shows the PRs tab (shared layout).
+    pub sidebar_prs: bool,
+    /// Keys of the folded sidebar sections.
+    pub collapsed_sections: Vec<String>,
 }
 
 /// Choices offered for [`Settings::merged_days`].
@@ -81,6 +89,10 @@ impl Default for Settings {
             sidebar_order: SECTIONS.iter().map(|s| s.to_string()).collect(),
             recent: Vec::new(),
             merged_days: 7,
+            shared_layout: true,
+            sidebar_width: None,
+            sidebar_prs: false,
+            collapsed_sections: vec!["tags".into()],
         }
     }
 }
@@ -153,6 +165,9 @@ impl Settings {
     }
 
     fn save(&self) {
+        if cfg!(test) {
+            return;
+        }
         let Some(f) = file() else { return };
         if let Some(dir) = f.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -195,6 +210,16 @@ pub fn update(cx: &mut gpui_kit::App, f: impl FnOnce(&mut Settings)) {
     f(&mut settings);
     settings.save();
     install(settings, cx);
+}
+
+/// Persists a UI memory (layout, folded sections) without redrawing the app.
+pub fn remember(f: impl FnOnce(&mut Settings)) {
+    let mut settings = get();
+    f(&mut settings);
+    settings.save();
+    if let Ok(mut current) = CURRENT.write() {
+        *current = Some(settings);
+    }
 }
 
 /// Bumped on every settings change; views observe it to react.

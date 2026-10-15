@@ -813,3 +813,86 @@ fn command_f_finds_branch_names_and_sidebar_has_a_prs_tab(cx: &mut TestAppContex
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn control_tab_shows_a_switcher_until_released(cx: &mut TestAppContext) {
+    init(cx);
+    let (a, b, c) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    for d in [&a, &b, &c] {
+        fixture(d.path());
+    }
+    let session = session_of(
+        vec![
+            a.path().to_path_buf(),
+            b.path().to_path_buf(),
+            c.path().to_path_buf(),
+        ],
+        0,
+    );
+    let (handle, ws) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| Workspace::new(session, false, window, cx))
+        })
+        .unwrap()
+    });
+    let active = |cx: &TestAppContext| cx.read(|cx| ws.read(cx).active_index());
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.run_until_parked();
+    let ctrl = gpui_kit::Modifiers {
+        control: true,
+        ..Default::default()
+    };
+    vcx.simulate_modifiers_change(ctrl);
+    vcx.simulate_keystrokes("ctrl-tab ctrl-tab");
+    vcx.run_until_parked();
+    assert_eq!(active(cx), 0, "nothing switches while ⌃ is held");
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("tab-switcher").is_some());
+    })
+    .unwrap();
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_modifiers_change(gpui_kit::Modifiers::none());
+    vcx.run_until_parked();
+    assert_eq!(active(cx), 2, "release picks the highlighted tab");
+
+    // Keys keep working right after a switch (focus follows the tab).
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_modifiers_change(ctrl);
+    vcx.simulate_keystrokes("ctrl-tab");
+    vcx.simulate_modifiers_change(gpui_kit::Modifiers::none());
+    vcx.run_until_parked();
+    assert_eq!(active(cx), 0);
+}
+
+#[gpui_kit::test]
+fn new_commits_shimmer_and_worktree_branches_open_their_tab(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (_handle, view) = open_repo_view(cx, dir.path());
+    commit_file(dir.path(), "n.txt", "n\n", "brand new");
+    cx.update(|cx| view.update(cx, |v, cx| v.reload(cx)));
+    settle(cx, &view);
+    cx.read(|cx| assert_eq!(view.read(cx).shimmering(), 1));
+
+    let wt = dir.path().with_extension("wt");
+    git(
+        dir.path(),
+        &["worktree", "add", "-q", wt.to_str().unwrap(), "topic"],
+    );
+    cx.update(|cx| view.update(cx, |v, cx| v.reload(cx)));
+    settle(cx, &view);
+    let others = cx.read(|cx| view.read(cx).other_worktrees());
+    assert_eq!(
+        others
+            .get("topic")
+            .map(|p| std::fs::canonicalize(p).unwrap()),
+        Some(std::fs::canonicalize(&wt).unwrap())
+    );
+    let _ = std::fs::remove_dir_all(&wt);
+}

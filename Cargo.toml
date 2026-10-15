@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = ["vendor"]
 
 [workspace.package]
 edition = "2024"
@@ -17,3 +18,7 @@ codegen-units = 4
 # Snappier debug builds: optimise dependencies (GPUI, gix) even in dev.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Local tweaks to gpui-component (popup menu surface), see vendor/README.md.
+[patch.crates-io]
+gpui-component = { path = "vendor/gpui-component" }

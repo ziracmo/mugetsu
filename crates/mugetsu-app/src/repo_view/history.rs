@@ -34,6 +34,8 @@ struct ChipContext {
     view: gpui_kit::WeakEntity<RepoView>,
     /// ⌘F query, to ring the chips whose name matches.
     search: String,
+    /// Branches checked out in another worktree.
+    worktrees: HashMap<String, std::path::PathBuf>,
 }
 
 /// Rings a chip whose name matches the ⌘F query.
@@ -81,6 +83,7 @@ fn chip(
     strong: bool,
     head: bool,
     pushed: Option<Lucide>,
+    worktree: bool,
 ) -> gpui_kit::Div {
     let base = h_flex()
         .flex_none()
@@ -124,6 +127,22 @@ fn chip(
                 })),
         ),
         None => s.child(div().pl_1p5().child(Icon::new(icon).xsmall())),
+    })
+    // Checked out in another worktree: same dark cell, worktree icon.
+    .when(worktree, |s| {
+        s.child(
+            div()
+                .h_full()
+                .px_1()
+                .flex()
+                .items_center()
+                .bg(gpui_kit::rgba(0x000000b3))
+                .child(Icon::new(Lucide::FolderTree).xsmall().text_color(if head {
+                    gpui_kit::white()
+                } else {
+                    color
+                })),
+        )
     })
     .child(div().px_1().truncate().child(text))
 }
@@ -170,6 +189,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                         theme::is_main_branch(name),
                         *head,
                         synced.map(|_| remote_icon),
+                        ctx.worktrees.contains_key(name),
                     ),
                     name,
                     false,
@@ -193,6 +213,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 false,
                 false,
                 None,
+                false,
             )
             .into_any_element(),
             RefLabel::DetachedHead => chip(
@@ -202,6 +223,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 false,
                 false,
                 None,
+                false,
             )
             .into_any_element(),
         };
@@ -224,6 +246,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     false,
                     false,
                     None,
+                    false,
                 ),
                 name,
                 true,
@@ -334,8 +357,10 @@ impl RepoView {
             burst: self.celebrate.clone(),
             view: cx.entity().downgrade(),
             search: search.clone(),
+            worktrees: self.other_worktrees(),
         });
         let hits = Rc::new(self.search_hits.clone());
+        let shimmer = self.shimmer.clone();
         let list = if data.history.is_empty() {
             v_flex()
                 .size_full()
@@ -400,6 +425,17 @@ impl RepoView {
                                     if focused { 0.16 } else { 0.1 },
                                 ))
                             })
+                            .when_some(
+                                shimmer
+                                    .as_ref()
+                                    .filter(|(ids, _)| ids.contains(&id))
+                                    .map(|(_, seq)| *seq),
+                                |s, seq| {
+                                    s.relative()
+                                        .overflow_hidden()
+                                        .child(super::shimmer::sweep(seq))
+                                },
+                            )
                             .child(
                                 div()
                                     .flex_none()

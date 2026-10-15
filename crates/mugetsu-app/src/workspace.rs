@@ -57,7 +57,15 @@ pub struct Workspace {
     persist: bool,
     _scheduler: Task<()>,
     _activation: Subscription,
+    /// Focus the active tab on the next frame (after a switch, the focused
+    /// element may belong to a tab no longer drawn: keys would go nowhere).
+    refocus: bool,
+    /// ⌃Tab switcher: highlighted tab while the modifier is held.
+    switcher: Option<usize>,
 }
+
+/// Height of the title bar holding the tabs.
+pub const TITLE_HEIGHT: f32 = 44.;
 
 impl Workspace {
     pub fn new(
@@ -87,6 +95,8 @@ impl Workspace {
             persist,
             _scheduler: scheduler,
             _activation: activation,
+            refocus: true,
+            switcher: None,
         };
         this.open_set(window, cx);
         this
@@ -231,6 +241,7 @@ impl Workspace {
             return;
         }
         self.active = index;
+        self.refocus = true;
         self.sync_focus(cx);
         self.save(cx);
         cx.notify();
@@ -441,7 +452,7 @@ impl Workspace {
             .test_support()
             .group(group.clone())
             .relative()
-            .h(px(26.))
+            .h(px(28.))
             .flex_1()
             .min_w(px(110.))
             .max_w(px(260.))
@@ -713,9 +724,16 @@ impl Render for Workspace {
                 )
                 .into_any_element(),
         };
-        let _ = window;
+        if std::mem::take(&mut self.refocus)
+            && let Some(view) = self.active()
+        {
+            let handle = view.read(cx).history_focus_handle();
+            handle.focus(window, cx);
+        }
+        let switcher = self.render_switcher(cx);
         v_flex()
             .id("workspace")
+            .relative()
             .key_context("Workspace")
             .size_full()
             .text_color(cx.theme().foreground)
@@ -723,23 +741,27 @@ impl Render for Workspace {
                 cx.listener(|this, _: &OpenRepository, window, cx| this.prompt_open(window, cx)),
             )
             .on_action(cx.listener(|this, _: &CloseTab, _, cx| this.close(this.active, cx)))
-            .on_action(cx.listener(|this, _: &NextTab, _, cx| {
-                if !this.tabs.is_empty() {
-                    this.activate((this.active + 1) % this.tabs.len(), cx)
-                }
+            .on_action(
+                cx.listener(|this, _: &NextTab, window, cx| this.step_switcher(true, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &PreviousTab, window, cx| {
+                this.step_switcher(false, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &PreviousTab, _, cx| {
-                if !this.tabs.is_empty() {
-                    this.activate((this.active + this.tabs.len() - 1) % this.tabs.len(), cx)
-                }
-            }))
+            // Releasing the modifier picks the highlighted tab, like Dia / ⌘Tab.
+            .on_modifiers_changed(cx.listener(
+                |this, ev: &gpui_kit::ModifiersChangedEvent, _, cx| {
+                    if this.switcher.is_some() && !ev.modifiers.control && !ev.modifiers.platform {
+                        this.commit_switcher(cx);
+                    }
+                },
+            ))
             .child(
-                TitleBar::new().child(
+                TitleBar::new().h(px(TITLE_HEIGHT)).child(
                     h_flex()
                         .size_full()
                         .pl_1()
                         .pr_3()
-                        .py_1()
+                        .py_2()
                         .gap_1p5()
                         .items_center()
                         .child(self.render_workspace_menu(cx))
@@ -765,5 +787,146 @@ impl Render for Workspace {
                 ),
             )
             .child(div().flex_1().min_h_0().child(body))
+            .children(switcher)
+    }
+}
+
+impl Workspace {
+    /// ⌃Tab / ⌃⇧Tab: opens the switcher or moves its highlight.
+    fn step_switcher(&mut self, forward: bool, window: &Window, cx: &mut Context<Self>) {
+        let n = self.tabs.len();
+        if n < 2 {
+            return;
+        }
+        let from = self.switcher.unwrap_or(self.active);
+        let next = if forward {
+            (from + 1) % n
+        } else {
+            (from + n - 1) % n
+        };
+        // No modifier held (menu, test…): switch at once.
+        let held = window.modifiers();
+        if !held.control && !held.platform {
+            self.switcher = None;
+            self.activate(next, cx);
+            return;
+        }
+        self.switcher = Some(next);
+        cx.notify();
+    }
+
+    fn commit_switcher(&mut self, cx: &mut Context<Self>) {
+        if let Some(index) = self.switcher.take() {
+            self.activate(index, cx);
+        }
+        cx.notify();
+    }
+
+    /// Dia-like overlay: a card per open repository, the highlighted one framed.
+    fn render_switcher(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
+        let selected = self.switcher?;
+        let icons = crate::settings::get().repo_icons;
+        let cards = self.tabs.iter().enumerate().map(|(i, tab)| {
+            let view = tab.view.read(cx);
+            let name = view.name();
+            let branch = view.head_label();
+            let dirty = view.uncommitted();
+            let root = view.repo().root().to_path_buf();
+            let emoji = icons.get(&root).cloned();
+            let active = i == selected;
+            v_flex()
+                .id(("switch-card", i))
+                .test_support()
+                .w(px(170.))
+                .p_1p5()
+                .gap_1p5()
+                .rounded_xl()
+                .cursor_pointer()
+                .when(active, |s| s.bg(theme::alpha(gpui_kit::white(), 0.14)))
+                .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.08)))
+                .child(
+                    v_flex()
+                        .h(px(92.))
+                        .items_center()
+                        .justify_center()
+                        .gap_1()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(if active {
+                            theme::alpha(theme::accent(), 0.8)
+                        } else {
+                            theme::hairline()
+                        })
+                        .bg(theme::sheet())
+                        .child(
+                            div().text_3xl().child(match &emoji {
+                                Some(e) => e.clone(),
+                                None => name
+                                    .chars()
+                                    .next()
+                                    .unwrap_or('?')
+                                    .to_uppercase()
+                                    .to_string(),
+                            }),
+                        )
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(theme::muted())
+                                .child(Icon::new(Lucide::GitBranch).xsmall())
+                                .child(div().max_w(px(130.)).truncate().child(branch))
+                                .when(dirty > 0, |s| {
+                                    s.child(
+                                        Icon::new(Lucide::Pencil)
+                                            .xsmall()
+                                            .text_color(theme::amber()),
+                                    )
+                                }),
+                        ),
+                )
+                .child(
+                    div()
+                        .px_1()
+                        .text_sm()
+                        .truncate()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(if active {
+                            gpui_kit::white()
+                        } else {
+                            theme::muted()
+                        })
+                        .child(name),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.switcher = Some(i);
+                    this.commit_switcher(cx);
+                }))
+        });
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    h_flex()
+                        .id("tab-switcher")
+                        .test_support()
+                        .max_w(px(1100.))
+                        .flex_wrap()
+                        .justify_center()
+                        .p_3()
+                        .gap_2()
+                        .rounded_2xl()
+                        .bg(theme::popover())
+                        .border_1()
+                        .border_color(theme::glass_edge())
+                        .shadow_2xl()
+                        .children(cards),
+                )
+                .into_any_element(),
+        )
     }
 }

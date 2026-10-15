@@ -25,6 +25,19 @@ type Click = Box<dyn Fn(&ClickEvent, &mut Window, &mut gpui_kit::App)>;
 
 const INDENT: f32 = 14.;
 
+/// Every foldable section key (repository and PR tabs).
+pub const SECTION_KEYS: [&str; 9] = [
+    "branches",
+    "remotes",
+    "worktrees",
+    "tags",
+    "stashes",
+    "pr-open",
+    "pr-drafts",
+    "pr-stacks",
+    "pr-merged",
+];
+
 struct Row {
     id: SharedString,
     depth: usize,
@@ -200,8 +213,8 @@ impl RepoView {
                         .cursor_pointer()
                         .text_sm()
                         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().muted_foreground)
-                        .hover(|s| s.text_color(cx.theme().foreground))
+                        .text_color(theme::alpha(gpui_kit::white(), 0.82))
+                        .hover(|s| s.text_color(gpui_kit::white()))
                         .child(
                             Icon::new(if collapsed {
                                 Lucide::ChevronRight
@@ -225,6 +238,9 @@ impl RepoView {
                             if !this.collapsed.remove(key) {
                                 this.collapsed.insert(key);
                             }
+                            let folded: Vec<String> =
+                                this.collapsed.iter().map(|k| k.to_string()).collect();
+                            crate::settings::remember(|s| s.collapsed_sections = folded);
                             cx.notify();
                         }))
                         // Drag a header onto another to reorder the sections.

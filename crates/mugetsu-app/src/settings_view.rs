@@ -30,7 +30,7 @@ pub fn open(cx: &mut App) {
         return;
     }
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(600.), px(600.)), cx)),
+        window_bounds: Some(WindowBounds::centered(size(px(640.), px(640.)), cx)),
         is_resizable: false,
         window_background: gpui_kit::WindowBackgroundAppearance::Blurred,
         ..TitleBar::window_options()
@@ -202,6 +202,22 @@ impl Render for SettingsView {
                             .on_click(|ix: &usize, _, cx| {
                                 let days = MERGED_DAYS[*ix];
                                 settings::update(cx, |s| s.merged_days = days)
+                            }),
+                    ))
+                    .child(row(
+                        tr("Disposition", "Layout"),
+                        RadioGroup::horizontal("shared-layout")
+                            .child(Radio::new("layout-shared").label(tr(
+                                "Même sidebar pour tous les dépôts",
+                                "Same sidebar for every repository",
+                            )))
+                            .child(
+                                Radio::new("layout-own").label(tr("Par dépôt", "Per repository")),
+                            )
+                            .selected_index(Some(if current.shared_layout { 0 } else { 1 }))
+                            .on_click(|ix: &usize, _, cx| {
+                                let shared = *ix == 0;
+                                settings::update(cx, |s| s.shared_layout = shared)
                             }),
                     ))
                     .child(row(
