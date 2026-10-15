@@ -1133,7 +1133,7 @@ fn compact_view_lists_branches_and_goes_back(cx: &mut TestAppContext) {
 fn new_window_opens_an_empty_repository_window(cx: &mut TestAppContext) {
     init(cx);
     let before = cx.update(|cx| cx.windows().len());
-    cx.update(|cx| crate::app_menu::new_window(cx));
+    cx.update(crate::app_menu::new_window);
     cx.run_until_parked();
     assert_eq!(cx.update(|cx| cx.windows().len()), before + 1);
 }
