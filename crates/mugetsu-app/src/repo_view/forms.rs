@@ -12,9 +12,10 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
-    AppContext as _, Context, Entity, Focusable as _, Image, ImageFormat, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window,
-    div, img, prelude::FluentBuilder as _, px,
+    Animation, AnimationExt as _, AppContext as _, Context, Entity, Focusable as _, Image,
+    ImageFormat, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled as _, Window, div, img, prelude::FluentBuilder as _,
+    px,
 };
 use mugetsu_git::{LocalChanges, PushOptions};
 
@@ -22,6 +23,9 @@ use super::RepoView;
 use super::sidebar::default_remote;
 use crate::i18n::tr;
 use crate::theme;
+
+/// Send-off played on the reset sheet before it closes.
+const RESET_SENDOFF: std::time::Duration = std::time::Duration::from_millis(280);
 
 pub(crate) static APP_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
     Arc::new(Image::from_bytes(
@@ -578,7 +582,11 @@ impl RepoView {
             .map_or((0, 0), |b| (b.ahead, b.behind));
         let dirty = if is_head { self.data.uncommitted() } else { 0 };
         let view = cx.entity().downgrade();
+        // Set once "Reset" is pressed: the sheet plays its send-off, then closes.
+        let launched = std::rc::Rc::new(std::cell::Cell::new(false));
         window.open_dialog(cx, move |dialog, window, _| {
+            let going = launched.get();
+            let launched = launched.clone();
             // Centred vertically (the sheet is about 330px tall).
             let top = ((window.viewport_size().height - px(330.)) / 2.).max(px(40.));
             let (name, target, view) = (branch.clone(), upstream.clone(), view.clone());
@@ -645,11 +653,28 @@ impl RepoView {
                                         .bg(theme::alpha(theme::red(), 0.16))
                                         .border_1()
                                         .border_color(theme::alpha(theme::red(), 0.45))
-                                        .child(
+                                        .child(if going {
+                                            // Winds back a full turn.
                                             Icon::new(Lucide::RotateCcw)
                                                 .size(px(20.))
-                                                .text_color(theme::red()),
-                                        ),
+                                                .text_color(theme::red())
+                                                .with_animation(
+                                                    "reset-spin",
+                                                    Animation::new(RESET_SENDOFF)
+                                                        .with_easing(gpui_kit::ease_out_quint()),
+                                                    |icon, t| {
+                                                        icon.rotate(gpui_kit::radians(
+                                                            -t * std::f32::consts::TAU,
+                                                        ))
+                                                    },
+                                                )
+                                                .into_any_element()
+                                        } else {
+                                            Icon::new(Lucide::RotateCcw)
+                                                .size(px(20.))
+                                                .text_color(theme::red())
+                                                .into_any_element()
+                                        }),
                                 )
                                 .child(
                                     v_flex()
@@ -677,17 +702,35 @@ impl RepoView {
                                 .justify_center()
                                 .gap_3()
                                 .p_3()
+                                .relative()
+                                .overflow_hidden()
                                 .rounded_lg()
                                 .bg(theme::alpha(gpui_kit::white(), 0.04))
                                 .border_1()
                                 .border_color(theme::hairline())
-                                .child(ref_pill(&name, Lucide::GitBranch, theme::accent()))
+                                .child(if going {
+                                    // The local branch is pulled onto the remote one.
+                                    div()
+                                        .relative()
+                                        .child(ref_pill(&name, Lucide::GitBranch, theme::accent()))
+                                        .with_animation(
+                                            "reset-pull",
+                                            Animation::new(RESET_SENDOFF)
+                                                .with_easing(gpui_kit::ease_in_out),
+                                            |el, t| el.left(px(70. * t)).opacity(1. - t),
+                                        )
+                                        .into_any_element()
+                                } else {
+                                    ref_pill(&name, Lucide::GitBranch, theme::accent())
+                                        .into_any_element()
+                                })
                                 .child(
                                     Icon::new(Lucide::ArrowLeft)
                                         .small()
                                         .text_color(theme::muted()),
                                 )
-                                .child(ref_pill(&target, Lucide::Cloud, theme::violet())),
+                                .child(ref_pill(&target, Lucide::Cloud, theme::violet()))
+                                .when(going, |s| s.child(super::shimmer::sweep(1))),
                         )
                         .child(stats),
                 )
@@ -707,16 +750,28 @@ impl RepoView {
                         ),
                 )
                 .on_ok(move |_, window, cx| {
-                    let (name, target) = (name.clone(), target.clone());
-                    let _ = view.update(cx, |this, cx| {
-                        this.run_op(
-                            "Reset",
-                            move |r| r.reset_branch(&name, &target, is_head),
-                            window,
-                            cx,
-                        )
-                    });
-                    true
+                    if launched.replace(true) {
+                        return false;
+                    }
+                    window.refresh();
+                    let (name, target, view) = (name.clone(), target.clone(), view.clone());
+                    window
+                        .spawn(cx, async move |cx| {
+                            cx.background_executor().timer(RESET_SENDOFF).await;
+                            let _ = cx.update(|window, cx| {
+                                window.close_dialog(cx);
+                                let _ = view.update(cx, |this, cx| {
+                                    this.run_op(
+                                        "Reset",
+                                        move |r| r.reset_branch(&name, &target, is_head),
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            });
+                        })
+                        .detach();
+                    false
                 })
         });
     }
