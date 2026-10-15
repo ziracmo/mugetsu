@@ -824,27 +824,33 @@ impl RepoView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let branch = local.clone();
-        self.run_op_then(
+        if self.busy.is_some() {
+            return;
+        }
+        // Optimistic: show the new HEAD right away; the reload after git
+        // finishes (or fails) brings back the real state.
+        if let Some(next) = self.data.with_checkout(&local, track.as_deref()) {
+            self.data = Arc::new(next);
+        }
+        self.celebrate_seq += 1;
+        let seq = self.celebrate_seq;
+        self.celebrate = Some((local.clone(), seq));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(1400))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.celebrate.as_ref().is_some_and(|(_, s)| *s == seq) {
+                    this.celebrate = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        let branch = local;
+        self.run_op(
             "Checkout",
             move |r| r.switch_to(&branch, track.as_deref(), changes),
-            move |this, _, cx| {
-                this.celebrate_seq += 1;
-                let seq = this.celebrate_seq;
-                this.celebrate = Some((local, seq));
-                cx.spawn(async move |this, cx| {
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_millis(1400))
-                        .await;
-                    let _ = this.update(cx, |this, cx| {
-                        if this.celebrate.as_ref().is_some_and(|(_, s)| *s == seq) {
-                            this.celebrate = None;
-                            cx.notify();
-                        }
-                    });
-                })
-                .detach();
-            },
             window,
             cx,
         );

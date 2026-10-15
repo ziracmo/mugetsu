@@ -7,11 +7,12 @@ use gix::ObjectId;
 use mugetsu_forge::GithubRepo;
 use mugetsu_git::{Graph, History, RefLabel, RefsSnapshot, Repo, Status};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct RepoData {
     pub refs: RefsSnapshot,
-    pub history: History,
-    pub graph: Graph,
+    /// Shared so optimistic updates copy only the small parts.
+    pub history: Arc<History>,
+    pub graph: Arc<Graph>,
     pub decorations: HashMap<ObjectId, Vec<RefLabel>>,
     pub status: Status,
     pub github: Option<GithubRepo>,
@@ -32,12 +33,73 @@ impl RepoData {
             .and_then(|r| GithubRepo::from_remote_url(&r.url));
         Ok(Arc::new(Self {
             refs,
-            history,
-            graph,
+            history: Arc::new(history),
+            graph: Arc::new(graph),
             decorations,
             status,
             github,
         }))
+    }
+
+    /// What the data will look like once `local` is checked out (created from
+    /// `track` when it doesn't exist yet), shown before git is done.
+    pub fn with_checkout(&self, local: &str, track: Option<&str>) -> Option<Self> {
+        let refs = &self.refs;
+        let target = refs
+            .branches
+            .iter()
+            .find(|b| b.name == local)
+            .map(|b| b.target)
+            .or_else(|| {
+                let track = track?;
+                refs.remote_branches
+                    .iter()
+                    .find(|b| b.name == track)
+                    .map(|b| b.target)
+            })?;
+        let mut next = self.clone();
+        next.refs.head = Some(target);
+        next.refs.head_branch = Some(local.to_string());
+        let mut found = false;
+        for b in &mut next.refs.branches {
+            b.is_head = b.name == local;
+            found |= b.is_head;
+        }
+        if !found {
+            next.refs.branches.push(mugetsu_git::Branch {
+                name: local.to_string(),
+                target,
+                upstream: track.map(str::to_string),
+                ahead: 0,
+                behind: 0,
+                is_head: true,
+                upstream_gone: false,
+            });
+            next.refs.branches.sort_by(|a, b| a.name.cmp(&b.name));
+        }
+        for labels in next.decorations.values_mut() {
+            labels.retain(|l| !matches!(l, RefLabel::DetachedHead));
+            for l in labels.iter_mut() {
+                if let RefLabel::Branch { head, .. } = l {
+                    *head = false;
+                }
+            }
+        }
+        let labels = next.decorations.entry(target).or_default();
+        match labels
+            .iter_mut()
+            .find(|l| matches!(l, RefLabel::Branch { name, .. } if name == local))
+        {
+            Some(RefLabel::Branch { head, .. }) => *head = true,
+            _ => labels.insert(
+                0,
+                RefLabel::Branch {
+                    name: local.to_string(),
+                    head: true,
+                },
+            ),
+        }
+        Some(next)
     }
 
     pub fn uncommitted(&self) -> usize {
