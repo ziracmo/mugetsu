@@ -40,7 +40,10 @@ pub struct DiffFile {
 
 impl DiffFile {
     pub fn path(&self) -> &str {
-        self.new_path.as_deref().or(self.old_path.as_deref()).unwrap_or("")
+        self.new_path
+            .as_deref()
+            .or(self.old_path.as_deref())
+            .unwrap_or("")
     }
 
     pub fn stats(&self) -> (usize, usize) {
@@ -91,7 +94,12 @@ fn strip_path(p: &str) -> Option<String> {
     if p == "/dev/null" {
         return None;
     }
-    Some(p.strip_prefix("a/").or_else(|| p.strip_prefix("b/")).unwrap_or(p).to_string())
+    Some(
+        p.strip_prefix("a/")
+            .or_else(|| p.strip_prefix("b/"))
+            .unwrap_or(p)
+            .to_string(),
+    )
 }
 
 fn parse_range(s: &str) -> (u32, u32) {
@@ -108,7 +116,10 @@ impl FileDiff {
         let mut new_no = 0;
         for line in raw.lines() {
             if let Some(rest) = line.strip_prefix("diff --git ") {
-                let mut file = DiffFile { header: vec![line.to_string()], ..Default::default() };
+                let mut file = DiffFile {
+                    header: vec![line.to_string()],
+                    ..Default::default()
+                };
                 // Best effort until ---/+++ give the exact paths (needed for binary files).
                 if let Some((a, b)) = rest.split_once(" b/") {
                     file.old_path = strip_path(a);
@@ -117,11 +128,15 @@ impl FileDiff {
                 files.push(file);
                 continue;
             }
-            let Some(file) = files.last_mut() else { continue };
+            let Some(file) = files.last_mut() else {
+                continue;
+            };
             if let Some(h) = line.strip_prefix("@@ ") {
                 let mut parts = h.split(' ');
-                let (old_start, old_len) = parse_range(parts.next().unwrap_or("-0").trim_start_matches('-'));
-                let (new_start, new_len) = parse_range(parts.next().unwrap_or("+0").trim_start_matches('+'));
+                let (old_start, old_len) =
+                    parse_range(parts.next().unwrap_or("-0").trim_start_matches('-'));
+                let (new_start, new_len) =
+                    parse_range(parts.next().unwrap_or("+0").trim_start_matches('+'));
                 old_no = old_start;
                 new_no = new_start;
                 file.hunks.push(Hunk {
@@ -178,7 +193,12 @@ impl FileDiff {
                         }
                         LineKind::NoNewline => (None, None),
                     };
-                    hunk.lines.push(DiffLine { kind, old_no: o, new_no: n, text: text.to_string() });
+                    hunk.lines.push(DiffLine {
+                        kind,
+                        old_no: o,
+                        new_no: n,
+                        text: text.to_string(),
+                    });
                 }
             }
         }
@@ -205,9 +225,14 @@ impl Repo {
     /// Diff for an untracked file, shown as a full addition.
     pub fn diff_untracked(&self, path: &str) -> anyhow::Result<FileDiff> {
         // `git diff --no-index` exits 1 when files differ, so read stdout regardless.
-        let out = self
-            .git()
-            .run_lenient(["diff", "--no-ext-diff", "--no-index", "--", "/dev/null", path])?;
+        let out = self.git().run_lenient([
+            "diff",
+            "--no-ext-diff",
+            "--no-index",
+            "--",
+            "/dev/null",
+            path,
+        ])?;
         Ok(FileDiff::parse(&out))
     }
 
@@ -258,10 +283,29 @@ Binary files a/img.png and b/img.png differ
         assert_eq!(f.path(), "src/lib.rs");
         assert_eq!(f.hunks.len(), 2);
         let h = &f.hunks[0];
-        assert_eq!((h.old_start, h.old_len, h.new_start, h.new_len), (1, 3, 1, 4));
-        assert_eq!(h.lines[1], DiffLine { kind: LineKind::Removed, old_no: Some(2), new_no: None, text: "b".into() });
+        assert_eq!(
+            (h.old_start, h.old_len, h.new_start, h.new_len),
+            (1, 3, 1, 4)
+        );
+        assert_eq!(
+            h.lines[1],
+            DiffLine {
+                kind: LineKind::Removed,
+                old_no: Some(2),
+                new_no: None,
+                text: "b".into()
+            }
+        );
         assert_eq!(h.lines[3].new_no, Some(3));
-        assert_eq!(h.lines[4], DiffLine { kind: LineKind::Context, old_no: Some(3), new_no: Some(4), text: "d".into() });
+        assert_eq!(
+            h.lines[4],
+            DiffLine {
+                kind: LineKind::Context,
+                old_no: Some(3),
+                new_no: Some(4),
+                text: "d".into()
+            }
+        );
         assert_eq!(f.hunks[1].old_len, 1);
         assert_eq!(f.hunks[1].lines[1].kind, LineKind::NoNewline);
         assert_eq!(f.stats(), (3, 2));
@@ -277,7 +321,11 @@ Binary files a/img.png and b/img.png differ
         let d = FileDiff::parse(SAMPLE);
         let patch = d.files[0].hunk_patch(1).unwrap();
         assert!(patch.starts_with("diff --git a/src/lib.rs b/src/lib.rs\n"));
-        assert!(patch.contains("+++ b/src/lib.rs\n@@ -10 +11 @@\n-x\n\\ No newline at end of file\n+y\n"));
+        assert!(
+            patch.contains(
+                "+++ b/src/lib.rs\n@@ -10 +11 @@\n-x\n\\ No newline at end of file\n+y\n"
+            )
+        );
         assert!(!patch.contains("+B"));
     }
 }

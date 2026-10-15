@@ -82,8 +82,15 @@ impl Graph {
     pub fn row(&self, row: usize) -> GraphRow {
         let node = self.nodes[row];
         let r = row as u32;
-        let mut out = GraphRow { lane: node.lane, color: node.color, width: node.lane + 1, ..Default::default() };
-        let Some(bucket) = self.buckets.get(row / BUCKET) else { return out };
+        let mut out = GraphRow {
+            lane: node.lane,
+            color: node.color,
+            width: node.lane + 1,
+            ..Default::default()
+        };
+        let Some(bucket) = self.buckets.get(row / BUCKET) else {
+            return out;
+        };
         for &si in bucket {
             let s = self.spans[si as usize];
             if s.top_row > r || s.bottom_row < r {
@@ -97,11 +104,25 @@ impl Graph {
                 (Some((s.lane, s.lane)), Some((s.lane, s.lane)))
             };
             if let Some((from, to)) = upper {
-                push_unique(&mut out.upper, Edge { from, to, color: s.color });
+                push_unique(
+                    &mut out.upper,
+                    Edge {
+                        from,
+                        to,
+                        color: s.color,
+                    },
+                );
                 out.width = out.width.max(from.max(to) + 1);
             }
             if let Some((from, to)) = lower {
-                push_unique(&mut out.lower, Edge { from, to, color: s.color });
+                push_unique(
+                    &mut out.lower,
+                    Edge {
+                        from,
+                        to,
+                        color: s.color,
+                    },
+                );
                 out.width = out.width.max(from.max(to) + 1);
             }
         }
@@ -128,7 +149,10 @@ pub fn layout(commits: &[Commit]) -> Graph {
     // A commit may be awaited by several lanes (its children's first-parent lines);
     // they all converge into the leftmost when it shows up.
     let mut expected: HashMap<ObjectId, SmallVec<[usize; 2]>> = HashMap::new();
-    let mut graph = Graph { nodes: Vec::with_capacity(commits.len()), ..Default::default() };
+    let mut graph = Graph {
+        nodes: Vec::with_capacity(commits.len()),
+        ..Default::default()
+    };
     let mut next_color: u16 = 0;
 
     let alloc = |slots: &mut Vec<Option<Slot>>, free: &mut BTreeSet<usize>| -> usize {
@@ -146,7 +170,10 @@ pub fn layout(commits: &[Commit]) -> Graph {
         let (lane, color) = match expected.remove(&commit.id) {
             Some(lanes) => {
                 let lane = *lanes.iter().min().expect("non-empty");
-                let color = slots[lane].as_ref().expect("awaiting lane is occupied").color;
+                let color = slots[lane]
+                    .as_ref()
+                    .expect("awaiting lane is occupied")
+                    .color;
                 for i in lanes {
                     let slot = slots[i].take().expect("awaiting lane is occupied");
                     for (top_row, top_lane) in slot.starts {
@@ -172,13 +199,19 @@ pub fn layout(commits: &[Commit]) -> Graph {
                 (i, c)
             }
         };
-        graph.nodes.push(Node { lane: lane as Lane, color });
+        graph.nodes.push(Node {
+            lane: lane as Lane,
+            color,
+        });
 
         let mut parents = commit.parents.iter();
         match parents.next() {
             // The first parent always continues straight down in this lane.
             Some(first) => {
-                slots[lane] = Some(Slot { color, starts: smallvec::smallvec![(row, lane as Lane)] });
+                slots[lane] = Some(Slot {
+                    color,
+                    starts: smallvec::smallvec![(row, lane as Lane)],
+                });
                 expected.entry(*first).or_default().push(lane);
             }
             None => {
@@ -188,13 +221,20 @@ pub fn layout(commits: &[Commit]) -> Graph {
         for parent in parents {
             if let Some(&existing) = expected.get(parent).and_then(|l| l.first()) {
                 // Merge parent already awaited elsewhere: join that line.
-                slots[existing].as_mut().unwrap().starts.push((row, lane as Lane));
+                slots[existing]
+                    .as_mut()
+                    .unwrap()
+                    .starts
+                    .push((row, lane as Lane));
                 continue;
             }
             let target = alloc(&mut slots, &mut free);
             let c = next_color;
             next_color = next_color.wrapping_add(1);
-            slots[target] = Some(Slot { color: c, starts: smallvec::smallvec![(row, lane as Lane)] });
+            slots[target] = Some(Slot {
+                color: c,
+                starts: smallvec::smallvec![(row, lane as Lane)],
+            });
             expected.entry(*parent).or_default().push(target);
         }
         while slots.last().is_some_and(Option::is_none) {
@@ -208,7 +248,14 @@ pub fn layout(commits: &[Commit]) -> Graph {
     for (i, slot) in slots.into_iter().enumerate() {
         if let Some(slot) = slot {
             for (top_row, top_lane) in slot.starts {
-                graph.spans.push(Span { top_row, top_lane, lane: i as Lane, bottom_row: end, bottom_lane: i as Lane, color: slot.color });
+                graph.spans.push(Span {
+                    top_row,
+                    top_lane,
+                    lane: i as Lane,
+                    bottom_row: end,
+                    bottom_lane: i as Lane,
+                    color: slot.color,
+                });
             }
         }
     }
@@ -221,9 +268,13 @@ pub fn layout(commits: &[Commit]) -> Graph {
         for b in &mut graph.buckets[first..=last] {
             b.push(si as u32);
         }
-        graph.max_width = graph.max_width.max(s.lane.max(s.top_lane).max(s.bottom_lane) + 1);
+        graph.max_width = graph
+            .max_width
+            .max(s.lane.max(s.top_lane).max(s.bottom_lane) + 1);
     }
-    graph.max_width = graph.max_width.max(graph.nodes.iter().map(|n| n.lane + 1).max().unwrap_or(0));
+    graph.max_width = graph
+        .max_width
+        .max(graph.nodes.iter().map(|n| n.lane + 1).max().unwrap_or(0));
     graph
 }
 
@@ -317,7 +368,11 @@ mod tests {
         commits.push(commit(1, 1, &[]));
         let g = layout(&commits);
         for row in [1, 63, 64, 100, 150] {
-            assert!(g.row(row).upper.iter().any(|e| (e.from, e.to) == (0, 0)), "row {row}: {:?}", g.row(row));
+            assert!(
+                g.row(row).upper.iter().any(|e| (e.from, e.to) == (0, 0)),
+                "row {row}: {:?}",
+                g.row(row)
+            );
         }
         assert_eq!(pairs(&g.row(151).upper), vec![(0, 0), (1, 0)]);
     }

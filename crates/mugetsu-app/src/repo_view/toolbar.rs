@@ -5,8 +5,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, h_flex};
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, div, prelude::FluentBuilder as _, px,
+    Animation, AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement,
+    ParentElement as _, StatefulInteractiveElement as _, Styled as _, div,
+    prelude::FluentBuilder as _, px,
 };
 use mugetsu_forge::PrState;
 
@@ -24,12 +25,20 @@ pub fn pr_color(state: PrState) -> gpui_kit::Hsla {
 }
 
 /// Small clickable "#123" chip opening the PR in the browser.
-pub fn pr_chip(id: impl Into<gpui_kit::ElementId>, lookup: Option<&PrLookup>) -> Option<AnyElement> {
+pub fn pr_chip(
+    id: impl Into<gpui_kit::ElementId>,
+    lookup: Option<&PrLookup>,
+) -> Option<AnyElement> {
     match lookup? {
         PrLookup::Found(pr) => {
             let url = pr.url.clone();
             let color = pr_color(pr.state);
-            let tip = format!("#{} {} ({})", pr.number, pr.title, crate::pr::state_label(pr.state));
+            let tip = format!(
+                "#{} {} ({})",
+                pr.number,
+                pr.title,
+                crate::pr::state_label(pr.state)
+            );
             Some(
                 h_flex()
                     .id(id)
@@ -59,12 +68,28 @@ pub fn pr_chip(id: impl Into<gpui_kit::ElementId>, lookup: Option<&PrLookup>) ->
                 .child("PR…")
                 .with_animation(
                     "pr-loading",
-                    Animation::new(Duration::from_millis(900)).repeat().with_easing(gpui_kit::pulsating_between(0.3, 1.)),
+                    Animation::new(Duration::from_millis(900))
+                        .repeat()
+                        .with_easing(gpui_kit::pulsating_between(0.3, 1.)),
                     |el, t| el.opacity(t),
                 )
                 .into_any_element(),
         ),
-        PrLookup::None | PrLookup::Failed(_) => None,
+        PrLookup::Failed(err) => {
+            let err = err.clone();
+            Some(
+                div()
+                    .id(id)
+                    .flex_none()
+                    .text_color(theme::muted())
+                    .child(Icon::new(Lucide::GitPullRequest).xsmall())
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(format!("PR introuvable : {err}")).build(window, cx)
+                    })
+                    .into_any_element(),
+            )
+        }
+        PrLookup::None => None,
     }
 }
 
@@ -109,15 +134,25 @@ impl RepoView {
         let busy = self.busy.is_some();
         let changes = data.uncommitted();
         let mode = self.mode;
-        let head_label = data
-            .refs
-            .head_branch
-            .clone()
-            .unwrap_or_else(|| data.refs.head.map(|h| format!("détaché @ {}", h.to_hex_with_len(8))).unwrap_or_default());
-        let head_pr = head.as_ref().and_then(|b| pr_chip("head-pr", self.pr_for(&b.name, b.upstream.as_deref(), false)));
+        let head_label = data.refs.head_branch.clone().unwrap_or_else(|| {
+            data.refs
+                .head
+                .map(|h| format!("détaché @ {}", h.to_hex_with_len(8)))
+                .unwrap_or_default()
+        });
+        let head_pr = head.as_ref().and_then(|b| {
+            pr_chip(
+                "head-pr",
+                self.pr_for(&b.name, b.upstream.as_deref(), false),
+            )
+        });
 
         let tab = |id: &'static str, label: String, active: bool| {
-            Button::new(id).small().label(label).when(active, |b| b.primary()).when(!active, |b| b.ghost())
+            Button::new(id)
+                .small()
+                .label(label)
+                .when(active, |b| b.primary())
+                .when(!active, |b| b.ghost())
         };
 
         h_flex()
@@ -132,13 +167,33 @@ impl RepoView {
                 h_flex()
                     .gap_2()
                     .min_w_0()
-                    .child(Icon::new(Lucide::GitBranch).small().text_color(theme::cyan()))
-                    .child(div().text_sm().font_weight(gpui_kit::FontWeight::SEMIBOLD).truncate().child(head_label))
+                    .child(
+                        Icon::new(Lucide::GitBranch)
+                            .small()
+                            .text_color(theme::cyan()),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .truncate()
+                            .child(head_label),
+                    )
                     .when_some(head.as_ref().filter(|b| b.ahead > 0), |s, b| {
-                        s.child(div().text_xs().text_color(theme::lime()).child(format!("↑{}", b.ahead)))
+                        s.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme::lime())
+                                .child(format!("↑{}", b.ahead)),
+                        )
                     })
                     .when_some(head.as_ref().filter(|b| b.behind > 0), |s, b| {
-                        s.child(div().text_xs().text_color(theme::amber()).child(format!("↓{}", b.behind)))
+                        s.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme::amber())
+                                .child(format!("↓{}", b.behind)),
+                        )
                     })
                     .children(head_pr),
             )
@@ -146,13 +201,19 @@ impl RepoView {
             .child(
                 h_flex()
                     .gap_1()
-                    .child(tab("mode-history", "Historique".into(), mode == Mode::History).on_click(
-                        cx.listener(|this, _, _, cx| this.set_mode(Mode::History, cx)),
-                    ))
+                    .child(
+                        tab("mode-history", "Historique".into(), mode == Mode::History).on_click(
+                            cx.listener(|this, _, _, cx| this.set_mode(Mode::History, cx)),
+                        ),
+                    )
                     .child(
                         tab(
                             "mode-changes",
-                            if changes > 0 { format!("Changements · {changes}") } else { "Changements".into() },
+                            if changes > 0 {
+                                format!("Changements · {changes}")
+                            } else {
+                                "Changements".into()
+                            },
                             mode == Mode::Changes,
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Changes, cx))),
@@ -161,28 +222,67 @@ impl RepoView {
             .child(div().flex_1())
             .child(self.fetch_button(cx))
             .child(
-                Button::new("pull").ghost().small().icon(Icon::new(Lucide::ArrowDownToLine)).label("Pull").disabled(busy)
+                Button::new("pull")
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(Lucide::ArrowDownToLine))
+                    .label("Pull")
+                    .disabled(busy)
                     .tooltip("Pull (fast-forward uniquement)")
-                    .on_click(cx.listener(|this, _, window, cx| this.run_op("Pull", |r| r.pull(), window, cx))),
-            )
-            .child(
-                Button::new("push").ghost().small().icon(Icon::new(Lucide::ArrowUpFromLine)).label("Push").disabled(busy)
                     .on_click(cx.listener(|this, _, window, cx| {
-                        let upstream = this.data.refs.branches.iter().find(|b| b.is_head).map(|b| (b.name.clone(), b.upstream.is_some()));
-                        let remote = this.data.refs.remotes.first().map(|r| r.name.clone());
-                        this.run_op("Push", move |r| match (upstream, remote) {
-                            (Some((branch, false)), Some(remote)) => r.push(Some((&remote, &branch))),
-                            _ => r.push(None),
-                        }, window, cx)
+                        this.run_op("Pull", |r| r.pull(), window, cx)
                     })),
             )
             .child(
-                Button::new("stash").ghost().small().icon(Icon::new(Lucide::Archive)).label("Stash").disabled(busy || changes == 0)
-                    .on_click(cx.listener(|this, _, window, cx| this.run_op("Stash", |r| r.stash_push(None), window, cx))),
+                Button::new("push")
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(Lucide::ArrowUpFromLine))
+                    .label("Push")
+                    .disabled(busy)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let upstream = this
+                            .data
+                            .refs
+                            .branches
+                            .iter()
+                            .find(|b| b.is_head)
+                            .map(|b| (b.name.clone(), b.upstream.is_some()));
+                        let remote = this.data.refs.remotes.first().map(|r| r.name.clone());
+                        this.run_op(
+                            "Push",
+                            move |r| match (upstream, remote) {
+                                (Some((branch, false)), Some(remote)) => {
+                                    r.push(Some((&remote, &branch)))
+                                }
+                                _ => r.push(None),
+                            },
+                            window,
+                            cx,
+                        )
+                    })),
             )
             .child(
-                Button::new("pop").ghost().small().icon(Icon::new(Lucide::ArchiveRestore)).label("Pop").disabled(busy || data.refs.stashes.is_empty())
-                    .on_click(cx.listener(|this, _, window, cx| this.run_op("Stash pop", |r| r.stash_pop(0), window, cx))),
+                Button::new("stash")
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(Lucide::Archive))
+                    .label("Stash")
+                    .disabled(busy || changes == 0)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.run_op("Stash", |r| r.stash_push(None), window, cx)
+                    })),
+            )
+            .child(
+                Button::new("pop")
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(Lucide::ArchiveRestore))
+                    .label("Pop")
+                    .disabled(busy || data.refs.stashes.is_empty())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.run_op("Stash pop", |r| r.stash_pop(0), window, cx)
+                    })),
             )
     }
 }

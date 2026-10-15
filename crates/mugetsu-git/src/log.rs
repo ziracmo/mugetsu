@@ -60,13 +60,25 @@ impl Repo {
         // Tags may point to tags, trees or blobs: keep only what peels to a commit.
         let tips: Vec<ObjectId> = tips
             .iter()
-            .filter_map(|id| repo.find_object(*id).ok()?.peel_to_commit().ok().map(|c| c.id))
+            .filter_map(|id| {
+                repo.find_object(*id)
+                    .ok()?
+                    .peel_to_commit()
+                    .ok()
+                    .map(|c| c.id)
+            })
             .collect();
         // Plain graph walk is ~10x faster than gix's time-sorted walk; ordering is
         // done afterwards by `date_order`, and metadata is decoded in parallel.
-        let ids: Vec<ObjectId> = repo.rev_walk(tips).all()?.map(|i| i.map(|i| i.id)).collect::<Result<_, _>>()?;
+        let ids: Vec<ObjectId> = repo
+            .rev_walk(tips)
+            .all()?
+            .map(|i| i.map(|i| i.id))
+            .collect::<Result<_, _>>()?;
         let sync = repo.into_sync();
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
+        let threads = std::thread::available_parallelism()
+            .map_or(4, |n| n.get())
+            .min(8);
         let chunk = ids.len().div_ceil(threads).max(1);
         let commits = std::thread::scope(|scope| {
             let handles: Vec<_> = ids
@@ -109,7 +121,8 @@ fn decode(repo: &gix::Repository, id: ObjectId) -> anyhow::Result<Commit> {
 /// first (git's `--date-order`). Robust against clock skew in the input order.
 pub fn date_order(commits: Vec<Commit>) -> Vec<Commit> {
     let n = commits.len();
-    let index: HashMap<ObjectId, usize> = commits.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+    let index: HashMap<ObjectId, usize> =
+        commits.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
     let mut pending_children = vec![0u32; n];
     for c in &commits {
         for p in &c.parents {
@@ -138,7 +151,10 @@ pub fn date_order(commits: Vec<Commit>) -> Vec<Commit> {
         }
     }
     let mut slots: Vec<Option<Commit>> = commits.into_iter().map(Some).collect();
-    order.into_iter().map(|i| slots[i].take().expect("each commit emitted once")).collect()
+    order
+        .into_iter()
+        .map(|i| slots[i].take().expect("each commit emitted once"))
+        .collect()
 }
 
 #[cfg(test)]
@@ -164,7 +180,10 @@ pub(crate) mod tests {
     fn date_order_puts_children_first_even_with_clock_skew() {
         // 3 -> 2 -> 1, but 3 has an older timestamp than its parent.
         let input = vec![commit(2, 20, &[1]), commit(1, 10, &[]), commit(3, 5, &[2])];
-        let out: Vec<_> = date_order(input).iter().map(|c| c.summary.clone()).collect();
+        let out: Vec<_> = date_order(input)
+            .iter()
+            .map(|c| c.summary.clone())
+            .collect();
         assert_eq!(out, ["c3", "c2", "c1"]);
     }
 
@@ -177,7 +196,10 @@ pub(crate) mod tests {
             commit(3, 3, &[1]),
             commit(4, 4, &[2, 3]),
         ];
-        let out: Vec<_> = date_order(input).iter().map(|c| c.summary.clone()).collect();
+        let out: Vec<_> = date_order(input)
+            .iter()
+            .map(|c| c.summary.clone())
+            .collect();
         assert_eq!(out, ["c4", "c3", "c2", "c1"]);
     }
 }

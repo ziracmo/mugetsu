@@ -52,7 +52,10 @@ pub struct FileStatus {
 
 impl FileStatus {
     pub fn is_staged(&self) -> bool {
-        !matches!(self.index, Change::Unmodified | Change::Untracked | Change::Conflicted)
+        !matches!(
+            self.index,
+            Change::Unmodified | Change::Untracked | Change::Conflicted
+        )
     }
 
     pub fn is_unstaged(&self) -> bool {
@@ -92,8 +95,14 @@ impl Status {
                         status.branch = (head != "(detached)").then(|| head.to_string());
                     } else if let Some(ab) = rec.strip_prefix("# branch.ab ") {
                         let mut parts = ab.split(' ');
-                        status.ahead = parts.next().and_then(|a| a.trim_start_matches('+').parse().ok()).unwrap_or(0);
-                        status.behind = parts.next().and_then(|b| b.trim_start_matches('-').parse().ok()).unwrap_or(0);
+                        status.ahead = parts
+                            .next()
+                            .and_then(|a| a.trim_start_matches('+').parse().ok())
+                            .unwrap_or(0);
+                        status.behind = parts
+                            .next()
+                            .and_then(|b| b.trim_start_matches('-').parse().ok())
+                            .unwrap_or(0);
                     }
                 }
                 b'1' => {
@@ -145,9 +154,13 @@ fn entry(xy: &str, path: &str, orig_path: Option<String>) -> FileStatus {
 
 impl Repo {
     pub fn status(&self) -> anyhow::Result<Status> {
-        let raw = self
-            .git()
-            .run(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"])?;
+        let raw = self.git().run([
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+        ])?;
         Ok(Status::parse(&raw))
     }
 }

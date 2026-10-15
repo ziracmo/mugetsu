@@ -15,7 +15,11 @@ pub fn relative_time(then: i64, now: i64) -> String {
 
 pub fn absolute_time(then: i64) -> String {
     chrono::DateTime::from_timestamp(then, 0)
-        .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -37,6 +41,10 @@ mod tests {
         assert_eq!(relative_time(0, 2 * 86_400), "2 d");
         assert_eq!(relative_time(0, 40 * 86_400), "1 mo");
         assert_eq!(relative_time(0, 800 * 86_400), "2 y");
-        assert_eq!(relative_time(10, 0), "now", "clock skew never goes negative");
+        assert_eq!(
+            relative_time(10, 0),
+            "now",
+            "clock skew never goes negative"
+        );
     }
 }

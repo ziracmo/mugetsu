@@ -30,11 +30,14 @@ impl RepoData {
             .find(|r| r.name == "origin")
             .or(refs.remotes.first())
             .and_then(|r| GithubRepo::from_remote_url(&r.url));
-        Ok(Arc::new(Self { refs, history, graph, decorations, status, github }))
-    }
-
-    pub fn head_row(&self) -> Option<usize> {
-        self.refs.head.and_then(|h| self.history.row_of(&h))
+        Ok(Arc::new(Self {
+            refs,
+            history,
+            graph,
+            decorations,
+            status,
+            github,
+        }))
     }
 
     pub fn uncommitted(&self) -> usize {

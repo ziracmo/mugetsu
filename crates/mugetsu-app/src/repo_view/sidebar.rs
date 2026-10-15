@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, ClickEvent, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::toolbar::pr_chip;
@@ -30,6 +32,7 @@ fn render_row(row: Row) -> AnyElement {
     let tooltip = row.tooltip;
     h_flex()
         .id(row.id)
+        .test_support()
         .h(px(24.))
         .pl_4()
         .pr_2()
@@ -41,18 +44,26 @@ fn render_row(row: Row) -> AnyElement {
         .border_l_2()
         .border_color(gpui_kit::transparent_black())
         .hover(|s| s.bg(theme::raised()))
-        .when(row.selected, |s| s.bg(theme::alpha(theme::cyan(), 0.12)).border_color(theme::cyan()))
+        .when(row.selected, |s| {
+            s.bg(theme::alpha(theme::cyan(), 0.12))
+                .border_color(theme::cyan())
+        })
         .child(Icon::new(row.icon).xsmall().text_color(row.icon_color))
         .child(
             div()
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::SEMIBOLD).text_color(theme::cyan()))
+                .when(row.bold, |s| {
+                    s.font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(theme::cyan())
+                })
                 .child(row.label),
         )
         .children(row.suffix)
-        .when_some(tooltip, |s, tip| s.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx)))
+        .when_some(tooltip, |s, tip| {
+            s.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        })
         .on_click(row.on_click)
         .into_any_element()
 }
@@ -80,10 +91,23 @@ impl RepoView {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .hover(|s| s.text_color(cx.theme().foreground))
-                    .child(Icon::new(if collapsed { Lucide::ChevronRight } else { Lucide::ChevronDown }).xsmall())
+                    .child(
+                        Icon::new(if collapsed {
+                            Lucide::ChevronRight
+                        } else {
+                            Lucide::ChevronDown
+                        })
+                        .xsmall(),
+                    )
                     .child(Icon::new(icon).xsmall())
                     .child(div().flex_1().child(title.to_uppercase()))
-                    .child(div().px_1p5().rounded_sm().bg(theme::raised()).child(count.to_string()))
+                    .child(
+                        div()
+                            .px_1p5()
+                            .rounded_sm()
+                            .bg(theme::raised())
+                            .child(count.to_string()),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !this.collapsed.remove(key) {
                             this.collapsed.insert(key);
@@ -109,20 +133,55 @@ impl RepoView {
                 let id = SharedString::from(format!("branch:{}", b.name));
                 let mut suffix = Vec::new();
                 if b.ahead > 0 {
-                    suffix.push(div().text_xs().text_color(theme::lime()).child(format!("↑{}", b.ahead)).into_any_element());
+                    suffix.push(
+                        div()
+                            .text_xs()
+                            .text_color(theme::lime())
+                            .child(format!("↑{}", b.ahead))
+                            .into_any_element(),
+                    );
                 }
                 if b.behind > 0 {
-                    suffix.push(div().text_xs().text_color(theme::amber()).child(format!("↓{}", b.behind)).into_any_element());
+                    suffix.push(
+                        div()
+                            .text_xs()
+                            .text_color(theme::amber())
+                            .child(format!("↓{}", b.behind))
+                            .into_any_element(),
+                    );
                 }
                 if b.upstream_gone {
-                    suffix.push(div().text_xs().text_color(theme::muted()).child("gone").into_any_element());
+                    suffix.push(
+                        div()
+                            .text_xs()
+                            .text_color(theme::muted())
+                            .child("gone")
+                            .into_any_element(),
+                    );
                 }
-                suffix.extend(pr_chip(SharedString::from(format!("pr:{}", b.name)), self.pr_for(&b.name, b.upstream.as_deref(), false)));
-                let (entity, name, upstream, target, row_id) = (entity.clone(), b.name.clone(), b.upstream.clone(), b.target, id.clone());
+                suffix.extend(pr_chip(
+                    SharedString::from(format!("pr:{}", b.name)),
+                    self.pr_for(&b.name, b.upstream.as_deref(), false),
+                ));
+                let (entity, name, upstream, target, row_id) = (
+                    entity.clone(),
+                    b.name.clone(),
+                    b.upstream.clone(),
+                    b.target,
+                    id.clone(),
+                );
                 render_row(Row {
                     id: id.clone(),
-                    icon: if b.is_head { Lucide::CircleDot } else { Lucide::GitBranch },
-                    icon_color: if b.is_head { theme::cyan() } else { theme::muted() },
+                    icon: if b.is_head {
+                        Lucide::CircleDot
+                    } else {
+                        Lucide::GitBranch
+                    },
+                    icon_color: if b.is_head {
+                        theme::cyan()
+                    } else {
+                        theme::muted()
+                    },
                     label: b.name.clone(),
                     selected: selected_ref.as_ref() == Some(&id),
                     bold: b.is_head,
@@ -159,10 +218,21 @@ impl RepoView {
                     .into_any_element(),
             );
             let prefix = format!("{}/", remote.name);
-            for b in data.refs.remote_branches.iter().filter(|b| b.name.starts_with(&prefix)) {
+            for b in data
+                .refs
+                .remote_branches
+                .iter()
+                .filter(|b| b.name.starts_with(&prefix))
+            {
                 let id = SharedString::from(format!("remote:{}", b.name));
-                let (entity, name, target, row_id) = (entity.clone(), b.name.clone(), b.target, id.clone());
-                let suffix = pr_chip(SharedString::from(format!("rpr:{}", b.name)), self.pr_for(&b.name, None, true)).into_iter().collect();
+                let (entity, name, target, row_id) =
+                    (entity.clone(), b.name.clone(), b.target, id.clone());
+                let suffix = pr_chip(
+                    SharedString::from(format!("rpr:{}", b.name)),
+                    self.pr_for(&b.name, None, true),
+                )
+                .into_iter()
+                .collect();
                 remote_rows.push(render_row(Row {
                     id: id.clone(),
                     icon: Lucide::GitBranch,
@@ -180,7 +250,12 @@ impl RepoView {
                             this.lookup_pr(&name, None, true, cx);
                             if double {
                                 let name = name.clone();
-                                this.run_op("Checkout", move |r| r.checkout_remote(&name), window, cx);
+                                this.run_op(
+                                    "Checkout",
+                                    move |r| r.checkout_remote(&name),
+                                    window,
+                                    cx,
+                                );
                             }
                         });
                     }),
@@ -228,12 +303,33 @@ impl RepoView {
                 render_row(Row {
                     id,
                     icon: Lucide::FolderGit2,
-                    icon_color: if is_current { theme::cyan() } else { theme::lime() },
-                    label: format!("{label}  ·  {}", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+                    icon_color: if is_current {
+                        theme::cyan()
+                    } else {
+                        theme::lime()
+                    },
+                    label: format!(
+                        "{label}  ·  {}",
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                    ),
                     selected: false,
                     bold: is_current,
-                    tooltip: Some(format!("{}{}", w.path, if is_current { "" } else { "\nCliquer pour ouvrir dans un onglet" })),
-                    suffix: if w.locked { vec![Icon::new(Lucide::Lock).xsmall().into_any_element()] } else { vec![] },
+                    tooltip: Some(format!(
+                        "{}{}",
+                        w.path,
+                        if is_current {
+                            ""
+                        } else {
+                            "\nCliquer pour ouvrir dans un onglet"
+                        }
+                    )),
+                    suffix: if w.locked {
+                        vec![Icon::new(Lucide::Lock).xsmall().into_any_element()]
+                    } else {
+                        vec![]
+                    },
                     on_click: Box::new(move |_, _, cx| {
                         let path = path.clone();
                         let _ = entity.update(cx, |_, cx| {
@@ -291,9 +387,23 @@ impl RepoView {
                     .size_full()
                     .py_1()
                     .overflow_y_scroll()
-                    .child(self.section("branches", "Branches", Lucide::GitBranch, nb, branch_rows, cx))
+                    .child(self.section(
+                        "branches",
+                        "Branches",
+                        Lucide::GitBranch,
+                        nb,
+                        branch_rows,
+                        cx,
+                    ))
                     .child(self.section("remotes", "Remotes", Lucide::Cloud, nr, remote_rows, cx))
-                    .child(self.section("worktrees", "Worktrees", Lucide::FolderTree, nw, worktree_rows, cx))
+                    .child(self.section(
+                        "worktrees",
+                        "Worktrees",
+                        Lucide::FolderTree,
+                        nw,
+                        worktree_rows,
+                        cx,
+                    ))
                     .child(self.section("tags", "Tags", Lucide::Tags, nt, tag_rows, cx))
                     .child(self.section("stashes", "Stashes", Lucide::Archive, ns, stash_rows, cx)),
             )

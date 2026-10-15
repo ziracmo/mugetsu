@@ -15,7 +15,9 @@ fn github() -> &'static Github {
 
 /// Blocking: call from a background task.
 pub fn lookup(repo: &GithubRepo, branch: &str) -> Result<Option<PullRequest>, String> {
-    github().pull_for_branch(repo, branch).map_err(|e| e.to_string())
+    github()
+        .pull_for_branch(repo, branch)
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Clone, Debug)]
@@ -76,7 +78,10 @@ mod tests {
     #[test]
     fn forge_branch_names() {
         assert_eq!(forge_branch("feat/x", None, false), "feat/x");
-        assert_eq!(forge_branch("local", Some("origin/feat/remote"), false), "feat/remote");
+        assert_eq!(
+            forge_branch("local", Some("origin/feat/remote"), false),
+            "feat/remote"
+        );
         assert_eq!(forge_branch("origin/feat/x", None, true), "feat/x");
     }
 
@@ -86,7 +91,10 @@ mod tests {
         let t = Instant::now();
         assert!(c.needs_lookup("a", t));
         c.set("a".into(), PrLookup::Loading, t);
-        assert!(!c.needs_lookup("a", t + TTL * 2), "in-flight requests are not repeated");
+        assert!(
+            !c.needs_lookup("a", t + TTL * 2),
+            "in-flight requests are not repeated"
+        );
         c.set("a".into(), PrLookup::None, t);
         assert!(!c.needs_lookup("a", t + Duration::from_secs(1)));
         assert!(c.needs_lookup("a", t + TTL + Duration::from_secs(1)));

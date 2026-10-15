@@ -1,5 +1,5 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use gix::ObjectId;
@@ -84,13 +84,20 @@ impl RefsSnapshot {
     pub fn decorations(&self) -> HashMap<ObjectId, Vec<RefLabel>> {
         let mut map: HashMap<ObjectId, Vec<RefLabel>> = HashMap::new();
         for b in &self.branches {
-            map.entry(b.target).or_default().push(RefLabel::Branch { name: b.name.clone(), head: b.is_head });
+            map.entry(b.target).or_default().push(RefLabel::Branch {
+                name: b.name.clone(),
+                head: b.is_head,
+            });
         }
         for b in &self.remote_branches {
-            map.entry(b.target).or_default().push(RefLabel::Remote(b.name.clone()));
+            map.entry(b.target)
+                .or_default()
+                .push(RefLabel::Remote(b.name.clone()));
         }
         for t in &self.tags {
-            map.entry(t.target).or_default().push(RefLabel::Tag(t.name.clone()));
+            map.entry(t.target)
+                .or_default()
+                .push(RefLabel::Tag(t.name.clone()));
         }
         if self.head_branch.is_none()
             && let Some(h) = self.head
@@ -109,8 +116,11 @@ impl RefsSnapshot {
             if f.len() < 6 {
                 continue;
             }
-            let (refname, oid, peeled, upstream, track, head) = (f[0], f[1], f[2], f[3], f[4], f[5]);
-            let Ok(oid) = ObjectId::from_hex(oid.as_bytes()) else { continue };
+            let (refname, oid, peeled, upstream, track, head) =
+                (f[0], f[1], f[2], f[3], f[4], f[5]);
+            let Ok(oid) = ObjectId::from_hex(oid.as_bytes()) else {
+                continue;
+            };
             if let Some(name) = refname.strip_prefix("refs/heads/") {
                 let (ahead, behind, gone) = parse_track(track);
                 let is_head = head == "*";
@@ -141,7 +151,10 @@ impl RefsSnapshot {
                 });
             } else if let Some(name) = refname.strip_prefix("refs/tags/") {
                 let target = ObjectId::from_hex(peeled.as_bytes()).unwrap_or(oid);
-                self.tags.push(Tag { name: name.to_string(), target });
+                self.tags.push(Tag {
+                    name: name.to_string(),
+                    target,
+                });
             }
         }
         self.fingerprint = hasher.finish();
@@ -157,8 +170,7 @@ pub enum RefLabel {
     DetachedHead,
 }
 
-pub const FOR_EACH_REF_FORMAT: &str =
-    "--format=%(refname)%00%(objectname)%00%(*objectname)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(HEAD)";
+pub const FOR_EACH_REF_FORMAT: &str = "--format=%(refname)%00%(objectname)%00%(*objectname)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(HEAD)";
 
 fn parse_track(track: &str) -> (u32, u32, bool) {
     if track == "gone" {
@@ -180,9 +192,14 @@ pub fn parse_remotes(raw: &str) -> Vec<Remote> {
     let mut remotes: Vec<Remote> = Vec::new();
     for line in raw.lines() {
         let mut parts = line.split_whitespace();
-        let (Some(name), Some(url)) = (parts.next(), parts.next()) else { continue };
+        let (Some(name), Some(url)) = (parts.next(), parts.next()) else {
+            continue;
+        };
         if !remotes.iter().any(|r| r.name == name) {
-            remotes.push(Remote { name: name.to_string(), url: url.to_string() });
+            remotes.push(Remote {
+                name: name.to_string(),
+                url: url.to_string(),
+            });
         }
     }
     remotes
@@ -234,7 +251,11 @@ pub fn parse_stashes(raw: &str) -> Vec<Stash> {
         .enumerate()
         .filter_map(|(index, line)| {
             let (id, message) = line.split_once('\0')?;
-            Some(Stash { index, id: ObjectId::from_hex(id.as_bytes()).ok()?, message: message.to_string() })
+            Some(Stash {
+                index,
+                id: ObjectId::from_hex(id.as_bytes()).ok()?,
+                message: message.to_string(),
+            })
         })
         .collect()
 }
@@ -243,14 +264,23 @@ impl Repo {
     pub fn refs(&self) -> anyhow::Result<RefsSnapshot> {
         let git = self.git();
         let mut snap = RefsSnapshot::default();
-        snap.parse_refs(&git.run(["for-each-ref", FOR_EACH_REF_FORMAT, "refs/heads", "refs/remotes", "refs/tags"])?);
+        snap.parse_refs(&git.run([
+            "for-each-ref",
+            FOR_EACH_REF_FORMAT,
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ])?);
         snap.head = git
             .run(["rev-parse", "--verify", "-q", "HEAD"])
             .ok()
             .and_then(|s| ObjectId::from_hex(s.trim().as_bytes()).ok());
         snap.remotes = parse_remotes(&git.run(["remote", "-v"])?);
         snap.worktrees = parse_worktrees(&git.run(["worktree", "list", "--porcelain", "-z"])?);
-        snap.stashes = parse_stashes(&git.run(["stash", "list", "--format=%H%x00%gs"]).unwrap_or_default());
+        snap.stashes = parse_stashes(
+            &git.run(["stash", "list", "--format=%H%x00%gs"])
+                .unwrap_or_default(),
+        );
         let mut h = DefaultHasher::new();
         snap.fingerprint.hash(&mut h);
         snap.head.hash(&mut h);
@@ -261,7 +291,13 @@ impl Repo {
     /// Cheap check used by background polling: hash of all ref targets.
     pub fn refs_fingerprint(&self) -> anyhow::Result<u64> {
         let mut snap = RefsSnapshot::default();
-        snap.parse_refs(&self.git().run(["for-each-ref", FOR_EACH_REF_FORMAT, "refs/heads", "refs/remotes", "refs/tags"])?);
+        snap.parse_refs(&self.git().run([
+            "for-each-ref",
+            FOR_EACH_REF_FORMAT,
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ])?);
         Ok(snap.fingerprint)
     }
 }
@@ -316,7 +352,15 @@ mod tests {
 
     #[test]
     fn parses_remotes_once_per_name() {
-        let r = parse_remotes("origin\tgit@github.com:a/b.git (fetch)\norigin\tgit@github.com:a/b.git (push)\n");
-        assert_eq!(r, vec![Remote { name: "origin".into(), url: "git@github.com:a/b.git".into() }]);
+        let r = parse_remotes(
+            "origin\tgit@github.com:a/b.git (fetch)\norigin\tgit@github.com:a/b.git (push)\n",
+        );
+        assert_eq!(
+            r,
+            vec![Remote {
+                name: "origin".into(),
+                url: "git@github.com:a/b.git".into()
+            }]
+        );
     }
 }

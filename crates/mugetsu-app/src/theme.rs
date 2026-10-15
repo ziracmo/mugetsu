@@ -38,7 +38,8 @@ pub fn muted() -> Hsla {
 
 /// Graph lane palette, cycled by lane color index.
 const LANES: [u32; 10] = [
-    0x00e5ff, 0xff2bd6, 0xa3ff12, 0xffb020, 0x8b5cf6, 0x38bdf8, 0xf472b6, 0x2dd4bf, 0xfb7185, 0xfacc15,
+    0x00e5ff, 0xff2bd6, 0xa3ff12, 0xffb020, 0x8b5cf6, 0x38bdf8, 0xf472b6, 0x2dd4bf, 0xfb7185,
+    0xfacc15,
 ];
 
 pub fn lane_color(index: u16) -> Hsla {
@@ -52,9 +53,10 @@ pub fn alpha(color: Hsla, a: f32) -> Hsla {
 }
 
 pub fn init(cx: &mut App) {
-    let set: serde_json::Value = serde_json::from_str(THEME_JSON).expect("theme.json is valid JSON");
-    let config: ThemeConfig =
-        serde_json::from_value(set["themes"][0].clone()).expect("theme.json matches the theme schema");
+    let set: serde_json::Value =
+        serde_json::from_str(THEME_JSON).expect("theme.json is valid JSON");
+    let config: ThemeConfig = serde_json::from_value(set["themes"][0].clone())
+        .expect("theme.json matches the theme schema");
     let config = Rc::new(config);
     let _ = ThemeRegistry::global_mut(cx).load_themes_from_str(THEME_JSON);
     Theme::update(cx, |theme| {

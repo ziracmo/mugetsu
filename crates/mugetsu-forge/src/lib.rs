@@ -30,7 +30,10 @@ impl GithubRepo {
         if owner.is_empty() || name.is_empty() || name.contains('/') {
             return None;
         }
-        Some(Self { owner: owner.to_string(), name: name.to_string() })
+        Some(Self {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        })
     }
 }
 
@@ -69,14 +72,24 @@ impl From<ApiPull> for PullRequest {
             ("open", false, _) => PrState::Open,
             _ => PrState::Closed,
         };
-        Self { number: p.number, title: p.title, url: p.html_url, state }
+        Self {
+            number: p.number,
+            title: p.title,
+            url: p.html_url,
+            state,
+        }
     }
 }
 
 /// Picks the most relevant PR: open first, then the most recent.
 pub fn pick(prs: Vec<PullRequest>) -> Option<PullRequest> {
     let mut prs = prs;
-    prs.sort_by_key(|p| (!matches!(p.state, PrState::Open | PrState::Draft), std::cmp::Reverse(p.number)));
+    prs.sort_by_key(|p| {
+        (
+            !matches!(p.state, PrState::Open | PrState::Draft),
+            std::cmp::Reverse(p.number),
+        )
+    });
     prs.into_iter().next()
 }
 
@@ -89,7 +102,10 @@ pub fn token(gh_binary: &str) -> Option<String> {
             return Some(t);
         }
     }
-    let out = Command::new(gh_binary).args(["auth", "token"]).output().ok()?;
+    let out = Command::new(gh_binary)
+        .args(["auth", "token"])
+        .output()
+        .ok()?;
     let t = String::from_utf8(out.stdout).ok()?.trim().to_string();
     (out.status.success() && !t.is_empty()).then_some(t)
 }
@@ -109,7 +125,11 @@ impl Github {
     }
 
     /// PR whose head is `branch` in `repo` (same-repo branches; forks are matched by owner).
-    pub fn pull_for_branch(&self, repo: &GithubRepo, branch: &str) -> anyhow::Result<Option<PullRequest>> {
+    pub fn pull_for_branch(
+        &self,
+        repo: &GithubRepo,
+        branch: &str,
+    ) -> anyhow::Result<Option<PullRequest>> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/pulls?state=all&per_page=10&head={}:{}",
             repo.owner, repo.name, repo.owner, branch
@@ -122,7 +142,11 @@ impl Github {
         if let Some(t) = &self.token {
             req = req.header("Authorization", &format!("Bearer {t}"));
         }
-        let pulls: Vec<ApiPull> = req.call().context("GitHub request")?.body_mut().read_json()?;
+        let pulls: Vec<ApiPull> = req
+            .call()
+            .context("GitHub request")?
+            .body_mut()
+            .read_json()?;
         Ok(pick(pulls.into_iter().map(Into::into).collect()))
     }
 }
@@ -133,7 +157,10 @@ mod tests {
 
     #[test]
     fn parses_github_remote_urls() {
-        let expected = Some(GithubRepo { owner: "ziracmo".into(), name: "mugetsu".into() });
+        let expected = Some(GithubRepo {
+            owner: "ziracmo".into(),
+            name: "mugetsu".into(),
+        });
         for url in [
             "git@github.com:ziracmo/mugetsu.git",
             "ssh://git@github.com/ziracmo/mugetsu",
@@ -144,7 +171,10 @@ mod tests {
             assert_eq!(GithubRepo::from_remote_url(url), expected, "{url}");
         }
         assert_eq!(GithubRepo::from_remote_url("git@gitlab.com:a/b.git"), None);
-        assert_eq!(GithubRepo::from_remote_url("https://github.com/only-owner"), None);
+        assert_eq!(
+            GithubRepo::from_remote_url("https://github.com/only-owner"),
+            None
+        );
     }
 
     #[test]
@@ -157,16 +187,37 @@ mod tests {
             draft,
             merged_at: merged.then(|| "x".into()),
         };
-        assert_eq!(PullRequest::from(api("open", false, false)).state, PrState::Open);
-        assert_eq!(PullRequest::from(api("open", true, false)).state, PrState::Draft);
-        assert_eq!(PullRequest::from(api("closed", false, true)).state, PrState::Merged);
-        assert_eq!(PullRequest::from(api("closed", false, false)).state, PrState::Closed);
+        assert_eq!(
+            PullRequest::from(api("open", false, false)).state,
+            PrState::Open
+        );
+        assert_eq!(
+            PullRequest::from(api("open", true, false)).state,
+            PrState::Draft
+        );
+        assert_eq!(
+            PullRequest::from(api("closed", false, true)).state,
+            PrState::Merged
+        );
+        assert_eq!(
+            PullRequest::from(api("closed", false, false)).state,
+            PrState::Closed
+        );
     }
 
     #[test]
     fn prefers_open_then_newest() {
-        let pr = |number, state| PullRequest { number, title: String::new(), url: String::new(), state };
-        let picked = pick(vec![pr(9, PrState::Closed), pr(3, PrState::Open), pr(5, PrState::Merged)]);
+        let pr = |number, state| PullRequest {
+            number,
+            title: String::new(),
+            url: String::new(),
+            state,
+        };
+        let picked = pick(vec![
+            pr(9, PrState::Closed),
+            pr(3, PrState::Open),
+            pr(5, PrState::Merged),
+        ]);
         assert_eq!(picked.unwrap().number, 3);
         let picked = pick(vec![pr(2, PrState::Merged), pr(7, PrState::Closed)]);
         assert_eq!(picked.unwrap().number, 7);

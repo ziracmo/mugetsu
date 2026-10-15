@@ -34,7 +34,10 @@ impl Repo {
         let path = path.as_ref();
         let out = Git::new(path).run(["rev-parse", "--show-toplevel"])?;
         let root = PathBuf::from(out.trim());
-        Ok(Self { git: Git::new(&root), root })
+        Ok(Self {
+            git: Git::new(&root),
+            root,
+        })
     }
 
     pub fn root(&self) -> &Path {

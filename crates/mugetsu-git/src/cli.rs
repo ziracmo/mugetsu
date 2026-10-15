@@ -60,7 +60,9 @@ impl Git {
         S: AsRef<OsStr>,
     {
         let mut cmd = self.command(args);
-        let out = cmd.output().with_context(|| format!("failed to spawn {cmd:?}"))?;
+        let out = cmd
+            .output()
+            .with_context(|| format!("failed to spawn {cmd:?}"))?;
         if !out.status.success() {
             bail!("{}", String::from_utf8_lossy(&out.stderr).trim());
         }
@@ -74,7 +76,9 @@ impl Git {
         S: AsRef<OsStr>,
     {
         let mut cmd = self.command(args);
-        let out = cmd.output().with_context(|| format!("failed to spawn {cmd:?}"))?;
+        let out = cmd
+            .output()
+            .with_context(|| format!("failed to spawn {cmd:?}"))?;
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
@@ -86,8 +90,12 @@ impl Git {
     {
         use std::io::Write;
         let mut cmd = self.command(args);
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = cmd.spawn().with_context(|| format!("failed to spawn {cmd:?}"))?;
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("failed to spawn {cmd:?}"))?;
         child.stdin.take().expect("piped stdin").write_all(input)?;
         let out = child.wait_with_output()?;
         if !out.status.success() {

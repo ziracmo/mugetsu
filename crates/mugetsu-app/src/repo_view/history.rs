@@ -1,14 +1,15 @@
 use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::diff::Diff;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, ClipboardItem, Context, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px, uniform_list,
+    Animation, AnimationExt as _, AnyElement, ClipboardItem, Context, InteractiveElement as _,
+    IntoElement, ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Window, div, prelude::FluentBuilder as _, px, uniform_list,
 };
 use mugetsu_git::RefLabel;
 
@@ -21,12 +22,19 @@ pub const ROW_HEIGHT: f32 = 26.;
 
 fn label_chip(label: &RefLabel) -> AnyElement {
     let (text, color, icon) = match label {
-        RefLabel::Branch { name, head } => (name.clone(), if *head { theme::cyan() } else { theme::lime() }, Lucide::GitBranch),
+        RefLabel::Branch { name, head } => (
+            name.clone(),
+            if *head { theme::cyan() } else { theme::lime() },
+            Lucide::GitBranch,
+        ),
         RefLabel::Remote(name) => (name.clone(), theme::violet(), Lucide::Cloud),
         RefLabel::Tag(name) => (name.clone(), theme::amber(), Lucide::Tag),
         RefLabel::DetachedHead => ("HEAD".into(), theme::magenta(), Lucide::CircleDot),
     };
-    let head = matches!(label, RefLabel::Branch { head: true, .. } | RefLabel::DetachedHead);
+    let head = matches!(
+        label,
+        RefLabel::Branch { head: true, .. } | RefLabel::DetachedHead
+    );
     h_flex()
         .flex_none()
         .max_w(px(220.))
@@ -50,6 +58,7 @@ impl RepoView {
         (n > 0).then(|| {
             h_flex()
                 .id("wip")
+                .test_support()
                 .h(px(28.))
                 .flex_none()
                 .px_3()
@@ -66,23 +75,38 @@ impl RepoView {
                         .bg(theme::amber())
                         .with_animation(
                             "wip-pulse",
-                            Animation::new(Duration::from_millis(1400)).repeat().with_easing(gpui_kit::pulsating_between(0.35, 1.)),
+                            Animation::new(Duration::from_millis(1400))
+                                .repeat()
+                                .with_easing(gpui_kit::pulsating_between(0.35, 1.)),
                             |el, t| el.opacity(t),
                         ),
                 )
-                .child(div().text_sm().text_color(theme::amber()).child(format!("{n} fichier(s) modifié(s) non commité(s)")))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme::amber())
+                        .child(format!("{n} fichier(s) modifié(s) non commité(s)")),
+                )
                 .child(div().flex_1())
-                .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Voir les changements →"))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Voir les changements →"),
+                )
                 .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Changes, cx)))
                 .into_any_element()
         })
     }
 
-    pub(super) fn render_history(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_history(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let data = self.data.clone();
         let selected = self.selected;
         let head = data.refs.head;
-        let graph_width = graph_view::column_width(data.graph.max_width);
         let entity = cx.entity().downgrade();
         let now = fmt::now();
         let focused = self.history_focus.is_focused(window);
@@ -94,22 +118,38 @@ impl RepoView {
                 .justify_center()
                 .gap_3()
                 .text_color(cx.theme().muted_foreground)
-                .when(self.loading, |s| s.child(Spinner::new().color(theme::cyan())).child("Lecture de l'historique…"))
+                .when(self.loading, |s| {
+                    s.child(Spinner::new().color(theme::cyan()))
+                        .child("Lecture de l'historique…")
+                })
                 .when(!self.loading, |s| s.child("Aucun commit"))
                 .into_any_element()
         } else {
             uniform_list("history", data.history.len(), move |range, _, cx| {
+                // The graph column adapts to the lanes actually visible.
+                let rows: Vec<_> = range.clone().map(|ix| data.graph.row(ix)).collect();
+                let graph_width =
+                    graph_view::column_width(rows.iter().map(|r| r.width).max().unwrap_or(1));
                 range
-                    .map(|ix| {
+                    .zip(rows)
+                    .map(|(ix, row)| {
                         let commit = &data.history.commits[ix];
-                        let row = data.graph.row(ix);
                         let is_selected = selected == Some(commit.id);
-                        let style = NodeStyle { is_head: head == Some(commit.id), is_merge: commit.parents.len() > 1, selected: is_selected };
-                        let labels = data.decorations.get(&commit.id).map(|l| l.iter().map(label_chip).collect::<Vec<_>>()).unwrap_or_default();
+                        let style = NodeStyle {
+                            is_head: head == Some(commit.id),
+                            is_merge: commit.parents.len() > 1,
+                            selected: is_selected,
+                        };
+                        let labels = data
+                            .decorations
+                            .get(&commit.id)
+                            .map(|l| l.iter().map(label_chip).collect::<Vec<_>>())
+                            .unwrap_or_default();
                         let id = commit.id;
                         let entity = entity.clone();
                         h_flex()
                             .id(SharedString::from(commit.id.to_string()))
+                            .test_support()
                             .h(px(ROW_HEIGHT))
                             .w_full()
                             .pr_3()
@@ -118,9 +158,18 @@ impl RepoView {
                             .cursor_pointer()
                             .hover(|s| s.bg(theme::raised()))
                             .when(is_selected, |s| {
-                                s.bg(theme::alpha(theme::cyan(), if focused { 0.16 } else { 0.1 }))
+                                s.bg(theme::alpha(
+                                    theme::cyan(),
+                                    if focused { 0.16 } else { 0.1 },
+                                ))
                             })
-                            .child(div().flex_none().w(graph_width).h_full().child(graph_view::graph_cell(row, style)))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .w(graph_width)
+                                    .h_full()
+                                    .child(graph_view::graph_cell(row, style)),
+                            )
                             .child(
                                 h_flex()
                                     .flex_1()
@@ -131,12 +180,30 @@ impl RepoView {
                                         div()
                                             .min_w_0()
                                             .truncate()
-                                            .when(commit.parents.len() > 1, |s| s.text_color(cx.theme().muted_foreground))
+                                            .when(commit.parents.len() > 1, |s| {
+                                                s.text_color(cx.theme().muted_foreground)
+                                            })
                                             .child(commit.summary.clone()),
                                     ),
                             )
-                            .child(div().flex_none().w(px(130.)).truncate().text_xs().text_color(cx.theme().muted_foreground).child(commit.author.clone()))
-                            .child(div().flex_none().w(px(56.)).text_xs().text_right().text_color(cx.theme().muted_foreground).child(fmt::relative_time(commit.time, now)))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .w(px(130.))
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(commit.author.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .w(px(56.))
+                                    .text_xs()
+                                    .text_right()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(fmt::relative_time(commit.time, now)),
+                            )
                             .child(
                                 div()
                                     .flex_none()
@@ -173,20 +240,42 @@ impl RepoView {
                     .min_h_0()
                     .track_focus(&self.history_focus)
                     .key_context("History")
-                    .on_action(cx.listener(|this, _: &SelectNewer, _, cx| this.move_selection(-1, cx)))
-                    .on_action(cx.listener(|this, _: &SelectOlder, _, cx| this.move_selection(1, cx)))
+                    .on_action(
+                        cx.listener(|this, _: &SelectNewer, _, cx| this.move_selection(-1, cx)),
+                    )
+                    .on_action(
+                        cx.listener(|this, _: &SelectOlder, _, cx| this.move_selection(1, cx)),
+                    )
                     .child(list)
                     .child(Scrollbar::vertical(&self.history_scroll)),
             )
     }
 
     pub(super) fn render_commit_details(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(commit) = self.selected.and_then(|id| self.data.history.row_of(&id)).map(|r| self.data.history.commits[r].clone()) else {
-            return v_flex().size_full().items_center().justify_center().text_color(cx.theme().muted_foreground).child("Sélectionne un commit").into_any_element();
+        let Some(commit) = self
+            .selected
+            .and_then(|id| self.data.history.row_of(&id))
+            .map(|r| self.data.history.commits[r].clone())
+        else {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .text_color(cx.theme().muted_foreground)
+                .child("Sélectionne un commit")
+                .into_any_element();
         };
         let sha = commit.id.to_string();
-        let message = if self.commit_message.is_empty() { SharedString::from(commit.summary.clone()) } else { self.commit_message.clone() };
-        let (subject, body) = message.split_once('\n').map_or((message.to_string(), String::new()), |(s, b)| (s.to_string(), b.trim().to_string()));
+        let message = if self.commit_message.is_empty() {
+            SharedString::from(commit.summary.clone())
+        } else {
+            self.commit_message.clone()
+        };
+        let (subject, body) = message
+            .split_once('\n')
+            .map_or((message.to_string(), String::new()), |(s, b)| {
+                (s.to_string(), b.trim().to_string())
+            });
         v_flex()
             .size_full()
             .min_h_0()
@@ -201,8 +290,20 @@ impl RepoView {
                     .bg(theme::panel())
                     .border_b_1()
                     .border_color(cx.theme().border)
-                    .child(div().text_base().font_weight(gpui_kit::FontWeight::SEMIBOLD).child(subject))
-                    .when(!body.is_empty(), |s| s.child(div().text_sm().text_color(cx.theme().muted_foreground).child(body)))
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(subject),
+                    )
+                    .when(!body.is_empty(), |s| {
+                        s.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(body),
+                        )
+                    })
                     .child(
                         h_flex()
                             .gap_3()
@@ -220,13 +321,23 @@ impl RepoView {
                                     .hover(|s| s.text_color(theme::magenta()))
                                     .child(Icon::new(Lucide::Copy).xsmall())
                                     .child(commit.id.to_hex_with_len(10).to_string())
-                                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(sha.clone()))),
+                                    .on_click(move |_, _, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            sha.clone(),
+                                        ))
+                                    }),
                             )
                             .child(div().flex_1())
                             .child(format!("{} fichier(s)", self.commit_files)),
                     ),
             )
-            .child(div().flex_1().min_h_0().p_2().child(Diff::new(&self.commit_diff).line_number(true)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .p_2()
+                    .child(Diff::new(&self.commit_diff).line_number(true)),
+            )
             .into_any_element()
     }
 }

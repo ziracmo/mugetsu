@@ -17,9 +17,9 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::{ActiveTheme as _, WindowExt as _, v_flex};
 use gpui_kit::{
-    AnimationExt as _, AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, ScrollStrategy, SharedString, Styled as _, Task,
-    UniformListScrollHandle, Window, div,
+    AnimationExt as _, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollStrategy, SharedString,
+    Styled as _, Task, UniformListScrollHandle, Window, div,
 };
 use mugetsu_git::{FileDiff, Repo};
 
@@ -27,7 +27,17 @@ use crate::fetch_policy;
 use crate::model::RepoData;
 use crate::pr::{self, PrCache, PrLookup};
 
-gpui_kit::actions!(repo, [SelectNewer, SelectOlder, Fetch, Refresh, ShowHistory, ShowChanges]);
+gpui_kit::actions!(
+    repo,
+    [
+        SelectNewer,
+        SelectOlder,
+        Fetch,
+        Refresh,
+        ShowHistory,
+        ShowChanges
+    ]
+);
 
 pub fn init(cx: &mut gpui_kit::App) {
     use gpui_kit::KeyBinding;
@@ -161,6 +171,7 @@ impl RepoView {
         self.repo.name()
     }
 
+    #[cfg(test)]
     pub fn data(&self) -> &Arc<RepoData> {
         &self.data
     }
@@ -169,6 +180,7 @@ impl RepoView {
         self.has_updates
     }
 
+    #[cfg(test)]
     pub fn is_loading(&self) -> bool {
         self.loading
     }
@@ -177,12 +189,24 @@ impl RepoView {
         self.fetching
     }
 
+    #[cfg(test)]
     pub fn mode(&self) -> Mode {
         self.mode
     }
 
+    #[cfg(test)]
     pub fn selected_commit(&self) -> Option<ObjectId> {
         self.selected
+    }
+
+    #[cfg(test)]
+    pub fn selected_ref(&self) -> Option<&SharedString> {
+        self.selected_ref.as_ref()
+    }
+
+    #[cfg(test)]
+    pub fn is_busy(&self) -> bool {
+        self.busy.is_some()
     }
 
     /// Called by the workspace when the tab gains or loses focus.
@@ -214,7 +238,9 @@ impl RepoView {
         self.loading = true;
         let repo = self.repo.clone();
         self._load = cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move { RepoData::load(&repo) }).await;
+            let result = cx
+                .background_spawn(async move { RepoData::load(&repo) })
+                .await;
             let _ = this.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
@@ -235,7 +261,9 @@ impl RepoView {
         let first_load = self.data.history.is_empty();
         self.data = data;
         // Keep the selected commit if it still exists, else select HEAD.
-        let keep = self.selected.filter(|id| self.data.history.row_of(id).is_some());
+        let keep = self
+            .selected
+            .filter(|id| self.data.history.row_of(id).is_some());
         match keep.or(self.data.refs.head) {
             Some(id) if keep.is_none() || first_load => self.select_commit(id, true, cx),
             _ => {}
@@ -243,7 +271,12 @@ impl RepoView {
         if self.mode == Mode::Changes {
             let still_there = self.selected_change.as_ref().is_some_and(|sel| {
                 self.data.status.files.iter().any(|f| {
-                    f.path == sel.path && if sel.staged { f.is_staged() } else { f.is_unstaged() }
+                    f.path == sel.path
+                        && if sel.staged {
+                            f.is_staged()
+                        } else {
+                            f.is_unstaged()
+                        }
                 })
             });
             if still_there {
@@ -255,7 +288,13 @@ impl RepoView {
             }
         }
         if let Some(head) = self.data.refs.head_branch.clone() {
-            let upstream = self.data.refs.branches.iter().find(|b| b.is_head).and_then(|b| b.upstream.clone());
+            let upstream = self
+                .data
+                .refs
+                .branches
+                .iter()
+                .find(|b| b.is_head)
+                .and_then(|b| b.upstream.clone());
             self.lookup_pr(&head, upstream.as_deref(), false, cx);
         }
     }
@@ -263,9 +302,12 @@ impl RepoView {
     // ---- History selection -------------------------------------------------
 
     pub fn select_commit(&mut self, id: ObjectId, scroll: bool, cx: &mut Context<Self>) {
-        let Some(row) = self.data.history.row_of(&id) else { return };
+        let Some(row) = self.data.history.row_of(&id) else {
+            return;
+        };
         if scroll {
-            self.history_scroll.scroll_to_item(row, ScrollStrategy::Center);
+            self.history_scroll
+                .scroll_to_item(row, ScrollStrategy::Center);
         }
         if self.selected == Some(id) && !self.commit_diff.read(cx).files().is_empty() {
             cx.notify();
@@ -279,7 +321,15 @@ impl RepoView {
             let result = cx
                 .background_spawn(async move {
                     let message = repo.git().run(["log", "-1", "--format=%B", &rev])?;
-                    let patch = repo.git().run(["show", "--format=", "--no-ext-diff", "--patch", "--find-renames", "--first-parent", &rev])?;
+                    let patch = repo.git().run([
+                        "show",
+                        "--format=",
+                        "--no-ext-diff",
+                        "--patch",
+                        "--find-renames",
+                        "--first-parent",
+                        &rev,
+                    ])?;
                     let files = UiDiffFile::parse(&patch).unwrap_or_default();
                     anyhow::Ok((message.trim().to_string(), files))
                 })
@@ -304,7 +354,10 @@ impl RepoView {
         if len == 0 {
             return;
         }
-        let row = self.selected.and_then(|id| self.data.history.row_of(&id)).unwrap_or(0);
+        let row = self
+            .selected
+            .and_then(|id| self.data.history.row_of(&id))
+            .unwrap_or(0);
         let next = row.saturating_add_signed(delta).min(len - 1);
         let id = self.data.history.commits[next].id;
         self.select_commit(id, true, cx);
@@ -312,8 +365,16 @@ impl RepoView {
 
     // ---- Pull requests -----------------------------------------------------
 
-    pub fn lookup_pr(&mut self, branch: &str, upstream: Option<&str>, is_remote: bool, cx: &mut Context<Self>) {
-        let Some(gh) = self.data.github.clone() else { return };
+    pub fn lookup_pr(
+        &mut self,
+        branch: &str,
+        upstream: Option<&str>,
+        is_remote: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(gh) = self.data.github.clone() else {
+            return;
+        };
         let forge_branch = pr::forge_branch(branch, upstream, is_remote);
         let now = Instant::now();
         if !self.prs.needs_lookup(&forge_branch, now) {
@@ -322,7 +383,9 @@ impl RepoView {
         self.prs.set(forge_branch.clone(), PrLookup::Loading, now);
         cx.spawn(async move |this, cx| {
             let key = forge_branch.clone();
-            let result = cx.background_spawn(async move { pr::lookup(&gh, &key) }).await;
+            let result = cx
+                .background_spawn(async move { pr::lookup(&gh, &key) })
+                .await;
             let lookup = match result {
                 Ok(Some(found)) => PrLookup::Found(found),
                 Ok(None) => PrLookup::None,
@@ -336,7 +399,12 @@ impl RepoView {
         .detach();
     }
 
-    pub fn pr_for(&self, branch: &str, upstream: Option<&str>, is_remote: bool) -> Option<&PrLookup> {
+    pub fn pr_for(
+        &self,
+        branch: &str,
+        upstream: Option<&str>,
+        is_remote: bool,
+    ) -> Option<&PrLookup> {
         self.prs.get(&pr::forge_branch(branch, upstream, is_remote))
     }
 
@@ -426,7 +494,9 @@ impl RepoView {
                 match result {
                     Ok(()) => on_success(this, window, cx),
                     Err(e) => window.push_notification(
-                        gpui_kit::component::notification::Notification::error(format!("{label} : {e:#}")),
+                        gpui_kit::component::notification::Notification::error(format!(
+                            "{label} : {e:#}"
+                        )),
                         cx,
                     ),
                 }
@@ -446,20 +516,47 @@ impl Render for RepoView {
                 .items_center()
                 .justify_center()
                 .gap_2()
-                .child(div().text_color(crate::theme::red()).child("Impossible de lire le dépôt"))
-                .child(div().text_sm().text_color(cx.theme().muted_foreground).child(err.clone()))
+                .child(
+                    div()
+                        .text_color(crate::theme::red())
+                        .child("Impossible de lire le dépôt"),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(err.clone()),
+                )
                 .into_any_element()
         } else {
             let main = match self.mode {
                 Mode::History => v_resizable("history-split")
-                    .child(resizable_panel().size_range(rem * 8. ..rem * 400.).child(self.render_history(window, cx)))
-                    .child(resizable_panel().size(rem * 22.).size_range(rem * 8. ..rem * 400.).child(self.render_commit_details(cx)))
+                    .child(
+                        resizable_panel()
+                            .size_range(rem * 8. ..rem * 400.)
+                            .child(self.render_history(window, cx)),
+                    )
+                    .child(
+                        resizable_panel()
+                            .size(rem * 22.)
+                            .size_range(rem * 8. ..rem * 400.)
+                            .child(self.render_commit_details(cx)),
+                    )
                     .into_any_element(),
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
             };
             h_resizable("repo-split")
-                .child(resizable_panel().size(rem * 17.).size_range(rem * 12. ..rem * 32.).child(self.render_sidebar(cx)))
-                .child(resizable_panel().size_range(rem * 30. ..rem * 400.).child(main))
+                .child(
+                    resizable_panel()
+                        .size(rem * 17.)
+                        .size_range(rem * 12. ..rem * 32.)
+                        .child(self.render_sidebar(cx)),
+                )
+                .child(
+                    resizable_panel()
+                        .size_range(rem * 30. ..rem * 400.)
+                        .child(main),
+                )
                 .into_any_element()
         };
         let generation = self.generation.min(1);
@@ -482,7 +579,8 @@ impl Render for RepoView {
                     // Content fades in when the tab first gets data.
                     .with_animation(
                         ("repo-fade", generation),
-                        gpui_kit::Animation::new(std::time::Duration::from_millis(220)).with_easing(gpui_kit::ease_out_quint()),
+                        gpui_kit::Animation::new(std::time::Duration::from_millis(220))
+                            .with_easing(gpui_kit::ease_out_quint()),
                         |el, t| el.opacity(0.4 + 0.6 * t),
                     ),
             )

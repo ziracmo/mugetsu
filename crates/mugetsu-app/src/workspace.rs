@@ -6,13 +6,17 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex,
+};
 use gpui_kit::{
-    Animation, AnimationExt as _, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Task, Window, div, prelude::FluentBuilder as _, px,
+    Animation, AnimationExt as _, AppContext as _, Context, Entity, InteractiveElement as _,
+    IntoElement, ParentElement as _, PathPromptOptions, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use mugetsu_git::Repo;
 
@@ -49,7 +53,13 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new(paths: Vec<PathBuf>, active: usize, persist: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        paths: Vec<PathBuf>,
+        active: usize,
+        persist: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let scheduler = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -72,13 +82,17 @@ impl Workspace {
         };
         for path in paths {
             if let Err(e) = this.open(path, window, cx) {
-                window.push_notification(gpui_kit::component::notification::Notification::error(e.to_string()), cx);
+                window.push_notification(
+                    gpui_kit::component::notification::Notification::error(e.to_string()),
+                    cx,
+                );
             }
         }
         this.activate(active.min(this.tabs.len().saturating_sub(1)), cx);
         this
     }
 
+    #[cfg(test)]
     pub fn tabs(&self) -> Vec<Entity<RepoView>> {
         self.tabs.iter().map(|t| t.view.clone()).collect()
     }
@@ -87,26 +101,46 @@ impl Workspace {
         self.tabs.get(self.active).map(|t| &t.view)
     }
 
+    #[cfg(test)]
     pub fn active_index(&self) -> usize {
         self.active
     }
 
     /// Opens a repository (or focuses its tab if already open).
-    pub fn open(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> anyhow::Result<()> {
+    pub fn open(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
         let repo = Repo::open(&path)?;
-        if let Some(i) = self.tabs.iter().position(|t| t.view.read(cx).repo().root() == repo.root()) {
+        if let Some(i) = self
+            .tabs
+            .iter()
+            .position(|t| t.view.read(cx).repo().root() == repo.root())
+        {
             self.activate(i, cx);
             return Ok(());
         }
         let view = cx.new(|cx| RepoView::new(repo, window, cx));
-        let sub = cx.subscribe_in(&view, window, |this, _, event: &RepoEvent, window, cx| match event {
-            RepoEvent::UpdatesChanged => cx.notify(),
-            RepoEvent::OpenWorktree(path) => {
-                if let Err(e) = this.open(path.clone(), window, cx) {
-                    window.push_notification(gpui_kit::component::notification::Notification::error(e.to_string()), cx);
-                }
-            }
-        });
+        let sub =
+            cx.subscribe_in(
+                &view,
+                window,
+                |this, _, event: &RepoEvent, window, cx| match event {
+                    RepoEvent::UpdatesChanged => cx.notify(),
+                    RepoEvent::OpenWorktree(path) => {
+                        if let Err(e) = this.open(path.clone(), window, cx) {
+                            window.push_notification(
+                                gpui_kit::component::notification::Notification::error(
+                                    e.to_string(),
+                                ),
+                                cx,
+                            );
+                        }
+                    }
+                },
+            );
         self.tabs.push(Tab { view, _sub: sub });
         self.activate(self.tabs.len() - 1, cx);
         Ok(())
@@ -140,7 +174,8 @@ impl Workspace {
     fn sync_focus(&mut self, cx: &mut Context<Self>) {
         let (active, window_active) = (self.active, self.window_active);
         for (i, tab) in self.tabs.iter().enumerate() {
-            tab.view.update(cx, |v, cx| v.set_focused(window_active && i == active, cx));
+            tab.view
+                .update(cx, |v, cx| v.set_focused(window_active && i == active, cx));
         }
     }
 
@@ -148,7 +183,8 @@ impl Workspace {
         let now = Instant::now();
         let (active, window_active) = (self.active, self.window_active);
         for (i, tab) in self.tabs.iter().enumerate() {
-            tab.view.update(cx, |v, cx| v.tick(window_active && i == active, now, cx));
+            tab.view
+                .update(cx, |v, cx| v.tick(window_active && i == active, now, cx));
         }
     }
 
@@ -157,7 +193,11 @@ impl Workspace {
             return;
         }
         Session {
-            repos: self.tabs.iter().map(|t| t.view.read(cx).repo().root().to_path_buf()).collect(),
+            repos: self
+                .tabs
+                .iter()
+                .map(|t| t.view.read(cx).repo().root().to_path_buf())
+                .collect(),
             active: self.active,
         }
         .save();
@@ -175,7 +215,12 @@ impl Workspace {
                 let _ = this.update_in(cx, |this, window, cx| {
                     for p in paths {
                         if let Err(e) = this.open(p, window, cx) {
-                            window.push_notification(gpui_kit::component::notification::Notification::error(e.to_string()), cx);
+                            window.push_notification(
+                                gpui_kit::component::notification::Notification::error(
+                                    e.to_string(),
+                                ),
+                                cx,
+                            );
                         }
                     }
                 });
@@ -192,7 +237,8 @@ impl Workspace {
         let fetching = view.is_fetching();
         let path = view.repo().root().display().to_string();
         h_flex()
-            .id(SharedString::from(format!("tab-{path}")))
+            .id(SharedString::from(format!("tab-{name}")))
+            .test_support()
             .h(px(30.))
             .px_3()
             .gap_2()
@@ -201,37 +247,63 @@ impl Workspace {
             .cursor_pointer()
             .text_sm()
             .border_b_2()
-            .when(active, |s| s.bg(cx.theme().background).border_color(theme::cyan()).text_color(cx.theme().foreground))
-            .when(!active, |s| {
-                s.border_color(gpui_kit::transparent_black()).text_color(cx.theme().muted_foreground).hover(|s| s.bg(theme::raised()))
+            .when(active, |s| {
+                s.bg(cx.theme().background)
+                    .border_color(theme::cyan())
+                    .text_color(cx.theme().foreground)
             })
-            .child(Icon::new(Lucide::FolderGit2).xsmall().text_color(if active { theme::cyan() } else { theme::muted() }))
-            .child(name)
+            .when(!active, |s| {
+                s.border_color(gpui_kit::transparent_black())
+                    .text_color(cx.theme().muted_foreground)
+                    .hover(|s| s.bg(theme::raised()))
+            })
+            .child(
+                Icon::new(Lucide::FolderGit2)
+                    .xsmall()
+                    .text_color(if active {
+                        theme::cyan()
+                    } else {
+                        theme::muted()
+                    }),
+            )
+            .child(name.clone())
             // Remote changes found by a background fetch: pulsing neon dot.
             .when(updates, |s| {
                 s.child(
                     div()
-                        .id("updates-dot")
+                        .id(SharedString::from(format!("updates-{name}")))
+                        .test_support()
                         .size(px(7.))
                         .rounded_full()
                         .bg(theme::magenta())
                         .with_animation(
                             "updates-pulse",
-                            Animation::new(Duration::from_millis(1200)).repeat().with_easing(gpui_kit::pulsating_between(0.35, 1.)),
+                            Animation::new(Duration::from_millis(1200))
+                                .repeat()
+                                .with_easing(gpui_kit::pulsating_between(0.35, 1.)),
                             |el, t| el.opacity(t),
                         ),
                 )
             })
             .when(fetching && active, |s| {
-                s.child(div().size(px(5.)).rounded_full().bg(theme::cyan()).with_animation(
-                    "fetch-blink",
-                    Animation::new(Duration::from_millis(700)).repeat().with_easing(gpui_kit::pulsating_between(0.2, 1.)),
-                    |el, t| el.opacity(t),
-                ))
+                s.child(
+                    div()
+                        .size(px(5.))
+                        .rounded_full()
+                        .bg(theme::cyan())
+                        .with_animation(
+                            "fetch-blink",
+                            Animation::new(Duration::from_millis(700))
+                                .repeat()
+                                .with_easing(gpui_kit::pulsating_between(0.2, 1.)),
+                            |el, t| el.opacity(t),
+                        ),
+                )
             })
             .child(
                 div()
-                    .id(SharedString::from(format!("close-{path}")))
+                    .id(SharedString::from(format!("close-{name}")))
+                    .test_support()
                     .rounded_sm()
                     .text_color(theme::muted())
                     .hover(|s| s.text_color(theme::red()).bg(theme::raised()))
@@ -248,7 +320,9 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tabs: Vec<_> = (0..self.tabs.len()).map(|i| self.render_tab(i, cx).into_any_element()).collect();
+        let tabs: Vec<_> = (0..self.tabs.len())
+            .map(|i| self.render_tab(i, cx).into_any_element())
+            .collect();
         let body = match self.active() {
             Some(view) => view.clone().into_any_element(),
             None => v_flex()
@@ -256,10 +330,23 @@ impl Render for Workspace {
                 .items_center()
                 .justify_center()
                 .gap_4()
-                .child(div().text_3xl().font_weight(gpui_kit::FontWeight::BOLD).text_color(theme::cyan()).child("月 Mugetsu"))
-                .child(div().text_color(cx.theme().muted_foreground).child("Ouvre un dépôt Git pour commencer"))
                 .child(
-                    Button::new("open-first").primary().icon(Icon::new(Lucide::FolderOpen)).label("Ouvrir un dépôt…")
+                    div()
+                        .text_3xl()
+                        .font_weight(gpui_kit::FontWeight::BOLD)
+                        .text_color(theme::cyan())
+                        .child("月 Mugetsu"),
+                )
+                .child(
+                    div()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Ouvre un dépôt Git pour commencer"),
+                )
+                .child(
+                    Button::new("open-first")
+                        .primary()
+                        .icon(Icon::new(Lucide::FolderOpen))
+                        .label("Ouvrir un dépôt…")
                         .on_click(cx.listener(|this, _, window, cx| this.prompt_open(window, cx))),
                 )
                 .into_any_element(),
@@ -271,7 +358,9 @@ impl Render for Workspace {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .on_action(cx.listener(|this, _: &OpenRepository, window, cx| this.prompt_open(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenRepository, window, cx| this.prompt_open(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &CloseTab, _, cx| this.close(this.active, cx)))
             .on_action(cx.listener(|this, _: &NextTab, _, cx| {
                 if !this.tabs.is_empty() {
@@ -291,8 +380,14 @@ impl Render for Workspace {
                         .items_end()
                         .children(tabs)
                         .child(
-                            Button::new("open").ghost().xsmall().icon(Icon::new(Lucide::Plus)).tooltip("Ouvrir un dépôt (⌘O)")
-                                .on_click(cx.listener(|this, _, window, cx| this.prompt_open(window, cx))),
+                            Button::new("open")
+                                .ghost()
+                                .xsmall()
+                                .icon(Icon::new(Lucide::Plus))
+                                .tooltip("Ouvrir un dépôt (⌘O)")
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.prompt_open(window, cx)),
+                                ),
                         ),
                 ),
             )

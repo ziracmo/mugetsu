@@ -7,7 +7,11 @@ pub const FOCUSED_INTERVAL: Duration = Duration::from_secs(10);
 pub const BACKGROUND_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub fn interval(focused: bool) -> Duration {
-    if focused { FOCUSED_INTERVAL } else { BACKGROUND_INTERVAL }
+    if focused {
+        FOCUSED_INTERVAL
+    } else {
+        BACKGROUND_INTERVAL
+    }
 }
 
 /// `last` is when the previous fetch *started*; `None` means never.

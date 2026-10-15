@@ -34,7 +34,9 @@ impl Repo {
 
     /// Stages (or unstages with `reverse`) a single hunk of `file`.
     pub fn apply_hunk(&self, file: &DiffFile, hunk: usize, reverse: bool) -> anyhow::Result<()> {
-        let patch = file.hunk_patch(hunk).ok_or_else(|| anyhow::anyhow!("no hunk {hunk}"))?;
+        let patch = file
+            .hunk_patch(hunk)
+            .ok_or_else(|| anyhow::anyhow!("no hunk {hunk}"))?;
         let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
         if reverse {
             args.push("--reverse");
@@ -48,7 +50,9 @@ impl Repo {
         if amend {
             args.push("--amend");
         }
-        self.git().run_with_stdin(args, message.as_bytes()).map(drop)
+        self.git()
+            .run_with_stdin(args, message.as_bytes())
+            .map(drop)
     }
 
     pub fn checkout(&self, branch: &str) -> anyhow::Result<()> {
@@ -57,12 +61,25 @@ impl Repo {
 
     /// Checks out a remote branch as a new local tracking branch.
     pub fn checkout_remote(&self, remote_branch: &str) -> anyhow::Result<()> {
-        let local = remote_branch.split_once('/').map_or(remote_branch, |(_, b)| b);
-        self.git().run(["switch", "--track", "-c", local, remote_branch]).map(drop)
+        let local = remote_branch
+            .split_once('/')
+            .map_or(remote_branch, |(_, b)| b);
+        self.git()
+            .run(["switch", "--track", "-c", local, remote_branch])
+            .map(drop)
     }
 
-    pub fn create_branch(&self, name: &str, start: Option<&str>, checkout: bool) -> anyhow::Result<()> {
-        let mut args = if checkout { vec!["switch", "-c", name] } else { vec!["branch", name] };
+    pub fn create_branch(
+        &self,
+        name: &str,
+        start: Option<&str>,
+        checkout: bool,
+    ) -> anyhow::Result<()> {
+        let mut args = if checkout {
+            vec!["switch", "-c", name]
+        } else {
+            vec!["branch", name]
+        };
         if let Some(s) = start {
             args.push(s);
         }
@@ -70,10 +87,17 @@ impl Repo {
     }
 
     pub fn delete_branch(&self, name: &str, force: bool) -> anyhow::Result<()> {
-        self.git().run(["branch", if force { "-D" } else { "-d" }, name]).map(drop)
+        self.git()
+            .run(["branch", if force { "-D" } else { "-d" }, name])
+            .map(drop)
     }
 
-    pub fn create_tag(&self, name: &str, target: &str, message: Option<&str>) -> anyhow::Result<()> {
+    pub fn create_tag(
+        &self,
+        name: &str,
+        target: &str,
+        message: Option<&str>,
+    ) -> anyhow::Result<()> {
         match message {
             Some(m) => self.git().run(["tag", "-a", name, target, "-m", m]),
             None => self.git().run(["tag", name, target]),
@@ -86,7 +110,9 @@ impl Repo {
     }
 
     pub fn fetch_all(&self) -> anyhow::Result<()> {
-        self.git().run(["fetch", "--all", "--prune", "--quiet"]).map(drop)
+        self.git()
+            .run(["fetch", "--all", "--prune", "--quiet"])
+            .map(drop)
     }
 
     pub fn pull(&self) -> anyhow::Result<()> {
@@ -103,18 +129,24 @@ impl Repo {
 
     pub fn stash_push(&self, message: Option<&str>) -> anyhow::Result<()> {
         match message {
-            Some(m) => self.git().run(["stash", "push", "--include-untracked", "-m", m]),
+            Some(m) => self
+                .git()
+                .run(["stash", "push", "--include-untracked", "-m", m]),
             None => self.git().run(["stash", "push", "--include-untracked"]),
         }
         .map(drop)
     }
 
     pub fn stash_pop(&self, index: usize) -> anyhow::Result<()> {
-        self.git().run(["stash", "pop", &format!("stash@{{{index}}}")]).map(drop)
+        self.git()
+            .run(["stash", "pop", &format!("stash@{{{index}}}")])
+            .map(drop)
     }
 
     pub fn stash_drop(&self, index: usize) -> anyhow::Result<()> {
-        self.git().run(["stash", "drop", &format!("stash@{{{index}}}")]).map(drop)
+        self.git()
+            .run(["stash", "drop", &format!("stash@{{{index}}}")])
+            .map(drop)
     }
 
     pub fn worktree_add(&self, path: &str, branch: &str, create: bool) -> anyhow::Result<()> {

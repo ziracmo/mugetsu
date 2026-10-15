@@ -39,7 +39,10 @@ fn fixture() -> (tempfile::TempDir, Repo) {
     commit_file(p, "b.txt", "b\n", "f1");
     commit_file(p, "b.txt", "b\nb2\n", "f2");
     git(p, &["switch", "-q", "main"]);
-    git(p, &["merge", "-q", "--no-ff", "feature", "-m", "merge feature"]);
+    git(
+        p,
+        &["merge", "-q", "--no-ff", "feature", "-m", "merge feature"],
+    );
     git(p, &["tag", "-a", "v1.0", "-m", "release"]);
     let repo = Repo::open(p).unwrap();
     (dir, repo)
@@ -63,8 +66,12 @@ fn history_and_graph_follow_the_dag() {
 #[test]
 fn refs_snapshot_lists_everything() {
     let (dir, repo) = fixture();
-    let wt = dir.path().join("../").join(format!("wt-{}", std::process::id()));
-    repo.worktree_add(wt.to_str().unwrap(), "wt-branch", true).unwrap();
+    let wt = dir
+        .path()
+        .join("../")
+        .join(format!("wt-{}", std::process::id()));
+    repo.worktree_add(wt.to_str().unwrap(), "wt-branch", true)
+        .unwrap();
     std::fs::write(dir.path().join("a.txt"), "dirty\n").unwrap();
     repo.stash_push(Some("wip")).unwrap();
 
@@ -73,13 +80,20 @@ fn refs_snapshot_lists_everything() {
     let names: Vec<_> = refs.branches.iter().map(|b| b.name.as_str()).collect();
     assert_eq!(names, ["feature", "main", "wt-branch"]);
     assert_eq!(refs.tags.len(), 1);
-    assert_eq!(refs.tags[0].target, refs.head.unwrap(), "annotated tag peeled to commit");
+    assert_eq!(
+        refs.tags[0].target,
+        refs.head.unwrap(),
+        "annotated tag peeled to commit"
+    );
     assert_eq!(refs.worktrees.len(), 2);
     assert_eq!(refs.stashes.len(), 1);
     assert!(refs.stashes[0].message.contains("wip"));
 
     let history = repo.history(&refs.tips()).unwrap();
-    assert!(history.row_of(&refs.stashes[0].id).is_some(), "stash commits are part of the walk");
+    assert!(
+        history.row_of(&refs.stashes[0].id).is_some(),
+        "stash commits are part of the walk"
+    );
     repo.worktree_remove(wt.to_str().unwrap()).unwrap();
 }
 
@@ -94,7 +108,10 @@ fn stage_hunk_commit_cycle() {
     assert_eq!(status.unstaged().count(), 2);
     let untracked = status.files.iter().find(|f| f.path == "new.txt").unwrap();
     assert_eq!(untracked.worktree, Change::Untracked);
-    assert_eq!(repo.diff_untracked("new.txt").unwrap().files[0].hunks[0].lines[0].kind, LineKind::Added);
+    assert_eq!(
+        repo.diff_untracked("new.txt").unwrap().files[0].hunks[0].lines[0].kind,
+        LineKind::Added
+    );
 
     let diff = repo.diff_worktree(false, Some("a.txt")).unwrap();
     repo.apply_hunk(&diff.files[0], 0, false).unwrap();
@@ -121,7 +138,10 @@ fn stage_hunk_commit_cycle() {
 fn fetch_moves_fingerprint() {
     let (dir, repo) = fixture();
     let clone_dir = tempfile::tempdir().unwrap();
-    git(clone_dir.path(), &["clone", "-q", dir.path().to_str().unwrap(), "c"]);
+    git(
+        clone_dir.path(),
+        &["clone", "-q", dir.path().to_str().unwrap(), "c"],
+    );
     let clone = Repo::open(clone_dir.path().join("c")).unwrap();
     let before = clone.refs_fingerprint().unwrap();
 
@@ -129,7 +149,13 @@ fn fetch_moves_fingerprint() {
     assert_eq!(clone.refs_fingerprint().unwrap(), before);
     clone.fetch_all().unwrap();
     assert_ne!(clone.refs_fingerprint().unwrap(), before);
-    let main = clone.refs().unwrap().branches.into_iter().find(|b| b.name == "main").unwrap();
+    let main = clone
+        .refs()
+        .unwrap()
+        .branches
+        .into_iter()
+        .find(|b| b.name == "main")
+        .unwrap();
     assert_eq!(main.behind, 1);
     let _ = repo;
 }
