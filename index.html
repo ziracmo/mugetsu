@@ -139,23 +139,23 @@
     </div>
     <div class="race" id="race" aria-label="Opening the history">
       <div class="lane lane--mugetsu" data-lane="mugetsu">
-        <div class="lane__who"><b>Mugetsu</b><small>gix in process, GPU graph</small></div>
+        <div class="lane__who"><b>Mugetsu</b><small>in-process decode and layout, measured<a class="src" href="#src-1" aria-label="source 1">1</a></small></div>
         <div class="lane__track"><div class="lane__bar"></div><span class="lane__time nums" id="speed-figure"><span id="speed-num">0.71</span><span id="speed-unit">s</span></span></div>
       </div>
       <div class="lane" data-lane="fork">
-        <div class="lane__who"><b>Fork</b><small>spawns git, parses text</small></div>
-        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">not measured</span></div>
+        <div class="lane__who"><b>Fork</b><small>bundled git command line<a class="src" href="#src-3" aria-label="source 3">3</a></small></div>
+        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">Not measured yet</span></div>
       </div>
       <div class="lane" data-lane="kraken">
-        <div class="lane__who"><b>GitKraken</b><small>JavaScript git, DOM rows</small></div>
-        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">not measured</span></div>
+        <div class="lane__who"><b>GitKraken</b><small>NodeGit in Electron<a class="src" href="#src-6" aria-label="source 6">6</a></small></div>
+        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">Not measured yet</span></div>
       </div>
       <div class="lane" data-lane="ghd">
-        <div class="lane__who"><b>GitHub Desktop</b><small>spawns git, loads pages of commits</small></div>
-        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">not measured</span></div>
+        <div class="lane__who"><b>GitHub Desktop</b><small>git command line via dugite, in Electron<a class="src" href="#src-9" aria-label="source 9">9</a></small></div>
+        <div class="lane__track"><div class="lane__bar"></div><span class="lane__time">Not measured yet</span></div>
       </div>
     </div>
-    <p class="speed__how" id="speed-how">Mugetsu's lane is real: on git.git, 85,593 commits read in 0.66&nbsp;s with a commit-graph, refs in 40&nbsp;ms, the graph laid out in 13&nbsp;ms, on four cores, scaled to your count. The other lanes show how those clients read history and keep running until you measure them on your machine; we have not, and we will not make their numbers up.</p>
+    <p class="speed__how" id="speed-how">Mugetsu's lane is measured inside the app on git.git: 85,593 commits decoded in 0.66&nbsp;s with a commit-graph, refs in 40&nbsp;ms, the graph laid out in 13&nbsp;ms, on four cores, then scaled to your count with the same cost model. The other lanes carry no number we did not take ourselves. They fill in with the click-to-graph time from the protocol <a class="link-plain" href="#compare">under the comparison</a>, on the same clone and the same Mac, and until then they stay empty.</p>
   </div>
 </section>
 

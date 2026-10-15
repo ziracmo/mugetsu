@@ -185,6 +185,8 @@ body::after { content: ""; position: fixed; inset: 0; z-index: 50; pointer-event
 .lane--mugetsu .lane__time { color: var(--ink); font-family: var(--font-display); font-weight: 300; font-size: clamp(1.75rem, 2.6vw, 2.5rem); letter-spacing: -0.02em; }
 .lane--mugetsu .lane__time #speed-unit { font-size: 0.5em; margin-left: 0.15em; }
 .lane.is-done .lane__time { color: var(--ink); }
+.lane:not(.lane--mugetsu):not(.is-measured) .lane__track { background: repeating-linear-gradient(90deg, transparent 0 10px, rgb(255 255 255 / 0.035) 10px 20px), var(--surface); }
+.lane:not(.lane--mugetsu) .lane__bar { background: linear-gradient(90deg, #2a2026, #5a3a44); }
 .lane:not(.lane--mugetsu) .lane__bar::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: repeating-linear-gradient(90deg, transparent 0 14px, rgb(255 255 255 / 0.05) 14px 28px); animation: stripes 1s linear infinite; }
 @keyframes stripes { to { background-position: 28px 0; } }
 .speed__how { margin-top: 2.5rem; color: var(--soft); max-width: 70ch; }
@@ -562,8 +564,8 @@ body::after { content: ""; position: fixed; inset: 0; z-index: 50; pointer-event
 @keyframes drift { from { transform: translateY(-6%); } to { transform: translateY(0); } }
 
 /* comparison: measured rows, method, sources */
-.facts .src { margin-left: 0.35em; font-size: 0.7em; vertical-align: super; color: var(--soft); text-decoration: none; }
-.facts .src:hover { color: var(--ink); }
+.facts .src, .lane__who .src { margin-left: 0.35em; font-size: 0.7em; vertical-align: super; color: var(--soft); text-decoration: none; }
+.facts .src:hover, .lane__who .src:hover { color: var(--ink); }
 .facts__bench dt { color: var(--glow); }
 .facts dd.is-missing { color: var(--soft); font-style: italic; }
 .compare__foot { margin-top: 4rem; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: var(--gutter); row-gap: 2rem; }

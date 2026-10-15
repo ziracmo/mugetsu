@@ -2,6 +2,8 @@
 (() => {
   const root = document.documentElement;
   const M = window.Motion;
+  // measured on one Mac, by hand, with the protocol under the comparison; null means not measured yet
+  let BENCH = {};
 
   // ---- accent colour (the same eight as the app's Settings window) ----
   const swatches = [...document.querySelectorAll('.sw')];
@@ -82,8 +84,25 @@
     raceRun.push(M.animate(me.querySelector('.lane__bar'), { width: ['0%', 'calc(100% - 12px)'] }, { duration: clock, easing: [0.33, 1, 0.68, 1] }));
     raceRun.push(M.animate((p) => showTime(t * p), { duration: clock, easing: [0.33, 1, 0.68, 1] }));
     setTimeout(() => me.classList.add('is-done'), clock * 1000);
-    lanes.slice(1).forEach((l, i) => {
-      raceRun.push(M.animate(l.querySelector('.lane__bar'), { width: ['0%', `${22 + i * 7}%`] }, { duration: clock * 2.2, easing: 'linear' }));
+    // the other lanes move only once measured on the same Mac, with the protocol under the comparison
+    const n0 = Number(slider.value) === 644;
+    lanes.slice(1).forEach((l) => {
+      const b = BENCH[l.dataset.lane] || {};
+      const bar = l.querySelector('.lane__bar'), label = l.querySelector('.lane__time');
+      if (b.open_s == null || !n0) { bar.style.width = '0%'; return; }
+      const mine = (BENCH.mugetsu && BENCH.mugetsu.open_s) || t;
+      const w = Math.min(96, Math.max(4, 100 * mine / b.open_s));
+      raceRun.push(M.animate(bar, { width: ['0%', `${w}%`] }, { duration: clock, easing: [0.33, 1, 0.68, 1] }));
+      raceRun.push(M.animate((p) => { label.textContent = `${(b.open_s * p).toFixed(1)} s`; }, { duration: clock, easing: [0.33, 1, 0.68, 1] }));
+    });
+  };
+  const laneLabels = () => {
+    const n0 = Number(slider.value) === 644;
+    lanes.slice(1).forEach((l) => {
+      const b = BENCH[l.dataset.lane] || {};
+      const label = l.querySelector('.lane__time');
+      l.classList.toggle('is-measured', b.open_s != null);
+      label.textContent = b.open_s == null ? 'Not measured yet' : n0 ? `${b.open_s.toFixed(1)} s` : 'Measured on git.git only';
     });
   };
   const update = () => {
@@ -91,6 +110,7 @@
     out.textContent = fmt.format(n);
     slider.setAttribute('aria-valuetext', fmt.format(n) + ' commits');
     showTime(timeFor(n));
+    laneLabels();
   };
   slider.addEventListener('input', update);
   slider.addEventListener('change', race);
@@ -166,8 +186,6 @@
       facts: [['Electron, TypeScript and React', 8], ['The browser engine (not published)', 0], ['dugite, the git command line driven from Node', 9], ['No charge', 8], ['Open source, MIT', 8]],
     },
   };
-  // measured on one Mac, by hand, with the protocol under the table; null means not measured yet
-  let BENCH = {};
   const pick = [...document.querySelectorAll('[data-client]')];
   const layersEl = document.getElementById('stack-layers');
   const factEls = ['f-runtime', 'f-graph', 'f-engine', 'f-price', 'f-source'].map((id) => document.getElementById(id));
@@ -202,6 +220,7 @@
     const m = document.getElementById('bench-machine');
     if (m && j.machine) m.textContent = `Measured on ${j.machine}, ${j.date}.`;
     showClient(current);
+    laneLabels();
   }).catch(() => {});
 
   // ---- downloads: look at the latest release for a .dmg and a .exe ----
