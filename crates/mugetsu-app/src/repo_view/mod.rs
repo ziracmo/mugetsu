@@ -1,0 +1,490 @@
+//! One repository tab: sidebar (branches, remotes, tags, worktrees, stashes),
+//! history graph with commit details, and the working-copy "Changes" view.
+
+mod changes;
+mod history;
+mod sidebar;
+mod toolbar;
+
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+use gix::ObjectId;
+use gpui_kit::component::diff::{DiffFile as UiDiffFile, DiffMode, DiffState};
+use gpui_kit::component::input::TextareaState;
+use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
+use gpui_kit::component::{ActiveTheme as _, WindowExt as _, v_flex};
+use gpui_kit::{
+    AnimationExt as _, AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, ScrollStrategy, SharedString, Styled as _, Task,
+    UniformListScrollHandle, Window, div,
+};
+use mugetsu_git::{FileDiff, Repo};
+
+use crate::fetch_policy;
+use crate::model::RepoData;
+use crate::pr::{self, PrCache, PrLookup};
+
+gpui_kit::actions!(repo, [SelectNewer, SelectOlder, Fetch, Refresh, ShowHistory, ShowChanges]);
+
+pub fn init(cx: &mut gpui_kit::App) {
+    use gpui_kit::KeyBinding;
+    cx.bind_keys([
+        KeyBinding::new("up", SelectNewer, Some("History")),
+        KeyBinding::new("k", SelectNewer, Some("History")),
+        KeyBinding::new("down", SelectOlder, Some("History")),
+        KeyBinding::new("j", SelectOlder, Some("History")),
+        KeyBinding::new("secondary-shift-f", Fetch, Some("Repo")),
+        KeyBinding::new("secondary-r", Refresh, Some("Repo")),
+        KeyBinding::new("secondary-1", ShowHistory, Some("Repo")),
+        KeyBinding::new("secondary-2", ShowChanges, Some("Repo")),
+    ]);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    History,
+    Changes,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RepoEvent {
+    /// Unseen remote changes appeared or were acknowledged (tab indicator).
+    UpdatesChanged,
+    OpenWorktree(PathBuf),
+}
+
+/// Which working-copy file is shown in the Changes view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectedChange {
+    pub path: String,
+    pub staged: bool,
+}
+
+pub struct RepoView {
+    repo: Repo,
+    data: Arc<RepoData>,
+    loading: bool,
+    load_error: Option<String>,
+    /// Bumped on every reload; also keys the fade-in animation.
+    generation: usize,
+    mode: Mode,
+
+    // History
+    selected: Option<ObjectId>,
+    selected_ref: Option<SharedString>,
+    history_scroll: UniformListScrollHandle,
+    history_focus: FocusHandle,
+    commit_diff: Entity<DiffState>,
+    commit_message: SharedString,
+    commit_files: usize,
+
+    // Changes
+    selected_change: Option<SelectedChange>,
+    change_diff: Entity<DiffState>,
+    change_hunks: Option<FileDiff>,
+    message: Entity<TextareaState>,
+    amend: bool,
+
+    // Sidebar
+    collapsed: HashSet<&'static str>,
+    prs: PrCache,
+
+    // Fetch
+    focused: bool,
+    fetching: bool,
+    last_fetch: Option<Instant>,
+    fetch_error: Option<String>,
+    has_updates: bool,
+    busy: Option<&'static str>,
+
+    _load: Task<()>,
+    _detail: Task<()>,
+    _fetch: Task<()>,
+    _op: Task<()>,
+}
+
+impl EventEmitter<RepoEvent> for RepoView {}
+
+impl RepoView {
+    pub fn new(repo: Repo, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let commit_diff = cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Unified));
+        let change_diff = cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Unified));
+        let message = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx).placeholder("Commit message");
+            state.set_auto_grow(3, 8, cx);
+            state
+        });
+        let mut this = Self {
+            repo,
+            data: Arc::default(),
+            loading: true,
+            load_error: None,
+            generation: 0,
+            mode: Mode::History,
+            selected: None,
+            selected_ref: None,
+            history_scroll: UniformListScrollHandle::new(),
+            history_focus: cx.focus_handle().tab_stop(true),
+            commit_diff,
+            commit_message: SharedString::default(),
+            commit_files: 0,
+            selected_change: None,
+            change_diff,
+            change_hunks: None,
+            message,
+            amend: false,
+            collapsed: HashSet::from(["tags"]),
+            prs: PrCache::default(),
+            focused: false,
+            fetching: false,
+            last_fetch: None,
+            fetch_error: None,
+            has_updates: false,
+            busy: None,
+            _load: Task::ready(()),
+            _detail: Task::ready(()),
+            _fetch: Task::ready(()),
+            _op: Task::ready(()),
+        };
+        this.reload(cx);
+        this
+    }
+
+    pub fn repo(&self) -> &Repo {
+        &self.repo
+    }
+
+    pub fn name(&self) -> String {
+        self.repo.name()
+    }
+
+    pub fn data(&self) -> &Arc<RepoData> {
+        &self.data
+    }
+
+    pub fn has_updates(&self) -> bool {
+        self.has_updates
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
+    pub fn is_fetching(&self) -> bool {
+        self.fetching
+    }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    pub fn selected_commit(&self) -> Option<ObjectId> {
+        self.selected
+    }
+
+    /// Called by the workspace when the tab gains or loses focus.
+    pub fn set_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.focused == focused {
+            return;
+        }
+        self.focused = focused;
+        if focused && self.has_updates {
+            self.has_updates = false;
+            cx.emit(RepoEvent::UpdatesChanged);
+            self.reload(cx);
+        }
+        cx.notify();
+    }
+
+    pub fn set_mode(&mut self, mode: Mode, cx: &mut Context<Self>) {
+        self.mode = mode;
+        if mode == Mode::Changes && self.selected_change.is_none() {
+            self.select_first_change(cx);
+        }
+        cx.notify();
+    }
+
+    /// Reloads refs, history, graph and status in the background.
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.generation += 1;
+        let generation = self.generation;
+        self.loading = true;
+        let repo = self.repo.clone();
+        self._load = cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { RepoData::load(&repo) }).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                this.loading = false;
+                match result {
+                    Ok(data) => this.install(data, cx),
+                    Err(e) => this.load_error = Some(format!("{e:#}")),
+                }
+                cx.notify();
+            });
+        });
+        cx.notify();
+    }
+
+    fn install(&mut self, data: Arc<RepoData>, cx: &mut Context<Self>) {
+        self.load_error = None;
+        let first_load = self.data.history.is_empty();
+        self.data = data;
+        // Keep the selected commit if it still exists, else select HEAD.
+        let keep = self.selected.filter(|id| self.data.history.row_of(id).is_some());
+        match keep.or(self.data.refs.head) {
+            Some(id) if keep.is_none() || first_load => self.select_commit(id, true, cx),
+            _ => {}
+        }
+        if self.mode == Mode::Changes {
+            let still_there = self.selected_change.as_ref().is_some_and(|sel| {
+                self.data.status.files.iter().any(|f| {
+                    f.path == sel.path && if sel.staged { f.is_staged() } else { f.is_unstaged() }
+                })
+            });
+            if still_there {
+                let sel = self.selected_change.clone().unwrap();
+                self.load_change(sel, cx);
+            } else {
+                self.selected_change = None;
+                self.select_first_change(cx);
+            }
+        }
+        if let Some(head) = self.data.refs.head_branch.clone() {
+            let upstream = self.data.refs.branches.iter().find(|b| b.is_head).and_then(|b| b.upstream.clone());
+            self.lookup_pr(&head, upstream.as_deref(), false, cx);
+        }
+    }
+
+    // ---- History selection -------------------------------------------------
+
+    pub fn select_commit(&mut self, id: ObjectId, scroll: bool, cx: &mut Context<Self>) {
+        let Some(row) = self.data.history.row_of(&id) else { return };
+        if scroll {
+            self.history_scroll.scroll_to_item(row, ScrollStrategy::Center);
+        }
+        if self.selected == Some(id) && !self.commit_diff.read(cx).files().is_empty() {
+            cx.notify();
+            return;
+        }
+        self.selected = Some(id);
+        self.commit_message = SharedString::default();
+        let repo = self.repo.clone();
+        let rev = id.to_string();
+        self._detail = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let message = repo.git().run(["log", "-1", "--format=%B", &rev])?;
+                    let patch = repo.git().run(["show", "--format=", "--no-ext-diff", "--patch", "--find-renames", "--first-parent", &rev])?;
+                    let files = UiDiffFile::parse(&patch).unwrap_or_default();
+                    anyhow::Ok((message.trim().to_string(), files))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.selected != Some(id) {
+                    return;
+                }
+                if let Ok((message, files)) = result {
+                    this.commit_message = message.into();
+                    this.commit_files = files.len();
+                    this.commit_diff.update(cx, |d, cx| d.set_files(files, cx));
+                }
+                cx.notify();
+            });
+        });
+        cx.notify();
+    }
+
+    fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let len = self.data.history.len();
+        if len == 0 {
+            return;
+        }
+        let row = self.selected.and_then(|id| self.data.history.row_of(&id)).unwrap_or(0);
+        let next = row.saturating_add_signed(delta).min(len - 1);
+        let id = self.data.history.commits[next].id;
+        self.select_commit(id, true, cx);
+    }
+
+    // ---- Pull requests -----------------------------------------------------
+
+    pub fn lookup_pr(&mut self, branch: &str, upstream: Option<&str>, is_remote: bool, cx: &mut Context<Self>) {
+        let Some(gh) = self.data.github.clone() else { return };
+        let forge_branch = pr::forge_branch(branch, upstream, is_remote);
+        let now = Instant::now();
+        if !self.prs.needs_lookup(&forge_branch, now) {
+            return;
+        }
+        self.prs.set(forge_branch.clone(), PrLookup::Loading, now);
+        cx.spawn(async move |this, cx| {
+            let key = forge_branch.clone();
+            let result = cx.background_spawn(async move { pr::lookup(&gh, &key) }).await;
+            let lookup = match result {
+                Ok(Some(found)) => PrLookup::Found(found),
+                Ok(None) => PrLookup::None,
+                Err(e) => PrLookup::Failed(e),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.prs.set(forge_branch, lookup, Instant::now());
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn pr_for(&self, branch: &str, upstream: Option<&str>, is_remote: bool) -> Option<&PrLookup> {
+        self.prs.get(&pr::forge_branch(branch, upstream, is_remote))
+    }
+
+    // ---- Fetch -------------------------------------------------------------
+
+    /// Called every second by the workspace scheduler.
+    pub fn tick(&mut self, focused: bool, now: Instant, cx: &mut Context<Self>) {
+        if self.fetching || self.loading || self.data.refs.remotes.is_empty() {
+            return;
+        }
+        if fetch_policy::is_due(self.last_fetch, now, focused) {
+            self.fetch(cx);
+        }
+    }
+
+    pub fn fetch(&mut self, cx: &mut Context<Self>) {
+        if self.fetching {
+            return;
+        }
+        self.fetching = true;
+        self.last_fetch = Some(Instant::now());
+        let repo = self.repo.clone();
+        let before = self.data.refs.fingerprint;
+        let status_before = self.data.status.clone();
+        self._fetch = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let fetched = repo.fetch_all();
+                    let refs = repo.refs()?;
+                    let status = repo.status()?;
+                    anyhow::Ok((fetched, refs.fingerprint != before, status != status_before))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.fetching = false;
+                match result {
+                    Ok((fetched, refs_moved, status_changed)) => {
+                        this.fetch_error = fetched.err().map(|e| e.to_string());
+                        if refs_moved || status_changed {
+                            if this.focused {
+                                this.reload(cx);
+                            } else if refs_moved && !this.has_updates {
+                                this.has_updates = true;
+                                cx.emit(RepoEvent::UpdatesChanged);
+                            }
+                        }
+                    }
+                    Err(e) => this.fetch_error = Some(e.to_string()),
+                }
+                cx.notify();
+            });
+        });
+        cx.notify();
+    }
+
+    // ---- Git operations ----------------------------------------------------
+
+    /// Runs a write operation in the background, then reloads; errors become notifications.
+    pub fn run_op(
+        &mut self,
+        label: &'static str,
+        op: impl FnOnce(&Repo) -> anyhow::Result<()> + Send + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_op_then(label, op, |_, _, _| {}, window, cx);
+    }
+
+    /// Like [`Self::run_op`], with `on_success` run on the UI thread when the operation succeeds.
+    pub fn run_op_then(
+        &mut self,
+        label: &'static str,
+        op: impl FnOnce(&Repo) -> anyhow::Result<()> + Send + 'static,
+        on_success: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.busy.is_some() {
+            return;
+        }
+        self.busy = Some(label);
+        let repo = self.repo.clone();
+        self._op = cx.spawn_in(window, async move |this, cx| {
+            let result = cx.background_spawn(async move { op(&repo) }).await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.busy = None;
+                match result {
+                    Ok(()) => on_success(this, window, cx),
+                    Err(e) => window.push_notification(
+                        gpui_kit::component::notification::Notification::error(format!("{label} : {e:#}")),
+                        cx,
+                    ),
+                }
+                this.reload(cx);
+            });
+        });
+        cx.notify();
+    }
+}
+
+impl Render for RepoView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let rem = window.rem_size();
+        let body = if let Some(err) = &self.load_error {
+            v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .child(div().text_color(crate::theme::red()).child("Impossible de lire le dépôt"))
+                .child(div().text_sm().text_color(cx.theme().muted_foreground).child(err.clone()))
+                .into_any_element()
+        } else {
+            let main = match self.mode {
+                Mode::History => v_resizable("history-split")
+                    .child(resizable_panel().size_range(rem * 8. ..rem * 400.).child(self.render_history(window, cx)))
+                    .child(resizable_panel().size(rem * 22.).size_range(rem * 8. ..rem * 400.).child(self.render_commit_details(cx)))
+                    .into_any_element(),
+                Mode::Changes => self.render_changes(window, cx).into_any_element(),
+            };
+            h_resizable("repo-split")
+                .child(resizable_panel().size(rem * 17.).size_range(rem * 12. ..rem * 32.).child(self.render_sidebar(cx)))
+                .child(resizable_panel().size_range(rem * 30. ..rem * 400.).child(main))
+                .into_any_element()
+        };
+        let generation = self.generation.min(1);
+        v_flex()
+            .id("repo-view")
+            .key_context("Repo")
+            .size_full()
+            .min_h_0()
+            .bg(cx.theme().background)
+            .on_action(cx.listener(|this, _: &Fetch, _, cx| this.fetch(cx)))
+            .on_action(cx.listener(|this, _: &Refresh, _, cx| this.reload(cx)))
+            .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.set_mode(Mode::History, cx)))
+            .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))
+            .child(self.render_toolbar(cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(body)
+                    // Content fades in when the tab first gets data.
+                    .with_animation(
+                        ("repo-fade", generation),
+                        gpui_kit::Animation::new(std::time::Duration::from_millis(220)).with_easing(gpui_kit::ease_out_quint()),
+                        |el, t| el.opacity(0.4 + 0.6 * t),
+                    ),
+            )
+    }
+}

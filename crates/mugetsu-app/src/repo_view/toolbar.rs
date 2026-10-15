@@ -1,0 +1,188 @@
+use std::time::Duration;
+
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, h_flex};
+use gpui_kit::{
+    Animation, AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    StatefulInteractiveElement as _, Styled as _, div, prelude::FluentBuilder as _, px,
+};
+use mugetsu_forge::PrState;
+
+use super::{Mode, RepoView};
+use crate::pr::PrLookup;
+use crate::theme;
+
+pub fn pr_color(state: PrState) -> gpui_kit::Hsla {
+    match state {
+        PrState::Open => theme::lime(),
+        PrState::Draft => theme::muted(),
+        PrState::Merged => theme::violet(),
+        PrState::Closed => theme::red(),
+    }
+}
+
+/// Small clickable "#123" chip opening the PR in the browser.
+pub fn pr_chip(id: impl Into<gpui_kit::ElementId>, lookup: Option<&PrLookup>) -> Option<AnyElement> {
+    match lookup? {
+        PrLookup::Found(pr) => {
+            let url = pr.url.clone();
+            let color = pr_color(pr.state);
+            let tip = format!("#{} {} ({})", pr.number, pr.title, crate::pr::state_label(pr.state));
+            Some(
+                h_flex()
+                    .id(id)
+                    .flex_none()
+                    .gap_1()
+                    .px_1p5()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(theme::alpha(color, 0.5))
+                    .bg(theme::alpha(color, 0.12))
+                    .text_color(color)
+                    .text_xs()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(theme::alpha(color, 0.25)))
+                    .child(Icon::new(Lucide::GitPullRequest).xsmall())
+                    .child(format!("#{}", pr.number))
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .into_any_element(),
+            )
+        }
+        PrLookup::Loading => Some(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(theme::muted())
+                .child("PR…")
+                .with_animation(
+                    "pr-loading",
+                    Animation::new(Duration::from_millis(900)).repeat().with_easing(gpui_kit::pulsating_between(0.3, 1.)),
+                    |el, t| el.opacity(t),
+                )
+                .into_any_element(),
+        ),
+        PrLookup::None | PrLookup::Failed(_) => None,
+    }
+}
+
+impl RepoView {
+    fn fetch_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let icon = Icon::new(Lucide::RefreshCw).small();
+        let icon = if self.fetching {
+            icon.with_animation(
+                "fetch-spin",
+                Animation::new(Duration::from_millis(900)).repeat(),
+                |icon, t| icon.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
+            )
+            .into_any_element()
+        } else {
+            icon.into_any_element()
+        };
+        let tip = match &self.fetch_error {
+            Some(e) => format!("Dernier fetch en échec : {e}"),
+            None => "Fetch (auto toutes les 10 s)".into(),
+        };
+        h_flex()
+            .id("fetch")
+            .gap_1p5()
+            .h(px(26.))
+            .px_2()
+            .rounded_md()
+            .cursor_pointer()
+            .text_sm()
+            .when(self.fetching, |s| s.text_color(theme::cyan()))
+            .when(self.fetch_error.is_some(), |s| s.text_color(theme::amber()))
+            .hover(|s| s.bg(theme::raised()))
+            .child(icon)
+            .child("Fetch")
+            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+            .on_click(cx.listener(|this, _, _, cx| this.fetch(cx)))
+            .into_any_element()
+    }
+
+    pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let data = self.data.clone();
+        let head = data.refs.branches.iter().find(|b| b.is_head).cloned();
+        let busy = self.busy.is_some();
+        let changes = data.uncommitted();
+        let mode = self.mode;
+        let head_label = data
+            .refs
+            .head_branch
+            .clone()
+            .unwrap_or_else(|| data.refs.head.map(|h| format!("détaché @ {}", h.to_hex_with_len(8))).unwrap_or_default());
+        let head_pr = head.as_ref().and_then(|b| pr_chip("head-pr", self.pr_for(&b.name, b.upstream.as_deref(), false)));
+
+        let tab = |id: &'static str, label: String, active: bool| {
+            Button::new(id).small().label(label).when(active, |b| b.primary()).when(!active, |b| b.ghost())
+        };
+
+        h_flex()
+            .h(px(44.))
+            .flex_none()
+            .px_3()
+            .gap_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(theme::panel())
+            .child(
+                h_flex()
+                    .gap_2()
+                    .min_w_0()
+                    .child(Icon::new(Lucide::GitBranch).small().text_color(theme::cyan()))
+                    .child(div().text_sm().font_weight(gpui_kit::FontWeight::SEMIBOLD).truncate().child(head_label))
+                    .when_some(head.as_ref().filter(|b| b.ahead > 0), |s, b| {
+                        s.child(div().text_xs().text_color(theme::lime()).child(format!("↑{}", b.ahead)))
+                    })
+                    .when_some(head.as_ref().filter(|b| b.behind > 0), |s, b| {
+                        s.child(div().text_xs().text_color(theme::amber()).child(format!("↓{}", b.behind)))
+                    })
+                    .children(head_pr),
+            )
+            .child(div().w(px(12.)))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .child(tab("mode-history", "Historique".into(), mode == Mode::History).on_click(
+                        cx.listener(|this, _, _, cx| this.set_mode(Mode::History, cx)),
+                    ))
+                    .child(
+                        tab(
+                            "mode-changes",
+                            if changes > 0 { format!("Changements · {changes}") } else { "Changements".into() },
+                            mode == Mode::Changes,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Changes, cx))),
+                    ),
+            )
+            .child(div().flex_1())
+            .child(self.fetch_button(cx))
+            .child(
+                Button::new("pull").ghost().small().icon(Icon::new(Lucide::ArrowDownToLine)).label("Pull").disabled(busy)
+                    .tooltip("Pull (fast-forward uniquement)")
+                    .on_click(cx.listener(|this, _, window, cx| this.run_op("Pull", |r| r.pull(), window, cx))),
+            )
+            .child(
+                Button::new("push").ghost().small().icon(Icon::new(Lucide::ArrowUpFromLine)).label("Push").disabled(busy)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let upstream = this.data.refs.branches.iter().find(|b| b.is_head).map(|b| (b.name.clone(), b.upstream.is_some()));
+                        let remote = this.data.refs.remotes.first().map(|r| r.name.clone());
+                        this.run_op("Push", move |r| match (upstream, remote) {
+                            (Some((branch, false)), Some(remote)) => r.push(Some((&remote, &branch))),
+                            _ => r.push(None),
+                        }, window, cx)
+                    })),
+            )
+            .child(
+                Button::new("stash").ghost().small().icon(Icon::new(Lucide::Archive)).label("Stash").disabled(busy || changes == 0)
+                    .on_click(cx.listener(|this, _, window, cx| this.run_op("Stash", |r| r.stash_push(None), window, cx))),
+            )
+            .child(
+                Button::new("pop").ghost().small().icon(Icon::new(Lucide::ArchiveRestore)).label("Pop").disabled(busy || data.refs.stashes.is_empty())
+                    .on_click(cx.listener(|this, _, window, cx| this.run_op("Stash pop", |r| r.stash_pop(0), window, cx))),
+            )
+    }
+}

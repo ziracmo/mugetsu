@@ -1,0 +1,13 @@
+[package]
+name = "mugetsu-git"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+gix = { version = "0.89", default-features = false, features = ["max-performance-safe", "revision", "sha1"] }
+smallvec = "1.16.3"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+tempfile = "3.27.0"
