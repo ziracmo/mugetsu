@@ -11,6 +11,7 @@ on:
       - .github/workflows/release.yml
       - scripts/**
       - packaging/**
+      - releases/**
   workflow_dispatch:
     inputs:
       tag:
@@ -25,6 +26,23 @@ env:
   TAG: ${{ inputs.tag || (github.event_name == 'pull_request' && 'v0.0.0-pr') || github.ref_name }}
 
 jobs:
+  notes:
+    name: Release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/release-notes.py check
+      - if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p notes
+          python3 scripts/release-notes.py body "$TAG" notes/body.md
+          cp "releases/$TAG.json" notes/release-notes.json
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: notes
+          path: notes
+
   macos:
     name: Mugetsu.dmg (universal)
     runs-on: macos-latest
@@ -66,12 +84,11 @@ jobs:
 
   release:
     name: GitHub release
-    needs: [macos, windows]
+    needs: [notes, macos, windows]
     # Publish the Mac build even if Windows fails; the .exe is added when it builds.
-    if: always() && github.event_name != 'pull_request' && needs.macos.result == 'success'
+    if: always() && github.event_name != 'pull_request' && needs.notes.result == 'success' && needs.macos.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -81,8 +98,9 @@ jobs:
           tag_name: ${{ env.TAG }}
           target_commitish: ${{ github.sha }}
           name: Mugetsu ${{ env.TAG }}
-          body_path: packaging/release-notes.md
-          generate_release_notes: true
-          files: dist/*
-          fail_on_unmatched_files: true
+          body_path: dist/body.md
+          files: |
+            dist/Mugetsu.dmg
+            dist/Mugetsu-Setup.exe
+            dist/release-notes.json
           prerelease: ${{ contains(env.TAG, '-') }}
