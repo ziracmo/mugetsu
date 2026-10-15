@@ -195,7 +195,7 @@ pub struct RepoView {
     adopt_layout: bool,
     pr_filter: pr_panel::PrFilter,
     /// A PR context menu is open: its info card stays hidden.
-    pr_menu_open: bool,
+    menu_open: bool,
     /// Branch whose push just succeeded (name, sequence), for its chip animation.
     pushed: Option<(String, usize)>,
 }
@@ -309,7 +309,7 @@ impl RepoView {
             sidebar_split: cx.new(|_| ResizableState::default()),
             adopt_layout: true,
             pr_filter: crate::settings::get().pr_filter,
-            pr_menu_open: false,
+            menu_open: false,
             pushed: None,
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;

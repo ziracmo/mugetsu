@@ -96,7 +96,7 @@ impl RepoView {
 
     /// "Show branch": back to the repository tab, tip selected and shimmering.
     pub fn show_pr_branch(&mut self, head: &str, cx: &mut Context<Self>) {
-        self.pr_menu_open = false;
+        self.menu_open = false;
         let Some(tip) = self.pr_tip(head) else {
             return;
         };
@@ -298,7 +298,7 @@ impl RepoView {
                 },
             )
             // No info card over the context menu.
-            .when(!self.pr_menu_open, |s| {
+            .when(!self.menu_open, |s| {
                 s.tooltip(move |window, cx| {
                     let card = card.clone();
                     Tooltip::element(move |_, _| pr_card(&card)).build(window, cx)
@@ -307,13 +307,13 @@ impl RepoView {
             .on_mouse_down(
                 gpui_kit::MouseButton::Right,
                 cx.listener(|this, _, _, cx| {
-                    this.pr_menu_open = true;
+                    this.menu_open = true;
                     cx.notify();
                 }),
             )
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                if !*hovered && this.pr_menu_open {
-                    this.pr_menu_open = false;
+                if !*hovered && this.menu_open {
+                    this.menu_open = false;
                     cx.notify();
                 }
             }))

@@ -39,6 +39,10 @@ pub const SECTION_KEYS: [&str; 9] = [
 ];
 
 struct Row {
+    /// For the context-menu state (no tooltip over an open menu).
+    view: gpui_kit::WeakEntity<RepoView>,
+    /// A context menu is open: no tooltip.
+    quiet: bool,
     id: SharedString,
     depth: usize,
     icon: Lucide,
@@ -55,7 +59,8 @@ struct Row {
 }
 
 fn render_row(row: Row) -> AnyElement {
-    let tooltip = row.tooltip;
+    let tooltip = row.tooltip.filter(|_| !row.quiet);
+    let (down_view, hover_view) = (row.view.clone(), row.view);
     let el = h_flex()
         .id(row.id)
         .test_support()
@@ -104,7 +109,24 @@ fn render_row(row: Row) -> AnyElement {
         .when_some(tooltip, |s, tip| {
             s.tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         })
-        .on_click(row.on_click);
+        .on_click(row.on_click)
+        // Right-click opens the menu: keep the tooltip out of its way.
+        .on_mouse_down(gpui_kit::MouseButton::Right, move |_, _, cx| {
+            let _ = down_view.update(cx, |this, cx| {
+                this.menu_open = true;
+                cx.notify();
+            });
+        })
+        .on_hover(move |hovered, _, cx| {
+            if !*hovered {
+                let _ = hover_view.update(cx, |this, cx| {
+                    if this.menu_open {
+                        this.menu_open = false;
+                        cx.notify();
+                    }
+                });
+            }
+        });
     match row.menu {
         Some(menu) => el
             .context_menu(move |m, window, cx| menu(m, window, cx))
@@ -441,6 +463,8 @@ impl RepoView {
                 id.clone(),
             );
             render_row(Row {
+                view: entity.clone(),
+                quiet: self.menu_open,
                 id: id.clone(),
                 depth,
                 icon: if b.is_head {
@@ -576,6 +600,8 @@ impl RepoView {
                     (entity.clone(), b.name.clone(), b.target, id.clone());
                 let menu_name = name.clone();
                 render_row(Row {
+                    view: entity.clone(),
+                    quiet: self.menu_open,
                     id: id.clone(),
                     depth,
                     icon: Lucide::GitBranch,
@@ -630,6 +656,8 @@ impl RepoView {
                 let (entity, target, row_id) = (entity.clone(), t.target, id.clone());
                 let (menu_ctx, tag) = (ctx.clone(), t.name.clone());
                 render_row(Row {
+                    view: entity.clone(),
+                    quiet: self.menu_open,
                     id: id.clone(),
                     depth: 0,
                     icon: Lucide::Tag,
@@ -674,6 +702,8 @@ impl RepoView {
                     .unwrap_or_else(|| tr("(détaché)", "(detached)").into());
                 let is_current = path == self.repo.root();
                 render_row(Row {
+                    view: entity.clone(),
+                    quiet: self.menu_open,
                     id,
                     depth: 0,
                     icon: Lucide::FolderGit2,
@@ -733,6 +763,8 @@ impl RepoView {
                 let id = SharedString::from(format!("stash:{}", s.index));
                 let (entity, target, row_id) = (entity.clone(), s.id, id.clone());
                 render_row(Row {
+                    view: entity.clone(),
+                    quiet: self.menu_open,
                     id: id.clone(),
                     depth: 0,
                     icon: Lucide::Archive,
