@@ -22,7 +22,11 @@ A fast desktop Git client for macOS, written in Rust. Inspired by Fork (density,
 - **Changes**: stage/unstage per file or per hunk, commit, amend, commit and push.
 - **Automatic fetch** every 10 s for the focused repository and every 5 min for the others. A pulsing dot appears on a tab when one of its remotes moved.
 - **GitHub pull requests**: each branch with a PR shows a `#123` chip coloured by state, with its CI result and unresolved conversations; hovering shows failing checks and the review decision; clicking opens the PR.
-- **PRs tab** in the sidebar: open PRs (reviews you owe first, flagged with an eye), drafts, GitHub stacks and PRs merged in the last 3 / 7 / 14 / 30 days (Settings). Branches in a stack show their `n/total` position.
+- **Tab switcher**: hold ⌃ and press Tab to pick a repository among cards, release to switch (Dia-like).
+- **Worktrees**: branches checked out in another worktree carry a worktree icon; double-click opens that worktree in a tab.
+- **Feedback**: new commits shimmer after a reload, a pushed branch chip gets a moving gradient edge.
+- **Layout memory**: folded sections are remembered; sidebar width and tab are shared by every repository (Settings).
+- **PRs tab** in the sidebar (quick filters: all / mine / to review; right-click → Show branch): open PRs (reviews you owe first, flagged with an eye), drafts, GitHub stacks and PRs merged in the last 3 / 7 / 14 / 30 days (Settings). Branches in a stack show their `n/total` position.
 - **Checkout** like Fork: double-click a branch (sidebar or graph chip); with uncommitted changes, or for a remote branch, a sheet offers to keep, stash and reapply, or discard them, and to name the local branch.
 - **Push sheet**: branch, target remote branch, push tags, force with lease.
 - Pull (fast-forward only), stash and pop, a particle burst on the branch after a checkout.
