@@ -1,13 +1,20 @@
 name: Release
 
-# Push a tag like v0.2.0 to build the installers and publish a GitHub release.
+# Push a tag like v0.2.0 (or run this workflow by hand with a tag name, created on
+# the chosen branch if missing) to build the installers and publish a GitHub release.
+# Pull requests touching the packaging only build, to catch breakage early.
 on:
   push:
     tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/**
+      - packaging/**
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to (re)build, e.g. v0.1.0
+        description: Release tag, e.g. v0.1.0
         required: true
 
 permissions:
@@ -15,7 +22,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || (github.event_name == 'pull_request' && 'v0.0.0-pr') || github.ref_name }}
 
 jobs:
   macos:
@@ -23,8 +30,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
@@ -41,8 +46,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p mugetsu-app
@@ -65,12 +68,10 @@ jobs:
     name: GitHub release
     needs: [macos, windows]
     # Publish the Mac build even if Windows fails; the .exe is added when it builds.
-    if: always() && needs.macos.result == 'success'
+    if: always() && github.event_name != 'pull_request' && needs.macos.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -78,6 +79,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           name: Mugetsu ${{ env.TAG }}
           body_path: packaging/release-notes.md
           generate_release_notes: true
