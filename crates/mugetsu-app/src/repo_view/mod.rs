@@ -184,6 +184,10 @@ pub struct RepoView {
     fetch_error: Option<String>,
     has_updates: bool,
     busy: Option<&'static str>,
+    /// Last Fetch / Pull / Push outcome on its button: (label, ok, seq).
+    op_flash: Option<(&'static str, bool, usize)>,
+    /// The running fetch was asked for (button, ⇧⌘F), not the timer.
+    manual_fetch: bool,
 
     _load: Task<()>,
     _detail: Task<()>,
@@ -308,6 +312,8 @@ impl RepoView {
             fetch_error: None,
             has_updates: false,
             busy: None,
+            op_flash: None,
+            manual_fetch: false,
             _load: Task::ready(()),
             _detail: Task::ready(()),
             _fetch: Task::ready(()),
@@ -681,6 +687,14 @@ impl RepoView {
         }
     }
 
+    /// Fetch asked for by the user: its button shows the outcome.
+    pub fn fetch_now(&mut self, cx: &mut Context<Self>) {
+        if !self.fetching {
+            self.manual_fetch = true;
+        }
+        self.fetch(cx);
+    }
+
     pub fn fetch(&mut self, cx: &mut Context<Self>) {
         if self.fetching {
             return;
@@ -701,6 +715,10 @@ impl RepoView {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.fetching = false;
+                if std::mem::take(&mut this.manual_fetch) {
+                    let ok = matches!(&result, Ok((Ok(_), _, _)));
+                    this.flash_op("Fetch", ok, cx);
+                }
                 match result {
                     Ok((fetched, refs_moved, status_changed)) => {
                         this.fetch_error = fetched.err().map(|e| e.to_string());
@@ -752,6 +770,7 @@ impl RepoView {
             let result = cx.background_spawn(async move { op(&repo) }).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.busy = None;
+                this.flash_op(label, result.is_ok(), cx);
                 match result {
                     Ok(()) => on_success(this, window, cx),
                     Err(e) => window.push_notification(
@@ -1024,6 +1043,34 @@ impl RepoView {
     }
 
     /// Plays the "pushed" animation on a branch chip.
+    /// Plays an operation's success or failure on its toolbar button.
+    fn flash_op(&mut self, label: &'static str, ok: bool, cx: &mut Context<Self>) {
+        if !matches!(label, "Fetch" | "Pull" | "Push") {
+            return;
+        }
+        self.celebrate_seq += 1;
+        let seq = self.celebrate_seq;
+        self.op_flash = Some((label, ok, seq));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(1600))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.op_flash.is_some_and(|(_, _, s)| s == seq) {
+                    this.op_flash = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    #[cfg(test)]
+    pub fn op_flash(&self) -> Option<(&'static str, bool)> {
+        self.op_flash.map(|(l, ok, _)| (l, ok))
+    }
+
     pub(super) fn celebrate_push(&mut self, branch: String, cx: &mut Context<Self>) {
         self.celebrate_seq += 1;
         let seq = self.celebrate_seq;
@@ -1230,7 +1277,7 @@ impl Render for RepoView {
             .key_context("Repo")
             .size_full()
             .min_h_0()
-            .on_action(cx.listener(|this, _: &Fetch, _, cx| this.fetch(cx)))
+            .on_action(cx.listener(|this, _: &Fetch, _, cx| this.fetch_now(cx)))
             .on_action(cx.listener(|this, _: &Pull, window, cx| this.pull(window, cx)))
             .on_action(
                 cx.listener(|this, _: &Push, window, cx| this.open_push_dialog(None, window, cx)),

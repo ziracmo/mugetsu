@@ -1074,3 +1074,19 @@ fn clicking_a_stack_shows_its_progress(cx: &mut TestAppContext) {
     .unwrap();
     cx.read(|cx| assert_eq!(view.read(cx).mode(), crate::repo_view::Mode::Stack));
 }
+
+#[gpui_kit::test]
+fn a_manual_fetch_plays_its_outcome_on_the_button(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update(|cx| view.update(cx, |v, cx| v.fetch_now(cx)));
+    settle(cx, &view);
+    cx.read(|cx| assert_eq!(view.read(cx).op_flash().map(|f| f.0), Some("Fetch")));
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("fetch").is_some());
+    })
+    .unwrap();
+}

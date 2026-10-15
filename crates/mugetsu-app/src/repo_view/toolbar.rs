@@ -295,18 +295,20 @@ pub fn pr_chip(
 }
 
 impl RepoView {
-    fn fetch_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let icon = Icon::new(Lucide::RefreshCw).small();
-        let icon = if self.fetching {
-            icon.with_animation(
-                "fetch-spin",
-                Animation::new(Duration::from_millis(900)).repeat(),
-                |icon, t| icon.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
-            )
-            .into_any_element()
-        } else {
-            icon.into_any_element()
+    /// Phase of the Fetch / Pull / Push button named `label`.
+    fn op_phase(&self, label: &'static str) -> OpPhase {
+        let running = match label {
+            "Fetch" => self.fetching,
+            _ => self.busy == Some(label),
         };
+        match self.op_flash {
+            _ if running => OpPhase::Running,
+            Some((l, ok, seq)) if l == label => OpPhase::Done { ok, seq },
+            _ => OpPhase::Idle,
+        }
+    }
+
+    fn fetch_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let tip = match &self.fetch_error {
             Some(e) => trf!("Dernier fetch en échec : {e}", "Last fetch failed: {e}"),
             None => tr(
@@ -315,22 +317,17 @@ impl RepoView {
             )
             .into(),
         };
-        h_flex()
-            .id("fetch")
-            .gap_1p5()
-            .h(px(26.))
-            .px_2()
-            .rounded_md()
-            .cursor_pointer()
-            .text_sm()
-            .when(self.fetching, |s| s.text_color(theme::accent()))
-            .when(self.fetch_error.is_some(), |s| s.text_color(theme::amber()))
-            .hover(|s| s.bg(theme::raised()))
-            .child(icon)
-            .child("Fetch")
-            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-            .on_click(cx.listener(|this, _, _, cx| this.fetch(cx)))
-            .into_any_element()
+        op_button(
+            "fetch",
+            Lucide::RefreshCw,
+            "Fetch",
+            Motion::Spin,
+            self.op_phase("Fetch"),
+            false,
+            self.fetch_error.is_some(),
+            tip,
+            cx.listener(|this, _, _, cx| this.fetch_now(cx)),
+        )
     }
 
     pub(super) fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -473,31 +470,32 @@ impl RepoView {
             )
             .child(div().flex_1())
             .child(self.fetch_button(cx))
-            .child(
-                Button::new("pull")
-                    .ghost()
-                    .small()
-                    .icon(Icon::new(Lucide::ArrowDownToLine))
-                    .label("Pull")
-                    .disabled(busy)
-                    .tooltip(tr(
-                        "Pull, fast-forward uniquement (⇧⌘L)",
-                        "Pull, fast-forward only (⇧⌘L)",
-                    ))
-                    .on_click(cx.listener(|this, _, window, cx| this.pull(window, cx))),
-            )
-            .child(
-                Button::new("push")
-                    .ghost()
-                    .small()
-                    .icon(Icon::new(Lucide::ArrowUpFromLine))
-                    .label("Push")
-                    .tooltip("Push (⇧⌘P)")
-                    .disabled(busy)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_push_dialog(None, window, cx)),
-                    ),
-            )
+            .child(op_button(
+                "pull",
+                Lucide::ArrowDownToLine,
+                "Pull",
+                Motion::Down,
+                self.op_phase("Pull"),
+                busy && self.busy != Some("Pull"),
+                false,
+                tr(
+                    "Pull, fast-forward uniquement (⇧⌘L)",
+                    "Pull, fast-forward only (⇧⌘L)",
+                )
+                .into(),
+                cx.listener(|this, _, window, cx| this.pull(window, cx)),
+            ))
+            .child(op_button(
+                "push",
+                Lucide::ArrowUpFromLine,
+                "Push",
+                Motion::Up,
+                self.op_phase("Push"),
+                busy && self.busy != Some("Push"),
+                false,
+                "Push (⇧⌘P)".into(),
+                cx.listener(|this, _, window, cx| this.open_push_dialog(None, window, cx)),
+            ))
             .child(
                 Button::new("stash")
                     .ghost()
@@ -521,4 +519,184 @@ impl RepoView {
                     })),
             )
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpPhase {
+    Idle,
+    Running,
+    /// Just finished; `seq` keys its one-shot animation.
+    Done {
+        ok: bool,
+        seq: usize,
+    },
+}
+
+/// How the icon moves while its operation runs.
+#[derive(Clone, Copy)]
+pub enum Motion {
+    Spin,
+    Down,
+    Up,
+}
+
+/// Fetch / Pull / Push: a liquid accent wave runs through the button while
+/// the operation works, then a lime ring and sparks on success, or a red
+/// shake on failure.
+#[allow(clippy::too_many_arguments)]
+fn op_button(
+    id: &'static str,
+    icon: Lucide,
+    label: &'static str,
+    motion: Motion,
+    phase: OpPhase,
+    disabled: bool,
+    warn: bool,
+    tip: String,
+    on_click: impl Fn(&gpui_kit::ClickEvent, &mut gpui_kit::Window, &mut gpui_kit::App) + 'static,
+) -> AnyElement {
+    let accent = theme::accent();
+    let glyph = match phase {
+        OpPhase::Done { ok: true, .. } => {
+            Icon::new(Lucide::Check).small().text_color(theme::lime())
+        }
+        OpPhase::Done { ok: false, .. } => Icon::new(Lucide::X).small().text_color(theme::red()),
+        _ => Icon::new(icon).small(),
+    };
+    let glyph: AnyElement = match (phase, motion) {
+        (OpPhase::Running, Motion::Spin) => glyph
+            .with_animation(
+                (id, 0usize),
+                Animation::new(Duration::from_millis(800))
+                    .repeat()
+                    .with_easing(gpui_kit::ease_in_out),
+                |icon, t| icon.rotate(gpui_kit::radians(t * std::f32::consts::TAU)),
+            )
+            .into_any_element(),
+        (OpPhase::Running, Motion::Down | Motion::Up) => {
+            let dir = if matches!(motion, Motion::Down) {
+                1.
+            } else {
+                -1.
+            };
+            div()
+                .relative()
+                .child(glyph)
+                .with_animation(
+                    (id, 1usize),
+                    Animation::new(Duration::from_millis(700)).repeat(),
+                    move |el, t| {
+                        // Drops out one side, comes back in from the other.
+                        let y = if t < 0.5 { t * 2. } else { t * 2. - 2. };
+                        el.top(px(dir * 9. * y)).opacity(1. - y.abs())
+                    },
+                )
+                .into_any_element()
+        }
+        (OpPhase::Done { seq, .. }, _) => div()
+            .child(glyph)
+            .with_animation(
+                (id, seq * 4 + 2),
+                Animation::new(Duration::from_millis(420)).with_easing(gpui_kit::ease_out_quint()),
+                |el, t| el.opacity(t),
+            )
+            .into_any_element(),
+        _ => glyph.into_any_element(),
+    };
+    let mut button = h_flex()
+        .id(id)
+        .test_support()
+        .relative()
+        .gap_1p5()
+        .h(px(26.))
+        .px_2()
+        .rounded_md()
+        .cursor_pointer()
+        .text_sm()
+        .border_1()
+        .border_color(theme::alpha(accent, 0.))
+        .when(warn, |s| s.text_color(theme::amber()))
+        .when(disabled, |s| s.opacity(0.45).cursor_default())
+        .when(!disabled, |s| {
+            s.hover(|s| s.bg(theme::raised())).on_click(on_click)
+        })
+        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx));
+    match phase {
+        OpPhase::Running => {
+            // The liquid: a soft accent band rolling through, over a tinted base,
+            // clipped by its own rounded box so the button keeps its size.
+            let wave = div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .w(gpui_kit::relative(0.7))
+                .bg(gpui_kit::linear_gradient(
+                    90.,
+                    gpui_kit::linear_color_stop(theme::alpha(accent, 0.), 0.),
+                    gpui_kit::linear_color_stop(theme::alpha(accent, 0.38), 1.),
+                ))
+                .with_animation(
+                    (id, 3usize),
+                    Animation::new(Duration::from_millis(1100))
+                        .repeat()
+                        .with_easing(gpui_kit::ease_in_out),
+                    |el, t| el.left(gpui_kit::relative(-0.7 + 1.7 * t)),
+                );
+            button = button
+                .text_color(gpui_kit::white())
+                .bg(theme::alpha(accent, 0.14))
+                .border_color(theme::alpha(accent, 0.5))
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded_md()
+                        .overflow_hidden()
+                        .child(wave),
+                );
+        }
+        OpPhase::Done { ok, seq } => {
+            let color = if ok { theme::lime() } else { theme::red() };
+            let ring = div()
+                .absolute()
+                .inset_0()
+                .rounded_md()
+                .border_1()
+                .border_color(color)
+                .with_animation(
+                    (id, seq * 4),
+                    Animation::new(Duration::from_millis(900))
+                        .with_easing(gpui_kit::ease_out_quint()),
+                    move |el, t| {
+                        el.opacity(1. - t).shadow(vec![gpui_kit::BoxShadow {
+                            color: theme::alpha(color, 0.55 * (1. - t)),
+                            offset: gpui_kit::point(px(0.), px(0.)),
+                            blur_radius: px(4. + 14. * t),
+                            spread_radius: px(1. + 5. * t),
+                            inset: false,
+                        }])
+                    },
+                );
+            button = button
+                .text_color(color)
+                .bg(theme::alpha(color, 0.1))
+                .child(ring);
+            if ok {
+                button = button.child(super::particles::burst(seq));
+            }
+        }
+        OpPhase::Idle => {}
+    }
+    let content = h_flex().gap_1p5().relative().child(glyph).child(label);
+    let content: AnyElement = match phase {
+        OpPhase::Done { ok: false, seq } => content
+            .with_animation(
+                (id, seq * 4 + 1),
+                Animation::new(Duration::from_millis(480)),
+                |el, t| el.left(px((t * 28.).sin() * 4. * (1. - t))),
+            )
+            .into_any_element(),
+        _ => content.into_any_element(),
+    };
+    button.child(content).into_any_element()
 }
