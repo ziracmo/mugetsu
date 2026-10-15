@@ -8,7 +8,6 @@ use chrono::{DateTime, Duration, Utc};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
-use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, Sizable as _, h_flex};
 use gpui_kit::{
     AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
@@ -16,7 +15,7 @@ use gpui_kit::{
 };
 use mugetsu_forge::{PrState, PullRequest};
 
-use super::toolbar::{check_look, pr_card, pr_color};
+use super::toolbar::{check_look, pr_color};
 use super::{RepoView, SidebarTab};
 use crate::i18n::tr;
 use crate::theme;
@@ -301,10 +300,8 @@ impl RepoView {
             )
             // No info card over the context menu.
             .when(!self.menu_open, |s| {
-                s.tooltip(move |window, cx| {
-                    let card = card.clone();
-                    Tooltip::element(move |_, _| pr_card(&card)).build(window, cx)
-                })
+                s.tooltip_show_delay(super::pr_tip::DELAY)
+                    .tooltip(move |window, cx| super::pr_tip::view(&card, window, cx))
             })
             .on_mouse_down(
                 gpui_kit::MouseButton::Right,

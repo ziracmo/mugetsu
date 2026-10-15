@@ -36,7 +36,7 @@ pub fn check_look(checks: CheckState) -> (Lucide, gpui_kit::Hsla) {
 
 /// Hover card of a PR: state, title, branches, CI, reviews, conversations.
 /// Fixed width so long names wrap instead of being cut.
-pub fn pr_card(pr: &PullRequest) -> AnyElement {
+pub fn pr_card(pr: &PullRequest, cx: &mut gpui_kit::App) -> AnyElement {
     let line = |icon: Lucide, color: gpui_kit::Hsla, text: String| {
         h_flex()
             .w_full()
@@ -79,7 +79,12 @@ pub fn pr_card(pr: &PullRequest) -> AnyElement {
         )
         .child(div().flex_1())
         .when(!pr.author.is_empty(), |s| {
-            s.child(div().text_color(theme::muted()).child(pr.author.clone()))
+            s.child(
+                h_flex()
+                    .gap_1p5()
+                    .child(crate::avatars::github(&pr.author, 16., cx))
+                    .child(div().text_color(theme::muted()).child(pr.author.clone())),
+            )
         });
     let mut card = v_flex()
         .w(px(380.))
@@ -252,10 +257,8 @@ pub fn pr_chip(
                             )
                         },
                     )
-                    .tooltip(move |window, cx| {
-                        let card = card.clone();
-                        Tooltip::element(move |_, _| pr_card(&card)).build(window, cx)
-                    })
+                    .tooltip_show_delay(super::pr_tip::DELAY)
+                    .tooltip(move |window, cx| super::pr_tip::view(&card, window, cx))
                     .on_click(move |_, _, cx| cx.open_url(&url))
                     .into_any_element(),
             )

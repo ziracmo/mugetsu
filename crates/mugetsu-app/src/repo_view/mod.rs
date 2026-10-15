@@ -8,6 +8,7 @@ mod history;
 mod menus;
 mod particles;
 mod pr_panel;
+mod pr_tip;
 mod search;
 mod shimmer;
 mod sidebar;
