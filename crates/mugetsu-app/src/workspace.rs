@@ -458,6 +458,7 @@ impl Workspace {
             .max_w(px(260.))
             .px_2()
             .gap_2()
+            .items_center()
             .rounded_lg()
             .cursor_pointer()
             .text_sm()
@@ -511,25 +512,44 @@ impl Workspace {
                     .min_w_0()
                     .justify_center()
                     .gap_1p5()
-                    .when_some(emoji, |s, e| s.child(div().flex_none().child(e)))
+                    .items_center()
+                    .when_some(emoji, |s, e| {
+                        s.child(
+                            div()
+                                .flex_none()
+                                .h(px(16.))
+                                .flex()
+                                .items_center()
+                                .line_height(px(16.))
+                                .child(e),
+                        )
+                    })
+                    // Name and branch share a baseline (different font sizes).
                     .child(
-                        div()
-                            .flex_none()
-                            .truncate()
-                            .font_weight(if active {
-                                gpui_kit::FontWeight::SEMIBOLD
-                            } else {
-                                gpui_kit::FontWeight::NORMAL
-                            })
-                            .child(name.clone()),
-                    )
-                    .child(
-                        div()
+                        h_flex()
                             .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(theme::muted())
-                            .child(branch),
+                            .items_baseline()
+                            .gap_1p5()
+                            .line_height(px(16.))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .truncate()
+                                    .font_weight(if active {
+                                        gpui_kit::FontWeight::SEMIBOLD
+                                    } else {
+                                        gpui_kit::FontWeight::NORMAL
+                                    })
+                                    .child(name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(theme::muted())
+                                    .child(branch),
+                            ),
                     )
                     // Uncommitted changes in this repository.
                     .when(dirty > 0, |s| {
