@@ -1038,6 +1038,27 @@ fn settings_sections_and_ai_tool_presets(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn notifications_settings_start_switched_off(cx: &mut TestAppContext) {
+    use crate::settings_view::{Section, SettingsView};
+    init(cx);
+    let (handle, view) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| SettingsView::new(window, cx))
+        })
+        .unwrap()
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("section-notifications", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.read(|cx| assert_eq!(view.read(cx).section(), Section::Notifications));
+    assert!(!crate::settings::Settings::default().notifications.any());
+}
+
+#[gpui_kit::test]
 fn clicking_a_stack_shows_its_progress(cx: &mut TestAppContext) {
     use mugetsu_forge::{PrState, PullRequest};
     init(cx);

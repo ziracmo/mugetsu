@@ -182,6 +182,8 @@ pub struct RepoView {
     folders: HashMap<String, bool>,
     sidebar_search: Entity<InputState>,
     prs: PrCache,
+    /// Diffs PR listings into system notifications.
+    pr_watcher: crate::notify::Watcher,
 
     // Fetch
     focused: bool,
@@ -323,6 +325,7 @@ impl RepoView {
             sidebar_collapsed: false,
             sidebar_search,
             prs: PrCache::default(),
+            pr_watcher: Default::default(),
             focused: false,
             fetching: false,
             last_fetch: None,
@@ -537,7 +540,7 @@ impl RepoView {
         if self.search_open {
             self.run_search(cx);
         }
-        self.refresh_prs(cx);
+        self.refresh_prs(true, cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
             let upstream = self
                 .data
@@ -619,21 +622,27 @@ impl RepoView {
     // ---- Pull requests -----------------------------------------------------
 
     /// Lists the repository's recent PRs so every branch shows its chip.
-    fn refresh_prs(&mut self, cx: &mut Context<Self>) {
+    fn refresh_prs(&mut self, focused: bool, cx: &mut Context<Self>) {
         let Some(gh) = self.data.github.clone() else {
             return;
         };
         let now = Instant::now();
-        if !self.prs.needs_bulk(now) {
+        if !self.prs.needs_bulk(now, focused) {
             return;
         }
         self.prs.mark_bulk(now);
+        let gh_name = gh.name.clone();
         cx.spawn(async move |this, cx| {
             let result = cx.background_spawn(async move { pr::recent(&gh) }).await;
             if let Ok(prs) = result {
                 let _ = this.update(cx, |this, cx| {
-                    this.prs
-                        .set_bulk(mugetsu_forge::by_branch(&prs.list), Instant::now());
+                    let now = Instant::now();
+                    let prefs = crate::settings::get().notifications;
+                    let notes =
+                        this.pr_watcher
+                            .diff(&gh_name, &prs.list, prs.me.as_deref(), prefs, now);
+                    notes.iter().for_each(crate::notify::show);
+                    this.prs.set_bulk(mugetsu_forge::by_branch(&prs.list), now);
                     this.pr_list = Arc::new(prs.list);
                     this.pr_me = prs.me;
                     cx.notify();
@@ -701,8 +710,9 @@ impl RepoView {
 
     /// Called every second by the workspace scheduler.
     pub fn tick(&mut self, focused: bool, now: Instant, cx: &mut Context<Self>) {
-        if focused && !self.loading {
-            self.refresh_prs(cx);
+        // Background tabs keep listing PRs only when notifications want them.
+        if !self.loading && (focused || crate::settings::get().notifications.any()) {
+            self.refresh_prs(focused, cx);
         }
         if self.fetching || self.loading || self.data.refs.remotes.is_empty() {
             return;
