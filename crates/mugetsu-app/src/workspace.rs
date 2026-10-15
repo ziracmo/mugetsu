@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
     ActiveTheme as _, Icon, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex,
@@ -197,6 +197,7 @@ impl Workspace {
             self.activate(i, cx);
             return Ok(());
         }
+        let repo_root = repo.root().to_path_buf();
         let view = cx.new(|cx| RepoView::new(repo, window, cx));
         let sub =
             cx.subscribe_in(
@@ -217,6 +218,10 @@ impl Workspace {
                 },
             );
         self.tabs.push(Tab { view, _sub: sub });
+        if self.persist {
+            let root = repo_root.clone();
+            cx.defer(move |cx| crate::settings::update(cx, |s| s.add_recent(root)));
+        }
         self.activate(self.tabs.len() - 1, cx);
         Ok(())
     }
@@ -270,7 +275,38 @@ impl Workspace {
         }
     }
 
+    /// Opens `path`, or shows why it can't be.
+    pub fn open_or_report(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if let Err(e) = self.open(path, window, cx) {
+            window.push_notification(
+                gpui_kit::component::notification::Notification::error(e.to_string()),
+                cx,
+            );
+        }
+    }
+
+    /// ⌘O: the repository picker when there is something to offer, else the
+    /// native folder dialog.
     fn prompt_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = crate::settings::get();
+        if settings.recent.is_empty() && settings.repo_folders.is_empty() {
+            self.browse(window, cx);
+            return;
+        }
+        let (pick_ws, browse_ws) = (cx.entity().downgrade(), cx.entity().downgrade());
+        crate::open_repo::open(
+            window,
+            cx,
+            move |path, window, cx| {
+                let _ = pick_ws.update(cx, |ws, cx| ws.open_or_report(path, window, cx));
+            },
+            move |window, cx| {
+                let _ = browse_ws.update(cx, |ws, cx| ws.browse(window, cx));
+            },
+        );
+    }
+
+    fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -393,7 +429,10 @@ impl Workspace {
         let branch = view.head_label();
         let updates = view.has_updates();
         let fetching = view.is_fetching();
-        let path = view.repo().root().display().to_string();
+        let root = view.repo().root().to_path_buf();
+        let path = root.display().to_string();
+        let dirty = view.uncommitted();
+        let emoji = crate::settings::get().repo_icons.get(&root).cloned();
         let group = SharedString::from(format!("tab-group-{index}"));
         // A thin divider between two inactive neighbours, like macOS tabs.
         let divider = index > 0 && !active && index != self.active + 1;
@@ -402,7 +441,7 @@ impl Workspace {
             .test_support()
             .group(group.clone())
             .relative()
-            .h(px(30.))
+            .h(px(26.))
             .flex_1()
             .min_w(px(110.))
             .max_w(px(260.))
@@ -461,6 +500,7 @@ impl Workspace {
                     .min_w_0()
                     .justify_center()
                     .gap_1p5()
+                    .when_some(emoji, |s, e| s.child(div().flex_none().child(e)))
                     .child(
                         div()
                             .flex_none()
@@ -479,7 +519,16 @@ impl Workspace {
                             .text_xs()
                             .text_color(theme::muted())
                             .child(branch),
-                    ),
+                    )
+                    // Uncommitted changes in this repository.
+                    .when(dirty > 0, |s| {
+                        s.child(
+                            Icon::new(Lucide::Pencil)
+                                .xsmall()
+                                .flex_none()
+                                .text_color(theme::amber()),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -521,9 +570,114 @@ impl Workspace {
                         )
                     }),
             )
-            .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx))
+            .tooltip(move |window, cx| {
+                let tip = if dirty > 0 {
+                    format!(
+                        "{path}\n{}",
+                        trf!(
+                            "{dirty} fichier(s) non commité(s)",
+                            "{dirty} uncommitted file(s)"
+                        )
+                    )
+                } else {
+                    path.clone()
+                };
+                Tooltip::new(tip).build(window, cx)
+            })
             .on_click(cx.listener(move |this, _, _, cx| this.activate(index, cx)))
+            .context_menu(move |menu, _, _| icon_menu(menu, root.clone()))
     }
+}
+
+/// Emoji offered to tell repositories apart in tabs and lists.
+const REPO_EMOJI: [&str; 24] = [
+    "🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "⚫", "⚪", "🚀", "🔥", "⭐", "🌙", "⚡", "🧪", "🛠️", "📦",
+    "🎨", "🧠", "🛡️", "🌐", "📱", "🐳", "🦀", "🐍",
+];
+
+/// Right-click on a tab.
+fn icon_menu(
+    menu: gpui_kit::component::menu::PopupMenu,
+    root: PathBuf,
+) -> gpui_kit::component::menu::PopupMenu {
+    menu.item(
+        PopupMenuItem::new(tr("Choisir une icône…", "Choose Icon…"))
+            .icon(Icon::new(Lucide::Palette))
+            .on_click(move |_, window, cx| icon_picker(root.clone(), window, cx)),
+    )
+}
+
+fn set_icon(root: &std::path::Path, icon: Option<&str>, cx: &mut gpui_kit::App) {
+    let root = root.to_path_buf();
+    let icon = icon.map(str::to_string);
+    crate::settings::update(cx, move |s| match icon {
+        Some(i) => {
+            s.repo_icons.insert(root, i);
+        }
+        None => {
+            s.repo_icons.remove(&root);
+        }
+    });
+}
+
+/// Emoji grid for a repository.
+fn icon_picker(root: PathBuf, window: &mut Window, cx: &mut gpui_kit::App) {
+    let name = root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    window.open_dialog(cx, move |dialog, _, _| {
+        let current = crate::settings::get().repo_icons.get(&root).cloned();
+        let cells = REPO_EMOJI.iter().map(|e| {
+            let root = root.clone();
+            let selected = current.as_deref() == Some(*e);
+            div()
+                .id(SharedString::from(format!("emoji-{e}")))
+                .test_support()
+                .size(px(40.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_lg()
+                .text_xl()
+                .cursor_pointer()
+                .hover(|s| s.bg(theme::raised()))
+                .when(selected, |s| {
+                    s.bg(theme::alpha(theme::accent(), 0.3))
+                        .border_1()
+                        .border_color(theme::accent())
+                })
+                .child(*e)
+                .on_click(move |_, window, cx| {
+                    set_icon(&root, Some(e), cx);
+                    window.close_dialog(cx);
+                })
+        });
+        let none_root = root.clone();
+        dialog
+            .title(trf!("Icône de « {name} »", "Icon for “{name}”"))
+            .w(px(420.))
+            .child(h_flex().flex_wrap().gap_1().children(cells))
+            .footer(
+                h_flex()
+                    .w_full()
+                    .child(
+                        Button::new("emoji-none")
+                            .ghost()
+                            .small()
+                            .label(tr("Aucune icône", "No icon"))
+                            .on_click(move |_, window, cx| {
+                                set_icon(&none_root, None, cx);
+                                window.close_dialog(cx);
+                            }),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        gpui_kit::component::dialog::DialogClose::new()
+                            .trigger(|b| b.ghost().small().label(tr("Fermer", "Close"))),
+                    ),
+            )
+    });
 }
 
 impl Render for Workspace {
@@ -582,8 +736,10 @@ impl Render for Workspace {
                 TitleBar::new().child(
                     h_flex()
                         .size_full()
-                        .pr_2()
-                        .gap_1()
+                        .pl_1()
+                        .pr_3()
+                        .py_1()
+                        .gap_1p5()
                         .items_center()
                         .child(self.render_workspace_menu(cx))
                         .child(

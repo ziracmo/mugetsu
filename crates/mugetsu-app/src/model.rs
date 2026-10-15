@@ -20,7 +20,7 @@ pub struct RepoData {
 impl RepoData {
     pub fn load(repo: &Repo) -> anyhow::Result<Arc<Self>> {
         let refs = repo.refs()?;
-        let history = repo.history(&refs.tips())?;
+        let history = repo.history(&refs.tips(), crate::settings::get().commit_order.into())?;
         let graph = mugetsu_git::layout(&history.commits);
         let decorations = refs.decorations();
         let status = repo.status()?;

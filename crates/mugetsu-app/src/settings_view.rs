@@ -1,16 +1,20 @@
-//! The Settings window (⌘,): language and accent colour, applied live.
+//! The Settings window (⌘,): language, accent colour, commit order and
+//! repository folders, applied live.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, TitleBar, h_flex, v_flex};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Context, Global, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    WindowBounds, WindowOptions, div, prelude::FluentBuilder as _, px, rgb, size,
+    ParentElement as _, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder as _, px, rgb,
+    size,
 };
 
 use crate::i18n::tr;
-use crate::settings::{self, ACCENTS, Lang};
+use crate::settings::{self, ACCENTS, CommitSort, Lang};
 use crate::theme;
 
 struct OpenSettingsWindow(AnyWindowHandle);
@@ -26,7 +30,7 @@ pub fn open(cx: &mut App) {
         return;
     }
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(520.), px(380.)), cx)),
+        window_bounds: Some(WindowBounds::centered(size(px(600.), px(560.)), cx)),
         is_resizable: false,
         window_background: gpui_kit::WindowBackgroundAppearance::Blurred,
         ..TitleBar::window_options()
@@ -40,6 +44,29 @@ pub fn open(cx: &mut App) {
 }
 
 pub struct SettingsView;
+
+fn add_folder(cx: &mut App) {
+    let picked = cx.prompt_for_paths(PathPromptOptions {
+        files: false,
+        directories: true,
+        multiple: true,
+        prompt: Some(tr("Ajouter", "Add").into()),
+    });
+    cx.spawn(async move |cx| {
+        if let Ok(Ok(Some(paths))) = picked.await {
+            cx.update(|cx| {
+                settings::update(cx, |s| {
+                    for p in paths {
+                        if !s.repo_folders.contains(&p) {
+                            s.repo_folders.push(p);
+                        }
+                    }
+                })
+            });
+        }
+    })
+    .detach();
+}
 
 fn row(label: &'static str, control: impl IntoElement) -> impl IntoElement {
     h_flex()
@@ -138,6 +165,71 @@ impl Render for SettingsView {
                     .child(row(
                         tr("Couleur d'accent", "Accent colour"),
                         h_flex().gap_2().children(swatches),
+                    ))
+                    .child(row(
+                        tr("Tri des commits", "Sort commits"),
+                        RadioGroup::horizontal("commit-order")
+                            .child(
+                                Radio::new("order-topo").label(tr("Topologique", "Topologically")),
+                            )
+                            .child(Radio::new("order-date").label(tr("Par date", "By date")))
+                            .selected_index(Some(match current.commit_order {
+                                CommitSort::Topological => 0,
+                                CommitSort::Date => 1,
+                            }))
+                            .on_click(|ix: &usize, _, cx| {
+                                let order = if *ix == 0 {
+                                    CommitSort::Topological
+                                } else {
+                                    CommitSort::Date
+                                };
+                                settings::update(cx, |s| s.commit_order = order)
+                            }),
+                    ))
+                    .child(row(
+                        tr("Dossiers de dépôts", "Repository folders"),
+                        v_flex()
+                            .flex_1()
+                            .gap_1()
+                            .children(current.repo_folders.iter().enumerate().map(|(i, f)| {
+                                let shown = f.display().to_string();
+                                h_flex()
+                                    .gap_2()
+                                    .text_sm()
+                                    .child(
+                                        Icon::new(Lucide::Folder)
+                                            .xsmall()
+                                            .text_color(theme::muted()),
+                                    )
+                                    .child(div().flex_1().min_w_0().truncate().child(shown))
+                                    .child(
+                                        Button::new(("remove-folder", i))
+                                            .ghost()
+                                            .xsmall()
+                                            .icon(Icon::new(Lucide::X))
+                                            .on_click(move |_, _, cx| {
+                                                settings::update(cx, |s| {
+                                                    if i < s.repo_folders.len() {
+                                                        s.repo_folders.remove(i);
+                                                    }
+                                                })
+                                            }),
+                                    )
+                            }))
+                            .child(
+                                h_flex().child(
+                                    Button::new("add-folder")
+                                        .outline()
+                                        .xsmall()
+                                        .icon(Icon::new(Lucide::Plus))
+                                        .label(tr("Ajouter un dossier…", "Add folder…"))
+                                        .on_click(|_, _, cx| add_folder(cx)),
+                                ),
+                            )
+                            .child(div().text_xs().text_color(theme::muted()).child(tr(
+                                "Les dépôts de ces dossiers sont proposés à l'ouverture (⌘O).",
+                                "Repositories in these folders are offered when opening (⌘O).",
+                            ))),
                     ))
                     .child(row(
                         tr("Aperçu", "Preview"),

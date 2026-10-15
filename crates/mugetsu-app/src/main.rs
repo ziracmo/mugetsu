@@ -2,12 +2,14 @@ mod app_menu;
 mod avatars;
 mod branch_tree;
 mod dialogs;
+mod dock_icon;
 mod fetch_policy;
 mod fmt;
 #[macro_use]
 mod i18n;
 mod graph_view;
 mod model;
+mod open_repo;
 mod pr;
 mod repo_view;
 mod session;
@@ -54,6 +56,7 @@ fn main() {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            dock_icon::set();
             settings::install(settings::Settings::load(), cx);
             avatars::init(cx);
             workspace::init(cx);
@@ -72,6 +75,7 @@ fn main() {
                 cx.new(|cx| Workspace::new(session, true, window, cx))
             })
             .expect("failed to open the main window");
+            cx.set_global(app_menu::MainWorkspace(main.0, main.1.clone()));
             // Closing the main window quits; the Settings window doesn't.
             let main_id = main.0.window_id();
             cx.on_window_closed(move |cx, id| {

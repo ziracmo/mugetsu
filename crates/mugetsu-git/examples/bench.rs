@@ -12,7 +12,7 @@ fn main() -> anyhow::Result<()> {
         t.elapsed()
     );
     let t = Instant::now();
-    let history = repo.history(&refs.tips())?;
+    let history = repo.history(&refs.tips(), mugetsu_git::CommitOrder::Date)?;
     println!("history   {:>6} commits {:?}", history.len(), t.elapsed());
     let t = Instant::now();
     let graph = mugetsu_git::layout(&history.commits);

@@ -32,9 +32,26 @@ pub struct History {
     pub index: HashMap<ObjectId, usize>,
 }
 
+/// How the history list is sorted (both keep children before parents).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CommitOrder {
+    /// `git log --topo-order`: a branch's commits stay together.
+    #[default]
+    Topological,
+    /// `git log --date-order`: newest first, branches interleaved.
+    Date,
+}
+
 impl History {
     pub fn from_commits(commits: Vec<Commit>) -> Self {
-        let commits = date_order(commits);
+        Self::ordered(commits, CommitOrder::Date)
+    }
+
+    pub fn ordered(commits: Vec<Commit>, order: CommitOrder) -> Self {
+        let commits = match order {
+            CommitOrder::Date => date_order(commits),
+            CommitOrder::Topological => topo_order(commits),
+        };
         let index = commits.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
         Self { commits, index }
     }
@@ -54,7 +71,7 @@ impl History {
 
 impl Repo {
     /// Walks every commit reachable from `tips` (usually all refs + HEAD).
-    pub fn history(&self, tips: &[ObjectId]) -> anyhow::Result<History> {
+    pub fn history(&self, tips: &[ObjectId], order: CommitOrder) -> anyhow::Result<History> {
         let mut repo = gix::open(self.root()).context("opening repository with gix")?;
         repo.object_cache_size_if_unset(64 * 1024 * 1024);
         // Tags may point to tags, trees or blobs: keep only what peels to a commit.
@@ -98,7 +115,7 @@ impl Repo {
             }
             anyhow::Ok(all)
         })?;
-        Ok(History::from_commits(commits))
+        Ok(History::ordered(commits, order))
     }
 }
 
@@ -157,6 +174,43 @@ pub fn date_order(commits: Vec<Commit>) -> Vec<Commit> {
         .collect()
 }
 
+/// Like `git log --topo-order`: children before parents, and once a line of
+/// history starts it is shown until it joins another (LIFO on ready commits;
+/// starting points newest first).
+pub fn topo_order(commits: Vec<Commit>) -> Vec<Commit> {
+    let n = commits.len();
+    let index: HashMap<ObjectId, usize> =
+        commits.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+    let mut pending_children = vec![0u32; n];
+    for c in &commits {
+        for p in &c.parents {
+            if let Some(&pi) = index.get(p) {
+                pending_children[pi] += 1;
+            }
+        }
+    }
+    let mut stack: Vec<usize> = (0..n).filter(|i| pending_children[*i] == 0).collect();
+    // Oldest at the bottom so the newest tip is popped first.
+    stack.sort_by_key(|&i| (commits[i].time, std::cmp::Reverse(i)));
+    let mut order = Vec::with_capacity(n);
+    while let Some(i) = stack.pop() {
+        order.push(i);
+        for p in &commits[i].parents {
+            if let Some(&pi) = index.get(p) {
+                pending_children[pi] -= 1;
+                if pending_children[pi] == 0 {
+                    stack.push(pi);
+                }
+            }
+        }
+    }
+    let mut slots: Vec<Option<Commit>> = commits.into_iter().map(Some).collect();
+    order
+        .into_iter()
+        .map(|i| slots[i].take().expect("each commit emitted once"))
+        .collect()
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -185,6 +239,29 @@ pub(crate) mod tests {
             .map(|c| c.summary.clone())
             .collect();
         assert_eq!(out, ["c3", "c2", "c1"]);
+    }
+
+    #[test]
+    fn topo_order_keeps_branches_together() {
+        // 1 <- a1(2) <- a2(4) \
+        //   <- b1(3) <- b2(5) -- m(6) merges a2 and b2
+        let input = vec![
+            commit(1, 1, &[]),
+            commit(10, 2, &[1]),
+            commit(11, 4, &[10]),
+            commit(20, 3, &[1]),
+            commit(21, 5, &[20]),
+            commit(30, 6, &[11, 21]),
+        ];
+        let names = |v: Vec<Commit>| v.iter().map(|c| c.summary.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            names(date_order(input.clone())),
+            ["c30", "c21", "c11", "c20", "c10", "c1"]
+        );
+        assert_eq!(
+            names(topo_order(input)),
+            ["c30", "c21", "c20", "c11", "c10", "c1"]
+        );
     }
 
     #[test]

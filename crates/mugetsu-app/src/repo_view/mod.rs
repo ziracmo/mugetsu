@@ -172,6 +172,9 @@ pub struct RepoView {
     _op: Task<()>,
     _search: Subscription,
     _commit_search: Subscription,
+    /// History order the data was loaded with (reloads when the setting changes).
+    commit_order: crate::settings::CommitSort,
+    _settings: Subscription,
 }
 
 impl EventEmitter<RepoEvent> for RepoView {}
@@ -256,6 +259,15 @@ impl RepoView {
             _op: Task::ready(()),
             _search,
             _commit_search,
+            commit_order: crate::settings::get().commit_order,
+            _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
+                let order = crate::settings::get().commit_order;
+                if order != this.commit_order {
+                    this.commit_order = order;
+                    this.reload(cx);
+                }
+                cx.notify();
+            }),
         };
         this.reload(cx);
         this
@@ -283,6 +295,11 @@ impl RepoView {
                 .map(|h| h.to_hex_with_len(7).to_string())
                 .unwrap_or_default()
         })
+    }
+
+    /// Files with uncommitted changes.
+    pub fn uncommitted(&self) -> usize {
+        self.data.uncommitted()
     }
 
     pub fn has_updates(&self) -> bool {

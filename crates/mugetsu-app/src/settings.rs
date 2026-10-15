@@ -1,5 +1,6 @@
 //! User preferences (language, accent colour), saved as JSON and applied live.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -15,7 +16,7 @@ pub enum Lang {
 
 /// Accent colours offered in the settings window (0xRRGGBB).
 pub const ACCENTS: [(u32, &str, &str); 8] = [
-    (0xe5534b, "Rouge", "Red"),
+    (0xf87171, "Rouge", "Red"),
     (0xe8853d, "Orange", "Orange"),
     (0xd9b26f, "Ambre", "Amber"),
     (0x8ac46e, "Vert", "Green"),
@@ -25,11 +26,43 @@ pub const ACCENTS: [(u32, &str, &str); 8] = [
     (0xd96fa8, "Rose", "Pink"),
 ];
 
+/// Former default red, replaced by a lighter one.
+const OLD_RED: u32 = 0xe5534b;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CommitSort {
+    #[default]
+    Topological,
+    Date,
+}
+
+impl From<CommitSort> for mugetsu_git::CommitOrder {
+    fn from(s: CommitSort) -> Self {
+        match s {
+            CommitSort::Topological => Self::Topological,
+            CommitSort::Date => Self::Date,
+        }
+    }
+}
+
+/// Sidebar sections, in their default order (users can drag them around).
+pub const SECTIONS: [&str; 5] = ["branches", "remotes", "worktrees", "tags", "stashes"];
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub lang: Lang,
     pub accent: u32,
+    pub commit_order: CommitSort,
+    /// Folders holding repositories, offered when opening one.
+    pub repo_folders: Vec<PathBuf>,
+    /// Emoji shown next to a repository's name, by repository path.
+    pub repo_icons: HashMap<PathBuf, String>,
+    /// Sidebar section keys in display order.
+    pub sidebar_order: Vec<String>,
+    /// Recently opened repositories, newest first.
+    pub recent: Vec<PathBuf>,
 }
 
 impl Default for Settings {
@@ -37,7 +70,52 @@ impl Default for Settings {
         Self {
             lang: system_lang(),
             accent: ACCENTS[0].0,
+            commit_order: CommitSort::default(),
+            repo_folders: Vec::new(),
+            repo_icons: HashMap::new(),
+            sidebar_order: SECTIONS.iter().map(|s| s.to_string()).collect(),
+            recent: Vec::new(),
         }
+    }
+}
+
+impl Settings {
+    /// Sidebar sections in display order: saved order first, unknown keys
+    /// dropped, missing ones appended.
+    pub fn sections(&self) -> Vec<&'static str> {
+        let mut out: Vec<&'static str> = self
+            .sidebar_order
+            .iter()
+            .filter_map(|k| SECTIONS.iter().copied().find(|s| s == k))
+            .collect();
+        for s in SECTIONS {
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        out
+    }
+
+    /// Moves section `key` onto section `target`'s place.
+    pub fn move_section(&mut self, key: &str, target: &str) {
+        let mut order = self.sections();
+        let Some(from) = order.iter().position(|s| *s == key) else {
+            return;
+        };
+        let item = order.remove(from);
+        let Some(to) = order.iter().position(|s| *s == target) else {
+            order.insert(from, item);
+            return;
+        };
+        // Dragged down: lands after the target; dragged up: before it.
+        order.insert(if from > to { to } else { to + 1 }, item);
+        self.sidebar_order = order.iter().map(|s| s.to_string()).collect();
+    }
+
+    pub fn add_recent(&mut self, path: PathBuf) {
+        self.recent.retain(|p| *p != path);
+        self.recent.insert(0, path);
+        self.recent.truncate(12);
     }
 }
 
@@ -58,7 +136,13 @@ impl Settings {
     pub fn load() -> Self {
         file()
             .and_then(|f| std::fs::read(f).ok())
-            .and_then(|b| serde_json::from_slice(&b).ok())
+            .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
+            .map(|mut s| {
+                if s.accent == OLD_RED {
+                    s.accent = ACCENTS[0].0;
+                }
+                s
+            })
             .unwrap_or_default()
     }
 
@@ -81,7 +165,7 @@ pub fn get() -> Settings {
         .and_then(|s| s.clone())
         .unwrap_or_else(|| Settings {
             lang: Lang::Fr,
-            accent: ACCENTS[0].0,
+            ..Settings::default()
         })
 }
 
@@ -92,6 +176,8 @@ pub fn install(settings: Settings, cx: &mut gpui_kit::App) {
         *current = Some(settings);
     }
     crate::theme::apply(cx);
+    let revision = cx.try_global::<Revision>().map_or(0, |r| r.0) + 1;
+    cx.set_global(Revision(revision));
     #[cfg(not(test))]
     crate::app_menu::set(cx);
     cx.refresh_windows();
@@ -103,4 +189,47 @@ pub fn update(cx: &mut gpui_kit::App, f: impl FnOnce(&mut Settings)) {
     f(&mut settings);
     settings.save();
     install(settings, cx);
+}
+
+/// Bumped on every settings change; views observe it to react.
+pub struct Revision(pub u64);
+impl gpui_kit::Global for Revision {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sections_can_be_reordered() {
+        let mut s = Settings::default();
+        assert_eq!(s.sections(), SECTIONS);
+        s.move_section("tags", "branches");
+        assert_eq!(
+            s.sections(),
+            ["tags", "branches", "remotes", "worktrees", "stashes"]
+        );
+        s.move_section("tags", "stashes");
+        assert_eq!(
+            s.sections(),
+            ["branches", "remotes", "worktrees", "stashes", "tags"]
+        );
+        s.move_section("tags", "remotes");
+        assert_eq!(
+            s.sections(),
+            ["branches", "tags", "remotes", "worktrees", "stashes"]
+        );
+        s.sidebar_order = vec!["stashes".into(), "bogus".into()];
+        assert_eq!(
+            s.sections(),
+            ["stashes", "branches", "remotes", "worktrees", "tags"]
+        );
+    }
+
+    #[test]
+    fn old_settings_files_still_load() {
+        let s: Settings = serde_json::from_str(r#"{"lang":"en","accent":123}"#).unwrap();
+        assert_eq!(s.lang, Lang::En);
+        assert_eq!(s.commit_order, CommitSort::Topological);
+        assert_eq!(s.sections().len(), 5);
+    }
 }

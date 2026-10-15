@@ -52,7 +52,9 @@ fn fixture() -> (tempfile::TempDir, Repo) {
 fn history_and_graph_follow_the_dag() {
     let (_dir, repo) = fixture();
     let refs = repo.refs().unwrap();
-    let history = repo.history(&refs.tips()).unwrap();
+    let history = repo
+        .history(&refs.tips(), mugetsu_git::CommitOrder::Date)
+        .unwrap();
     let summaries: Vec<_> = history.commits.iter().map(|c| c.summary.as_str()).collect();
     assert_eq!(summaries.len(), 5);
     assert_eq!(summaries[0], "merge feature");
@@ -89,7 +91,9 @@ fn refs_snapshot_lists_everything() {
     assert_eq!(refs.stashes.len(), 1);
     assert!(refs.stashes[0].message.contains("wip"));
 
-    let history = repo.history(&refs.tips()).unwrap();
+    let history = repo
+        .history(&refs.tips(), mugetsu_git::CommitOrder::Date)
+        .unwrap();
     assert!(
         history.row_of(&refs.stashes[0].id).is_some(),
         "stash commits are part of the walk"
@@ -128,7 +132,9 @@ fn stage_hunk_commit_cycle() {
     repo.commit("edit a\n\nbody", false).unwrap();
 
     let refs = repo.refs().unwrap();
-    let history = repo.history(&refs.tips()).unwrap();
+    let history = repo
+        .history(&refs.tips(), mugetsu_git::CommitOrder::Date)
+        .unwrap();
     assert_eq!(history.commits[0].summary, "edit a");
     let diff = repo.diff_commit("HEAD").unwrap();
     assert_eq!(diff.files[0].path(), "a.txt");

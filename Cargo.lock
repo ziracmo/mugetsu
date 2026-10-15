@@ -5093,6 +5093,7 @@ dependencies = [
  "gpui-kit",
  "mugetsu-forge",
  "mugetsu-git",
+ "objc",
  "serde",
  "serde_json",
  "smallvec",

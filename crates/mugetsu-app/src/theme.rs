@@ -33,7 +33,7 @@ pub fn panel() -> Hsla {
 }
 /// Floating content card: darker frosted glass above the blurred window.
 pub fn card() -> Hsla {
-    alpha(rgb(0x141416).into(), 0.72)
+    alpha(rgb(0x141416).into(), 0.9)
 }
 /// Bright top edge of glass surfaces (light catching the rim).
 pub fn glass_edge() -> Hsla {

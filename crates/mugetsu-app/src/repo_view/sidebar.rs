@@ -107,6 +107,29 @@ fn render_row(row: Row) -> AnyElement {
     }
 }
 
+/// A sidebar section header being dragged; also its drag preview.
+#[derive(Clone)]
+struct SectionDrag {
+    key: &'static str,
+    title: &'static str,
+}
+
+impl gpui_kit::Render for SectionDrag {
+    fn render(&mut self, _: &mut gpui_kit::Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .text_sm()
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .bg(gpui_kit::rgba(0x2a2a2dee))
+            .border_1()
+            .border_color(theme::glass_edge())
+            .shadow_lg()
+            .child(self.title)
+    }
+}
+
 /// `origin` when present, else the first remote.
 pub(super) fn default_remote(refs: &RefsSnapshot) -> Option<String> {
     refs.remotes
@@ -200,6 +223,17 @@ impl RepoView {
                                 this.collapsed.insert(key);
                             }
                             cx.notify();
+                        }))
+                        // Drag a header onto another to reorder the sections.
+                        .on_drag(SectionDrag { key, title }, |drag, _, _, cx| {
+                            gpui_kit::AppContext::new(cx, |_| drag.clone())
+                        })
+                        .drag_over::<SectionDrag>(|s, _, _, _| {
+                            s.bg(theme::alpha(theme::accent(), 0.18)).rounded_md()
+                        })
+                        .on_drop(cx.listener(move |_, drag: &SectionDrag, _, cx| {
+                            let from = drag.key;
+                            crate::settings::update(cx, |s| s.move_section(from, key));
                         })),
                 )
                 .when(!collapsed, |s| s.children(rows))
@@ -692,7 +726,7 @@ impl RepoView {
         let worktrees = self.worktree_rows(&query, cx);
         let tags = self.tag_rows(&query, cx);
         let stashes = self.stash_rows(&query, cx);
-        let sections = [
+        let mut sections = vec![
             self.section(
                 "branches",
                 "Branches",
@@ -731,6 +765,15 @@ impl RepoView {
                 cx,
             ),
         ];
+        let order = crate::settings::get().sections();
+        let keys = ["branches", "remotes", "worktrees", "tags", "stashes"];
+        let mut sections: Vec<(usize, Option<AnyElement>)> = sections
+            .drain(..)
+            .enumerate()
+            .map(|(i, el)| (order.iter().position(|k| *k == keys[i]).unwrap_or(i), el))
+            .collect();
+        sections.sort_by_key(|(rank, _)| *rank);
+        let sections: Vec<Option<AnyElement>> = sections.into_iter().map(|(_, el)| el).collect();
         let empty = searching && sections.iter().all(Option::is_none);
         v_flex()
             .id("sidebar")
