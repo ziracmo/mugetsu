@@ -2,6 +2,8 @@
 //! macOS would otherwise show the terminal's icon.
 
 #[cfg(target_os = "macos")]
+// objc 0.2's macros test cfgs this crate doesn't declare.
+#[allow(unexpected_cfgs)]
 pub fn set() {
     use objc::runtime::Object;
     use objc::{class, msg_send, sel, sel_impl};
