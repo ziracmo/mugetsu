@@ -252,6 +252,8 @@ impl RepoView {
         let click_url = pr.url.clone();
         let head = pr.head.clone();
         let show_head = pr.head.clone();
+        let review_pr = pr.clone();
+        let root = self.repo.root().to_path_buf();
         let view = cx.entity().downgrade();
         let can_checkout = pr.same_repo && pr.state != PrState::Merged;
         let remote = super::sidebar::default_remote(&self.data.refs);
@@ -341,6 +343,8 @@ impl RepoView {
             .context_menu(move |m, _, _| {
                 let url = open_url.clone();
                 let (show_view, show_head) = (view.clone(), show_head.clone());
+                let (review_pr, root) = (review_pr.clone(), root.clone());
+                let tool = crate::settings::get().ai_tool;
                 let m = m
                     .item(
                         PopupMenuItem::new(tr("Montrer la branche", "Show branch"))
@@ -354,6 +358,22 @@ impl RepoView {
                         PopupMenuItem::new(tr("Ouvrir sur GitHub", "Open on GitHub"))
                             .icon(Icon::new(Lucide::ExternalLink))
                             .on_click(move |_, _, cx| cx.open_url(&url)),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new(trf!("Review IA ({})", "AI review ({})", tool.label()))
+                            .icon(Icon::new(Lucide::Sparkles))
+                            .on_click(move |_, window, cx| {
+                                if let Err(e) = crate::ai_review::launch(&root, &review_pr) {
+                                    gpui_kit::component::WindowExt::push_notification(
+                                        window,
+                                        gpui_kit::component::notification::Notification::error(
+                                            format!("{e:#}"),
+                                        ),
+                                        cx,
+                                    );
+                                }
+                            }),
                     );
                 match checkout_ref.clone().filter(|_| can_checkout) {
                     Some(r) => {

@@ -77,6 +77,41 @@ pub struct Settings {
     pub pr_filter: PrFilter,
     /// Which PRs get a chip on branches (repository tab).
     pub pr_chips: PrFilter,
+    /// AI tool launched by a PR's "Review with AI".
+    pub ai_tool: AiTool,
+    /// Shell command run in a terminal for that review; see [`crate::ai_review`].
+    pub ai_command: String,
+}
+
+/// AI coding tool a PR review is started with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiTool {
+    #[default]
+    Claude,
+    Codex,
+    Custom,
+}
+
+impl AiTool {
+    pub const ALL: [AiTool; 3] = [AiTool::Claude, AiTool::Codex, AiTool::Custom];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AiTool::Claude => "Claude Code",
+            AiTool::Codex => "Codex",
+            AiTool::Custom => crate::i18n::tr("Autre", "Other"),
+        }
+    }
+
+    /// The command picked with the tool; `Custom` keeps the user's own.
+    pub fn preset(self) -> Option<&'static str> {
+        match self {
+            AiTool::Claude => Some("claude \"/code-review {url}\""),
+            AiTool::Codex => Some("codex \"Review the pull request {url} (branch {branch})\""),
+            AiTool::Custom => None,
+        }
+    }
 }
 
 /// PRs tab quick filter, shared by every repository.
@@ -111,6 +146,8 @@ impl Default for Settings {
             collapsed_sections: vec!["tags".into()],
             pr_filter: PrFilter::All,
             pr_chips: PrFilter::All,
+            ai_tool: AiTool::Claude,
+            ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),
         }
     }
 }

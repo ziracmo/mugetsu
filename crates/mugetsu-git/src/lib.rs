@@ -15,7 +15,7 @@ pub mod status;
 
 use std::path::{Path, PathBuf};
 
-pub use cli::Git;
+pub use cli::{Git, Identity, global_identity, set_global_identity};
 pub use diff::{DiffFile, DiffLine, FileDiff, Hunk, LineKind};
 pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout};
 pub use log::{Commit, CommitOrder, History};

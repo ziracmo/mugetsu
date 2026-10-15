@@ -116,3 +116,85 @@ impl Git {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 }
+
+/// Author identity commits are made with: `user.name` and `user.email`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Identity {
+    pub name: String,
+    pub email: String,
+}
+
+/// Where an identity is read from or written to: `["--global"]`, or
+/// `["--file", path]` in tests.
+fn identity_in(scope: &[&str]) -> Identity {
+    let git = Git::new(std::env::temp_dir());
+    let get = |key: &str| {
+        let mut args = vec!["config"];
+        args.extend_from_slice(scope);
+        args.extend(["--get", key]);
+        git.run(args)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
+    Identity {
+        name: get("user.name"),
+        email: get("user.email"),
+    }
+}
+
+fn set_identity_in(scope: &[&str], id: &Identity) -> anyhow::Result<()> {
+    let git = Git::new(std::env::temp_dir());
+    for (key, value) in [("user.name", &id.name), ("user.email", &id.email)] {
+        let mut args = vec!["config"];
+        args.extend_from_slice(scope);
+        let value = value.trim();
+        if value.is_empty() {
+            args.extend(["--unset", key]);
+            // Unsetting a missing key fails harmlessly (exit 5).
+            let _ = git.run(args);
+        } else {
+            args.extend([key, value]);
+            git.run(args)?;
+        }
+    }
+    Ok(())
+}
+
+/// The identity in `~/.gitconfig` (empty fields when unset).
+pub fn global_identity() -> Identity {
+    identity_in(&["--global"])
+}
+
+/// Writes the identity to `~/.gitconfig`; an empty field is unset.
+pub fn set_global_identity(id: &Identity) -> anyhow::Result<()> {
+    set_identity_in(&["--global"], id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_round_trips_through_a_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config");
+        let path = file.to_str().unwrap();
+        let scope = ["--file", path];
+        assert_eq!(identity_in(&scope), Identity::default());
+        let id = Identity {
+            name: "Ada Lovelace".into(),
+            email: "ada@example.com".into(),
+        };
+        set_identity_in(&scope, &id).unwrap();
+        assert_eq!(identity_in(&scope), id);
+        set_identity_in(
+            &scope,
+            &Identity {
+                name: "Ada".into(),
+                email: String::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(identity_in(&scope).email, "");
+    }
+}

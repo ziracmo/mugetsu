@@ -1010,3 +1010,29 @@ fn f_key_jumps_to_head_and_shimmers_it(cx: &mut TestAppContext) {
         assert_eq!(view.read(cx).shimmering(), 1);
     });
 }
+
+#[gpui_kit::test]
+fn settings_sections_and_ai_tool_presets(cx: &mut TestAppContext) {
+    use crate::settings::AiTool;
+    use crate::settings_view::{Section, SettingsView};
+    init(cx);
+    let (handle, view) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| SettingsView::new(window, cx))
+        })
+        .unwrap()
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("section-ai", cx);
+        window.render_frame(cx);
+        window.click("ai-tool-codex", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.read(|cx| assert_eq!(view.read(cx).section(), Section::Ai));
+    let s = crate::settings::get();
+    assert_eq!(s.ai_tool, AiTool::Codex);
+    assert_eq!(Some(s.ai_command.as_str()), AiTool::Codex.preset());
+}

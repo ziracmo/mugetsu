@@ -2,6 +2,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod about;
+mod ai_review;
 mod app_menu;
 mod avatars;
 mod branch_tree;
