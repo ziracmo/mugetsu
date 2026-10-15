@@ -7,6 +7,7 @@ mod forms;
 mod history;
 mod menus;
 mod particles;
+mod pr_panel;
 mod search;
 mod sidebar;
 mod toolbar;
@@ -184,11 +185,9 @@ pub struct RepoView {
     pr_list: Arc<Vec<mugetsu_forge::PullRequest>>,
     /// GitHub login of the user.
     pr_me: Option<String>,
-    #[allow(dead_code)] // PR tab, in progress
     sidebar_tab: SidebarTab,
 }
 
-#[allow(dead_code)] // PR tab, in progress
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarTab {
     Repo,
@@ -865,6 +864,11 @@ impl RepoView {
     }
 
     /// Particle burst for a branch label, while its checkout is being celebrated.
+    #[cfg(test)]
+    pub fn prs_tab_open(&self) -> bool {
+        self.sidebar_tab == SidebarTab::Prs
+    }
+
     #[cfg(test)]
     pub fn copied_feedback(&self) -> bool {
         self.copied.is_some()

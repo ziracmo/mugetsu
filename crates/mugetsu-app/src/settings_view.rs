@@ -14,7 +14,7 @@ use gpui_kit::{
 };
 
 use crate::i18n::tr;
-use crate::settings::{self, ACCENTS, CommitSort, Lang};
+use crate::settings::{self, ACCENTS, CommitSort, Lang, MERGED_DAYS};
 use crate::theme;
 
 struct OpenSettingsWindow(AnyWindowHandle);
@@ -30,7 +30,7 @@ pub fn open(cx: &mut App) {
         return;
     }
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(600.), px(560.)), cx)),
+        window_bounds: Some(WindowBounds::centered(size(px(600.), px(600.)), cx)),
         is_resizable: false,
         window_background: gpui_kit::WindowBackgroundAppearance::Blurred,
         ..TitleBar::window_options()
@@ -184,6 +184,24 @@ impl Render for SettingsView {
                                     CommitSort::Date
                                 };
                                 settings::update(cx, |s| s.commit_order = order)
+                            }),
+                    ))
+                    .child(row(
+                        tr("PRs mergées récentes", "Recently merged PRs"),
+                        MERGED_DAYS
+                            .iter()
+                            .fold(RadioGroup::horizontal("merged-days"), |g, d| {
+                                g.child(
+                                    Radio::new(SharedString::from(format!("merged-{d}")))
+                                        .label(trf!("{d} jours", "{d} days")),
+                                )
+                            })
+                            .selected_index(
+                                MERGED_DAYS.iter().position(|d| *d == current.merged_days),
+                            )
+                            .on_click(|ix: &usize, _, cx| {
+                                let days = MERGED_DAYS[*ix];
+                                settings::update(cx, |s| s.merged_days = days)
                             }),
                     ))
                     .child(row(

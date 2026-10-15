@@ -14,12 +14,15 @@ A fast desktop Git client for macOS, written in Rust. Inspired by Fork (density,
 - **Sidebar**: branches grouped into folders like Fork (`feat/…`, `fix/…`), the checked-out branch and main/develop/master/staging highlighted, GitHub icon on pushed branches, ahead/behind counts, remotes, worktrees (click to open in a tab), tags, stashes, and a filter field. Sections can be reordered by dragging their headers. Collapsible with ⌃⌘S.
 - **Ref chips**: a local branch identical to its remote counterpart shows as a single chip with a dark remote icon.
 - **Right-click menus** on branches, remote branches, tags and commits: checkout, checkout as worktree, fast-forward, push, reset to the upstream, create/open pull request, rename, delete, new branch/tag here, reset (soft/mixed/hard), cherry-pick, revert, save as patch, copy name/SHA.
-- **Commit search** (⌘F / Ctrl+F) by message, author or SHA, with next/previous match.
+- **Commit search** (⌘F / Ctrl+F) by message, author, branch / tag name or SHA, with next/previous match; matched text and chips are highlighted.
+- **Commit details**: changed files as a tree (created / modified / deleted / renamed icons, click to jump), description folded, SHA copy with a "Copied" burst.
+- **Optimistic checkout**: the new HEAD shows at once; the real state is reloaded when git finishes (rolled back on failure).
 - **Author avatars** from GitHub (noreply addresses) or Gravatar, cached on disk, with initials as a fallback.
 - **Diff** view with syntax highlighting and intra-line changes.
 - **Changes**: stage/unstage per file or per hunk, commit, amend, commit and push.
 - **Automatic fetch** every 10 s for the focused repository and every 5 min for the others. A pulsing dot appears on a tab when one of its remotes moved.
 - **GitHub pull requests**: each branch with a PR shows a `#123` chip coloured by state, with its CI result and unresolved conversations; hovering shows failing checks and the review decision; clicking opens the PR.
+- **PRs tab** in the sidebar: open PRs (reviews you owe first, flagged with an eye), drafts, GitHub stacks and PRs merged in the last 3 / 7 / 14 / 30 days (Settings). Branches in a stack show their `n/total` position.
 - **Checkout** like Fork: double-click a branch (sidebar or graph chip); with uncommitted changes, or for a remote branch, a sheet offers to keep, stash and reapply, or discard them, and to name the local branch.
 - **Push sheet**: branch, target remote branch, push tags, force with lease.
 - Pull (fast-forward only), stash and pop, a particle burst on the branch after a checkout.

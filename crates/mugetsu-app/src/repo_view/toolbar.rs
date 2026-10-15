@@ -26,7 +26,7 @@ pub fn pr_color(state: PrState) -> gpui_kit::Hsla {
     }
 }
 
-fn check_look(checks: CheckState) -> (Lucide, gpui_kit::Hsla) {
+pub fn check_look(checks: CheckState) -> (Lucide, gpui_kit::Hsla) {
     match checks {
         CheckState::Passing => (Lucide::CircleCheck, theme::lime()),
         CheckState::Failing => (Lucide::CircleX, theme::red()),

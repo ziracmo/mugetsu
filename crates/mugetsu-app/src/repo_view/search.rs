@@ -1,5 +1,10 @@
-//! ⌘F / Ctrl+F: find commits by message, author or SHA, and step through matches.
+//! ⌘F / Ctrl+F: find commits by message, author, branch / tag name or SHA,
+//! and step through matches; matched text is highlighted in the history.
 
+use std::collections::HashMap;
+use std::ops::Range;
+
+use gix::ObjectId;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -9,15 +14,61 @@ use gpui_kit::{
     AnyElement, Context, Focusable as _, InteractiveElement as _, IntoElement, ParentElement as _,
     Styled as _, Window, div, px,
 };
-use mugetsu_git::History;
+use mugetsu_git::{History, RefLabel};
 
 use super::{CloseSearch, RepoView};
 use crate::i18n::tr;
 use crate::theme;
 
-/// Rows whose summary or author contains every word of `query`
+/// Name of a ref label, if it has one.
+pub fn label_name(label: &RefLabel) -> Option<&str> {
+    match label {
+        RefLabel::Branch { name, .. } | RefLabel::Remote(name) | RefLabel::Tag(name) => Some(name),
+        RefLabel::DetachedHead => None,
+    }
+}
+
+/// Byte ranges of `text` matching any word of `query` (case-insensitive),
+/// sorted and merged.
+pub fn highlight_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
+    let lower = text.to_lowercase();
+    // Lowercasing can shift byte offsets (rare non-ASCII cases): no highlight then.
+    if lower.len() != text.len() {
+        return Vec::new();
+    }
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    for word in query.split_whitespace().map(str::to_lowercase) {
+        let mut from = 0;
+        while let Some(at) = lower[from..].find(&word) {
+            let start = from + at;
+            let end = start + word.len();
+            if text.is_char_boundary(start) && text.is_char_boundary(end) {
+                ranges.push(start..end);
+            }
+            from = end.max(start + 1);
+            while from < lower.len() && !lower.is_char_boundary(from) {
+                from += 1;
+            }
+        }
+    }
+    ranges.sort_by_key(|r| r.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for r in ranges {
+        match merged.last_mut() {
+            Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+            _ => merged.push(r),
+        }
+    }
+    merged
+}
+
+/// Rows whose summary, author or ref names contain every word of `query`
 /// (case-insensitive), or whose SHA starts with it.
-pub fn find_commits(history: &History, query: &str) -> Vec<usize> {
+pub fn find_commits(
+    history: &History,
+    labels: &HashMap<ObjectId, Vec<RefLabel>>,
+    query: &str,
+) -> Vec<usize> {
     let query = query.trim();
     if query.is_empty() {
         return Vec::new();
@@ -35,11 +86,18 @@ pub fn find_commits(history: &History, query: &str) -> Vec<usize> {
             {
                 return true;
             }
-            let summary = c.summary.to_lowercase();
-            let author = c.author.to_lowercase();
-            words
-                .iter()
-                .all(|w| summary.contains(w.as_str()) || author.contains(w.as_str()))
+            let mut hay = format!("{}\n{}", c.summary, c.author);
+            for name in labels
+                .get(&c.id)
+                .into_iter()
+                .flatten()
+                .filter_map(label_name)
+            {
+                hay.push('\n');
+                hay.push_str(name);
+            }
+            let hay = hay.to_lowercase();
+            words.iter().all(|w| hay.contains(w.as_str()))
         })
         .map(|(i, _)| i)
         .collect()
@@ -64,7 +122,7 @@ impl RepoView {
     /// Recomputes matches and jumps to the first one at or after the selection.
     pub(super) fn run_search(&mut self, cx: &mut Context<Self>) {
         let query = self.search_input.read(cx).value().to_string();
-        self.search_matches = find_commits(&self.data.history, &query);
+        self.search_matches = find_commits(&self.data.history, &self.data.decorations, &query);
         self.search_hits = self.search_matches.iter().copied().collect();
         let current = self
             .selected
@@ -221,11 +279,28 @@ mod tests {
     #[test]
     fn matches_message_author_and_sha() {
         let h = history();
-        assert_eq!(find_commits(&h, "FEAT search"), [0]);
-        assert_eq!(find_commits(&h, "alex"), [0, 2]);
-        assert_eq!(find_commits(&h, "cafe"), [2], "SHA prefix");
-        assert_eq!(find_commits(&h, "bbbb00"), [1]);
-        assert!(find_commits(&h, "  ").is_empty());
-        assert!(find_commits(&h, "nothing").is_empty());
+        let mut labels = HashMap::new();
+        labels.insert(
+            h.commits[1].id,
+            vec![RefLabel::Branch {
+                name: "feature/login".into(),
+                head: false,
+            }],
+        );
+        let find = |q| find_commits(&h, &labels, q);
+        assert_eq!(find("FEAT search"), [0]);
+        assert_eq!(find("alex"), [0, 2]);
+        assert_eq!(find("cafe"), [2], "SHA prefix");
+        assert_eq!(find("bbbb00"), [1]);
+        assert_eq!(find("login"), [1], "branch name");
+        assert!(find("  ").is_empty());
+        assert!(find("nothing").is_empty());
+    }
+
+    #[test]
+    fn highlights_every_word() {
+        assert_eq!(highlight_ranges("Fix the fix", "FIX"), [0..3, 8..11]);
+        assert_eq!(highlight_ranges("abcdef", "bc cd"), vec![1..4]);
+        assert!(highlight_ranges("abc", "").is_empty());
     }
 }

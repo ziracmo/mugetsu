@@ -766,3 +766,50 @@ fn commit_details_list_files_and_confirm_copies(cx: &mut TestAppContext) {
         assert!(view.read(cx).copied_feedback());
     });
 }
+
+#[gpui_kit::test]
+fn command_f_finds_branch_names_and_sidebar_has_a_prs_tab(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(dir.path(), &["branch", "zebra", "HEAD~2"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let target = cx.read(|cx| {
+        let d = view.read(cx).data().clone();
+        d.refs
+            .branches
+            .iter()
+            .find(|b| b.name == "zebra")
+            .unwrap()
+            .target
+    });
+    let head = cx.read(|cx| view.read(cx).data().refs.head.unwrap());
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(gpui_kit::SharedString::from(head.to_string()), cx);
+        window.press("secondary-f", cx);
+        window.input("zebra", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+    cx.read(|cx| assert_eq!(view.read(cx).selected_commit(), Some(target)));
+
+    cx.update_window(handle, |_, window, cx| {
+        window.press("escape", cx);
+        window.render_frame(cx);
+        window.click("sidebar-tab-prs", cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("branch:main").is_none(),
+            "repo sections hidden"
+        );
+    })
+    .unwrap();
+    cx.read(|cx| assert!(view.read(cx).prs_tab_open()));
+    cx.update_window(handle, |_, window, cx| {
+        window.click("sidebar-tab-repo", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("branch:main").is_some());
+    })
+    .unwrap();
+}

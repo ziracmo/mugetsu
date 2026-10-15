@@ -173,7 +173,7 @@ impl RepoView {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn section(
+    pub(super) fn section(
         &self,
         key: &'static str,
         title: &'static str,
@@ -228,16 +228,20 @@ impl RepoView {
                             cx.notify();
                         }))
                         // Drag a header onto another to reorder the sections.
-                        .on_drag(SectionDrag { key, title }, |drag, _, _, cx| {
-                            gpui_kit::AppContext::new(cx, |_| drag.clone())
-                        })
-                        .drag_over::<SectionDrag>(|s, _, _, _| {
-                            s.bg(theme::alpha(theme::accent(), 0.18)).rounded_md()
-                        })
-                        .on_drop(cx.listener(move |_, drag: &SectionDrag, _, cx| {
-                            let from = drag.key;
-                            crate::settings::update(cx, |s| s.move_section(from, key));
-                        })),
+                        .when(crate::settings::SECTIONS.contains(&key), |s| {
+                            s.on_drag(SectionDrag { key, title }, |drag, _, _, cx| {
+                                gpui_kit::AppContext::new(cx, |_| drag.clone())
+                            })
+                            .drag_over::<SectionDrag>(|s, _, _, _| {
+                                s.bg(theme::alpha(theme::accent(), 0.18)).rounded_md()
+                            })
+                            .on_drop(cx.listener(
+                                move |_, drag: &SectionDrag, _, cx| {
+                                    let from = drag.key;
+                                    crate::settings::update(cx, |s| s.move_section(from, key));
+                                },
+                            ))
+                        }),
                 )
                 .when(!collapsed, |s| s.children(rows))
                 .into_any_element(),
@@ -340,6 +344,7 @@ impl RepoView {
         let ctx = self.menu_context(cx);
         let searching = !query.is_empty();
         let pushed_color = theme::alpha(cx.theme().foreground, 0.55);
+        let stacks = super::pr_panel::stack_positions(&self.pr_list);
         let tree = branch_tree::build(
             data.refs
                 .branches
@@ -379,6 +384,9 @@ impl RepoView {
                         .child("gone")
                         .into_any_element(),
                 );
+            }
+            if let Some(&(pos, n)) = stacks.get(&b.name) {
+                suffix.push(super::pr_panel::stack_badge(pos, n));
             }
             suffix.extend(pr_chip(
                 SharedString::from(format!("pr:{}", b.name)),
@@ -814,12 +822,16 @@ impl RepoView {
             .map(|(i, el)| (order.iter().position(|k| *k == keys[i]).unwrap_or(i), el))
             .collect();
         sections.sort_by_key(|(rank, _)| *rank);
-        let sections: Vec<Option<AnyElement>> = sections.into_iter().map(|(_, el)| el).collect();
-        let empty = searching && sections.iter().all(Option::is_none);
+        let sections: Vec<AnyElement> = match self.sidebar_tab {
+            super::SidebarTab::Repo => sections.into_iter().filter_map(|(_, el)| el).collect(),
+            super::SidebarTab::Prs => self.pr_sections(&query, cx),
+        };
+        let empty = searching && sections.is_empty();
         v_flex()
             .id("sidebar")
             .size_full()
             // Pure window glass: the blur shows through the sidebar.
+            .child(self.render_sidebar_tabs(cx))
             .child(
                 div().flex_none().p_2().child(
                     Input::new(&self.sidebar_search)
@@ -840,7 +852,7 @@ impl RepoView {
                     .min_h_0()
                     .pb_2()
                     .overflow_y_scroll()
-                    .children(sections.into_iter().flatten())
+                    .children(sections)
                     .when(empty, |s| {
                         s.child(div().p_4().text_sm().text_color(theme::muted()).child(trf!(
                             "Rien ne correspond à « {query} »",

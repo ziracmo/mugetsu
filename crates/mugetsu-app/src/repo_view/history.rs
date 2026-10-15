@@ -32,6 +32,23 @@ struct ChipContext {
     github: bool,
     burst: Option<(String, usize)>,
     view: gpui_kit::WeakEntity<RepoView>,
+    /// ⌘F query, to ring the chips whose name matches.
+    search: String,
+}
+
+/// Rings a chip whose name matches the ⌘F query.
+fn mark_match(el: AnyElement, name: &str, ctx: &ChipContext) -> AnyElement {
+    if ctx.search.is_empty() || super::search::highlight_ranges(name, &ctx.search).is_empty() {
+        return el;
+    }
+    div()
+        .flex_none()
+        .rounded_md()
+        .border_1()
+        .border_color(theme::amber())
+        .shadow_sm()
+        .child(el)
+        .into_any_element()
 }
 
 /// Double-click on a branch chip checks it out (Fork-like dialog when needed).
@@ -188,6 +205,10 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
             )
             .into_any_element(),
         };
+        let element = match super::search::label_name(label) {
+            Some(name) => mark_match(element, name, ctx),
+            None => element,
+        };
         out.push(element);
     }
     // Remote branches not merged into a local chip (ahead/behind or remote-only).
@@ -195,22 +216,21 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
         if let RefLabel::Remote(name) = label
             && !merged.contains(name)
         {
-            out.push(
-                checkout_on_double_click(
-                    chip(
-                        name.clone(),
-                        theme::violet(),
-                        Lucide::Cloud,
-                        false,
-                        false,
-                        None,
-                    ),
-                    name,
-                    true,
-                    ctx,
-                )
-                .into_any_element(),
-            );
+            let el = checkout_on_double_click(
+                chip(
+                    name.clone(),
+                    theme::violet(),
+                    Lucide::Cloud,
+                    false,
+                    false,
+                    None,
+                ),
+                name,
+                true,
+                ctx,
+            )
+            .into_any_element();
+            out.push(mark_match(el, name, ctx));
         }
     }
     out
@@ -293,6 +313,16 @@ impl RepoView {
                 .collect(),
         );
 
+        let search = if self.search_open {
+            self.search_input.read(cx).value().trim().to_string()
+        } else {
+            String::new()
+        };
+        let highlight = gpui_kit::HighlightStyle {
+            background_color: Some(theme::alpha(theme::amber(), 0.4)),
+            color: Some(gpui_kit::white()),
+            ..Default::default()
+        };
         let chip_ctx = Rc::new(ChipContext {
             upstreams: data
                 .refs
@@ -303,6 +333,7 @@ impl RepoView {
             github: data.github.is_some(),
             burst: self.celebrate.clone(),
             view: cx.entity().downgrade(),
+            search: search.clone(),
         });
         let hits = Rc::new(self.search_hits.clone());
         let list = if data.history.is_empty() {
@@ -389,7 +420,20 @@ impl RepoView {
                                             .when(commit.parents.len() > 1, |s| {
                                                 s.text_color(cx.theme().muted_foreground)
                                             })
-                                            .child(commit.summary.clone()),
+                                            .child({
+                                                let ranges = if is_hit {
+                                                    super::search::highlight_ranges(
+                                                        &commit.summary,
+                                                        &search,
+                                                    )
+                                                } else {
+                                                    Vec::new()
+                                                };
+                                                gpui_kit::StyledText::new(commit.summary.clone())
+                                                    .with_highlights(
+                                                        ranges.into_iter().map(|r| (r, highlight)),
+                                                    )
+                                            }),
                                     ),
                             )
                             .child(

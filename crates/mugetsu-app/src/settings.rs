@@ -63,7 +63,12 @@ pub struct Settings {
     pub sidebar_order: Vec<String>,
     /// Recently opened repositories, newest first.
     pub recent: Vec<PathBuf>,
+    /// PRs tab: merged PRs younger than this many days are listed.
+    pub merged_days: u32,
 }
+
+/// Choices offered for [`Settings::merged_days`].
+pub const MERGED_DAYS: [u32; 4] = [3, 7, 14, 30];
 
 impl Default for Settings {
     fn default() -> Self {
@@ -75,6 +80,7 @@ impl Default for Settings {
             repo_icons: HashMap::new(),
             sidebar_order: SECTIONS.iter().map(|s| s.to_string()).collect(),
             recent: Vec::new(),
+            merged_days: 7,
         }
     }
 }
