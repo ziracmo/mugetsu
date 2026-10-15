@@ -1,19 +1,34 @@
 #!/usr/bin/env bash
 # Builds Mugetsu.app (ad-hoc signed) and installs it in /Applications.
-# Usage: scripts/bundle-macos.sh            → build + install in /Applications
+# Usage: scripts/bundle-macos.sh              → build + install in /Applications
 #        scripts/bundle-macos.sh --no-install → build only (target/release/Mugetsu.app)
+#        scripts/bundle-macos.sh --universal  → Apple silicon + Intel binary (implies --no-install)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 INSTALL=1
-[[ "${1:-}" == "--no-install" ]] && INSTALL=0
-
-cargo build --release -p mugetsu-app
+UNIVERSAL=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) INSTALL=0 ;;
+    --universal) UNIVERSAL=1 INSTALL=0 ;;
+  esac
+done
 
 APP=target/release/Mugetsu.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/Mugetsu "$APP/Contents/MacOS/Mugetsu"
+
+if [[ $UNIVERSAL == 1 ]]; then
+  for t in aarch64-apple-darwin x86_64-apple-darwin; do
+    cargo build --release --locked -p mugetsu-app --target "$t"
+  done
+  lipo -create -output "$APP/Contents/MacOS/Mugetsu" \
+    target/aarch64-apple-darwin/release/Mugetsu target/x86_64-apple-darwin/release/Mugetsu
+else
+  cargo build --release -p mugetsu-app
+  cp target/release/Mugetsu "$APP/Contents/MacOS/Mugetsu"
+fi
 
 # App icon: every size macOS wants, from the 1024 px master.
 ICONSET=target/release/Mugetsu.iconset
