@@ -71,6 +71,8 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("k", SelectNewer, Some("History")),
         KeyBinding::new("down", SelectOlder, Some("History")),
         KeyBinding::new("j", SelectOlder, Some("History")),
+        // Plain F: only from the history list, so typing in a field is untouched.
+        KeyBinding::new("f", RevealHead, Some("History")),
         // Same shortcuts as Fork on macOS.
         KeyBinding::new("secondary-shift-f", Fetch, Some("Repo")),
         KeyBinding::new("secondary-shift-l", Pull, Some("Repo")),
@@ -811,6 +813,7 @@ impl RepoView {
         if let Some(head) = self.data.refs.head {
             self.set_mode(Mode::History, cx);
             self.select_commit(head, true, cx);
+            self.flash_commits(HashSet::from([head]), cx);
         }
     }
 

@@ -974,3 +974,39 @@ fn deleting_a_branch_slashes_its_chip(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| window.render_frame(cx))
         .unwrap();
 }
+
+#[gpui_kit::test]
+fn f_key_jumps_to_head_and_shimmers_it(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let (head, other) = cx.read(|cx| {
+        let v = view.read(cx);
+        let head = v.data().refs.head.unwrap();
+        let other = v
+            .data()
+            .history
+            .commits
+            .iter()
+            .map(|c| c.id)
+            .find(|id| *id != head)
+            .unwrap();
+        (head, other)
+    });
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.select_commit(other, true, cx);
+            window.focus(&v.history_focus_handle(), cx);
+        });
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("f");
+    vcx.run_until_parked();
+    cx.read(|cx| {
+        assert_eq!(view.read(cx).selected_commit(), Some(head));
+        assert_eq!(view.read(cx).shimmering(), 1);
+    });
+}
