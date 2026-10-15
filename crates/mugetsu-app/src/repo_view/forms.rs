@@ -544,10 +544,12 @@ impl RepoView {
                         force_with_lease: f.force,
                         tags: f.tags,
                     };
+                    let pushed = local.clone();
                     let _ = view.update(cx, |this, cx| {
-                        this.run_op(
+                        this.run_op_then(
                             "Push",
                             move |r| r.push_to(&remote, &local, &remote_branch, options),
+                            move |this, _, cx| this.celebrate_push(pushed, cx),
                             window,
                             cx,
                         )

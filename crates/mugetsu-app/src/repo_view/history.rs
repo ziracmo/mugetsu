@@ -36,6 +36,8 @@ struct ChipContext {
     search: String,
     /// Branches checked out in another worktree.
     worktrees: HashMap<String, std::path::PathBuf>,
+    /// Branch just pushed (name, sequence).
+    pushed: Option<(String, usize)>,
 }
 
 /// Rings a chip whose name matches the ⌘F query.
@@ -195,6 +197,10 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     false,
                     ctx,
                 );
+                let el = match &ctx.pushed {
+                    Some((b, seq)) if b == name => super::shimmer::pushed(el, *seq),
+                    _ => el,
+                };
                 match &ctx.burst {
                     Some((b, seq)) if b == name => div()
                         .relative()
@@ -202,7 +208,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                         .child(el)
                         .child(super::particles::burst(*seq))
                         .into_any_element(),
-                    _ => el.into_any_element(),
+                    _ => el,
                 }
             }
             RefLabel::Remote(_) => continue,
@@ -358,6 +364,7 @@ impl RepoView {
             view: cx.entity().downgrade(),
             search: search.clone(),
             worktrees: self.other_worktrees(),
+            pushed: self.pushed.clone(),
         });
         let hits = Rc::new(self.search_hits.clone());
         let shimmer = self.shimmer.clone();

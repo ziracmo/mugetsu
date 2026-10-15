@@ -706,6 +706,7 @@ fn push_dialog_can_force_with_lease(cx: &mut TestAppContext) {
     let remote_head = || git(remote.path(), &["log", "-1", "--format=%s", "main"]);
     push(cx, true);
     assert_eq!(remote_head().trim(), "rewritten");
+    cx.read(|cx| assert_eq!(view.read(cx).pushed_branch().as_deref(), Some("main")));
 }
 
 #[gpui_kit::test]

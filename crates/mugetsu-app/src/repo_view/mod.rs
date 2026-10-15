@@ -196,6 +196,8 @@ pub struct RepoView {
     pr_filter: pr_panel::PrFilter,
     /// A PR context menu is open: its info card stays hidden.
     pr_menu_open: bool,
+    /// Branch whose push just succeeded (name, sequence), for its chip animation.
+    pushed: Option<(String, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -308,6 +310,7 @@ impl RepoView {
             adopt_layout: true,
             pr_filter: Default::default(),
             pr_menu_open: false,
+            pushed: None,
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
                 if order != this.commit_order {
@@ -932,6 +935,31 @@ impl RepoView {
                     .update(cx, |s, cx| s.resize_panel(0, gpui_kit::px(w), window, cx));
             }
         }
+    }
+
+    /// Plays the "pushed" animation on a branch chip.
+    pub(super) fn celebrate_push(&mut self, branch: String, cx: &mut Context<Self>) {
+        self.celebrate_seq += 1;
+        let seq = self.celebrate_seq;
+        self.pushed = Some((branch, seq));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(2800))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.pushed.as_ref().is_some_and(|(_, s)| *s == seq) {
+                    this.pushed = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    #[cfg(test)]
+    pub fn pushed_branch(&self) -> Option<String> {
+        self.pushed.as_ref().map(|(b, _)| b.clone())
     }
 
     /// Sweeps a shimmer over these commits' rows.

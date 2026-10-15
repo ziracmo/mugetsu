@@ -36,3 +36,28 @@ pub fn sweep(seq: usize) -> AnyElement {
         )
         .into_any_element()
 }
+
+/// Pushed branch chip: a turning gradient edge (lime → accent) with a light
+/// sweep, wrapped around `chip`.
+pub fn pushed(chip: AnyElement, seq: usize) -> AnyElement {
+    div()
+        .relative()
+        .flex_none()
+        .rounded_md()
+        .p(gpui_kit::px(1.5))
+        .overflow_hidden()
+        .with_animation(
+            ("pushed-edge", seq),
+            Animation::new(Duration::from_millis(1400)).repeat(),
+            |el, t| {
+                el.bg(linear_gradient(
+                    360. * t,
+                    linear_color_stop(theme::lime(), 0.),
+                    linear_color_stop(theme::accent(), 1.),
+                ))
+            },
+        )
+        .child(chip)
+        .child(sweep(seq))
+        .into_any_element()
+}
