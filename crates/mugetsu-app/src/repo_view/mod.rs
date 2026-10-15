@@ -175,6 +175,19 @@ pub struct RepoView {
     /// History order the data was loaded with (reloads when the setting changes).
     commit_order: crate::settings::CommitSort,
     _settings: Subscription,
+    /// Recent PRs of the repository (sidebar PR tab, stacks).
+    pr_list: Arc<Vec<mugetsu_forge::PullRequest>>,
+    /// GitHub login of the user.
+    pr_me: Option<String>,
+    #[allow(dead_code)] // PR tab, in progress
+    sidebar_tab: SidebarTab,
+}
+
+#[allow(dead_code)] // PR tab, in progress
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SidebarTab {
+    Repo,
+    Prs,
 }
 
 impl EventEmitter<RepoEvent> for RepoView {}
@@ -260,6 +273,9 @@ impl RepoView {
             _search,
             _commit_search,
             commit_order: crate::settings::get().commit_order,
+            pr_list: Arc::default(),
+            pr_me: None,
+            sidebar_tab: SidebarTab::Repo,
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
                 if order != this.commit_order {
@@ -515,7 +531,10 @@ impl RepoView {
             let result = cx.background_spawn(async move { pr::recent(&gh) }).await;
             if let Ok(prs) = result {
                 let _ = this.update(cx, |this, cx| {
-                    this.prs.set_bulk(prs, Instant::now());
+                    this.prs
+                        .set_bulk(mugetsu_forge::by_branch(&prs.list), Instant::now());
+                    this.pr_list = Arc::new(prs.list);
+                    this.pr_me = prs.me;
                     cx.notify();
                 });
             }

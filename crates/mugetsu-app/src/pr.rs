@@ -21,15 +21,26 @@ pub fn lookup(repo: &GithubRepo, branch: &str) -> Result<Option<PullRequest>, St
 }
 
 /// Blocking: recent PRs of the repository keyed by head branch.
-/// With a token, open PRs also get their CI / review state.
-pub fn recent(repo: &GithubRepo) -> Result<HashMap<String, PullRequest>, String> {
-    let mut prs = github().recent_pulls(repo).map_err(|e| e.to_string())?;
+/// Recent PRs of a repository and who "me" is on GitHub.
+pub struct RecentPrs {
+    pub list: Vec<PullRequest>,
+    pub me: Option<String>,
+}
+
+fn viewer() -> Option<String> {
+    static ME: OnceLock<Option<String>> = OnceLock::new();
+    ME.get_or_init(|| github().viewer_login().ok()).clone()
+}
+
+/// Blocking. With a token, open PRs also get their CI / review state.
+pub fn recent(repo: &GithubRepo) -> Result<RecentPrs, String> {
+    let mut list = github().recent_pulls(repo).map_err(|e| e.to_string())?;
     if let Ok(statuses) = github().pr_statuses(repo) {
-        for pr in prs.values_mut() {
+        for pr in &mut list {
             pr.status = statuses.get(&pr.number).cloned();
         }
     }
-    Ok(prs)
+    Ok(RecentPrs { list, me: viewer() })
 }
 
 #[derive(Clone, Debug)]

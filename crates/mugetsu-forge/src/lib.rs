@@ -53,6 +53,17 @@ pub struct PullRequest {
     pub state: PrState,
     /// CI and review state (open PRs, when a token allows GraphQL).
     pub status: Option<PrStatus>,
+    /// Head and base branch names.
+    pub head: String,
+    pub base: String,
+    /// Head branch lives in the repository itself (not a fork).
+    pub same_repo: bool,
+    pub author: String,
+    /// Logins whose review is requested and still pending.
+    pub requested_reviewers: Vec<String>,
+    /// ISO 8601 timestamps.
+    pub updated_at: String,
+    pub merged_at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,9 +192,23 @@ struct ApiOwner {
 }
 
 #[derive(Deserialize)]
+struct ApiBase {
+    #[serde(rename = "ref")]
+    branch: String,
+}
+
+#[derive(Deserialize)]
 struct ApiPull {
     #[serde(default)]
     head: Option<ApiHead>,
+    #[serde(default)]
+    base: Option<ApiBase>,
+    #[serde(default)]
+    user: Option<ApiOwner>,
+    #[serde(default)]
+    requested_reviewers: Vec<ApiOwner>,
+    #[serde(default)]
+    updated_at: String,
     number: u64,
     title: String,
     html_url: String,
@@ -191,6 +216,19 @@ struct ApiPull {
     #[serde(default)]
     draft: bool,
     merged_at: Option<String>,
+}
+
+impl ApiPull {
+    fn into_pr(self, owner: &str) -> PullRequest {
+        let same_repo = self.head.as_ref().is_some_and(|h| {
+            h.repo
+                .as_ref()
+                .is_some_and(|r| r.owner.login.eq_ignore_ascii_case(owner))
+        });
+        let mut pr = PullRequest::from(self);
+        pr.same_repo = same_repo;
+        pr
+    }
 }
 
 impl From<ApiPull> for PullRequest {
@@ -207,6 +245,13 @@ impl From<ApiPull> for PullRequest {
             url: p.html_url,
             state,
             status: None,
+            head: p.head.map(|h| h.branch).unwrap_or_default(),
+            base: p.base.map(|b| b.branch).unwrap_or_default(),
+            same_repo: false,
+            author: p.user.map(|u| u.login).unwrap_or_default(),
+            requested_reviewers: p.requested_reviewers.into_iter().map(|u| u.login).collect(),
+            updated_at: p.updated_at,
+            merged_at: p.merged_at,
         }
     }
 }
@@ -223,20 +268,51 @@ pub fn pick(prs: Vec<PullRequest>) -> Option<PullRequest> {
     prs.into_iter().next()
 }
 
-fn by_branch(pulls: Vec<ApiPull>, owner: &str) -> std::collections::HashMap<String, PullRequest> {
+/// Most relevant PR per head branch, for branches of the repository itself.
+pub fn by_branch(prs: &[PullRequest]) -> std::collections::HashMap<String, PullRequest> {
     let mut grouped: std::collections::HashMap<String, Vec<PullRequest>> = Default::default();
-    for mut p in pulls {
-        let Some(head) = p.head.take() else { continue };
-        let same_owner = head
-            .repo
-            .is_some_and(|r| r.owner.login.eq_ignore_ascii_case(owner));
-        if same_owner {
-            grouped.entry(head.branch).or_default().push(p.into());
-        }
+    for p in prs.iter().filter(|p| p.same_repo) {
+        grouped.entry(p.head.clone()).or_default().push(p.clone());
     }
     grouped
         .into_iter()
         .filter_map(|(branch, prs)| Some((branch, pick(prs)?)))
+        .collect()
+}
+
+/// Stacked pull requests: open PRs whose base is another open PR's head.
+/// Each stack is listed bottom (based on the trunk) to top, depth first;
+/// single PRs are not stacks.
+pub fn stacks(prs: &[PullRequest]) -> Vec<Vec<PullRequest>> {
+    let open: Vec<&PullRequest> = prs
+        .iter()
+        .filter(|p| p.same_repo && matches!(p.state, PrState::Open | PrState::Draft))
+        .collect();
+    let heads: std::collections::HashSet<&str> = open.iter().map(|p| p.head.as_str()).collect();
+    fn walk<'a>(pr: &'a PullRequest, open: &[&'a PullRequest], out: &mut Vec<PullRequest>) {
+        if out.iter().any(|p| p.number == pr.number) {
+            return; // cycles
+        }
+        out.push(pr.clone());
+        let mut children: Vec<&&PullRequest> = open.iter().filter(|c| c.base == pr.head).collect();
+        children.sort_by_key(|c| c.number);
+        for child in children {
+            walk(child, open, out);
+        }
+    }
+    let mut roots: Vec<&&PullRequest> = open
+        .iter()
+        .filter(|p| !heads.contains(p.base.as_str()))
+        .collect();
+    roots.sort_by_key(|p| std::cmp::Reverse(p.number));
+    roots
+        .into_iter()
+        .map(|root| {
+            let mut stack = Vec::new();
+            walk(root, &open, &mut stack);
+            stack
+        })
+        .filter(|s| s.len() > 1)
         .collect()
 }
 
@@ -287,18 +363,24 @@ impl Github {
             .read_json()?)
     }
 
-    /// The most recently updated PRs of `repo`, keyed by head branch (same-repo
-    /// branches only), most relevant PR per branch.
-    pub fn recent_pulls(
-        &self,
-        repo: &GithubRepo,
-    ) -> anyhow::Result<std::collections::HashMap<String, PullRequest>> {
+    /// The 100 most recently updated PRs of `repo`, newest first.
+    pub fn recent_pulls(&self, repo: &GithubRepo) -> anyhow::Result<Vec<PullRequest>> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/pulls?state=all&sort=updated&direction=desc&per_page=100",
             repo.owner, repo.name
         );
         let pulls: Vec<ApiPull> = self.get_json(&url)?;
-        Ok(by_branch(pulls, &repo.owner))
+        Ok(pulls.into_iter().map(|p| p.into_pr(&repo.owner)).collect())
+    }
+
+    /// Login of the token's owner.
+    pub fn viewer_login(&self) -> anyhow::Result<String> {
+        #[derive(Deserialize)]
+        struct User {
+            login: String,
+        }
+        self.token.as_deref().context("no GitHub token")?;
+        Ok(self.get_json::<User>("https://api.github.com/user")?.login)
     }
 
     /// CI / review state of the open PRs (GraphQL needs a token).
@@ -334,7 +416,9 @@ impl Github {
             repo.owner, repo.name, repo.owner, branch
         );
         let pulls: Vec<ApiPull> = self.get_json(&url)?;
-        Ok(pick(pulls.into_iter().map(Into::into).collect()))
+        Ok(pick(
+            pulls.into_iter().map(|p| p.into_pr(&repo.owner)).collect(),
+        ))
     }
 }
 
@@ -368,6 +452,10 @@ mod tests {
     fn maps_api_states() {
         let api = |state: &str, draft, merged: bool| ApiPull {
             head: None,
+            base: None,
+            user: None,
+            requested_reviewers: Vec::new(),
+            updated_at: String::new(),
             number: 1,
             title: String::new(),
             html_url: String::new(),
@@ -401,6 +489,13 @@ mod tests {
             url: String::new(),
             state,
             status: None,
+            head: String::new(),
+            base: String::new(),
+            same_repo: true,
+            author: String::new(),
+            requested_reviewers: Vec::new(),
+            updated_at: String::new(),
+            merged_at: None,
         };
         let picked = pick(vec![
             pr(9, PrState::Closed),
@@ -437,6 +532,35 @@ mod tests {
     }
 
     #[test]
+    fn finds_stacks_from_bases() {
+        let pr = |number, head: &str, base: &str, state| PullRequest {
+            number,
+            title: String::new(),
+            url: String::new(),
+            state,
+            status: None,
+            head: head.into(),
+            base: base.into(),
+            same_repo: true,
+            author: String::new(),
+            requested_reviewers: Vec::new(),
+            updated_at: String::new(),
+            merged_at: None,
+        };
+        let prs = vec![
+            pr(1, "a", "main", PrState::Open),
+            pr(2, "b", "a", PrState::Draft),
+            pr(3, "c", "b", PrState::Open),
+            pr(4, "lonely", "main", PrState::Open),
+            pr(5, "old", "lonely", PrState::Merged),
+        ];
+        let stacks = stacks(&prs);
+        assert_eq!(stacks.len(), 1);
+        let numbers: Vec<u64> = stacks[0].iter().map(|p| p.number).collect();
+        assert_eq!(numbers, [1, 2, 3]);
+    }
+
+    #[test]
     fn groups_pulls_by_head_branch() {
         let json = r#"[
             {"number": 3, "title": "t3", "html_url": "u3", "state": "open", "draft": false, "merged_at": null,
@@ -449,7 +573,9 @@ mod tests {
              "head": {"ref": "gone", "repo": null}}
         ]"#;
         let pulls: Vec<ApiPull> = serde_json::from_str(json).unwrap();
-        let map = by_branch(pulls, "me");
+        let prs: Vec<PullRequest> = pulls.into_iter().map(|p| p.into_pr("me")).collect();
+        assert_eq!(prs[0].head, "feat/x");
+        let map = by_branch(&prs);
         assert_eq!(map.len(), 1);
         assert_eq!(map["feat/x"].number, 3);
     }
