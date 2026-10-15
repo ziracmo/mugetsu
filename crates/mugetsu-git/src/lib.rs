@@ -5,6 +5,7 @@
 //! CLI so that user config, hooks, credential helpers and fsmonitor keep working.
 
 pub mod cli;
+pub mod conflict;
 pub mod diff;
 pub mod graph;
 pub mod log;
@@ -16,6 +17,7 @@ pub mod status;
 use std::path::{Path, PathBuf};
 
 pub use cli::{Git, Identity, global_identity, set_global_identity};
+pub use conflict::{Chunk, Conflict, ConflictFile, Operation, OperationState, Resolution};
 pub use diff::{DiffFile, DiffLine, FileDiff, Hunk, LineKind};
 pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout};
 pub use log::{Commit, CommitOrder, History};

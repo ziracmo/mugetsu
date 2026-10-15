@@ -196,6 +196,55 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             );
         }))
     };
+    let head = ctx.head_branch.clone().unwrap_or_else(|| "HEAD".into());
+    let merge = {
+        let name = name.clone();
+        item(
+            trf!(
+                "Merger '{}' dans '{head}'",
+                "Merge '{}' into '{head}'",
+                b.name
+            ),
+            Lucide::GitMerge,
+        )
+        .disabled(b.is_head)
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            let name = name.clone();
+            this.run_op(
+                "Merge",
+                move |r| {
+                    r.merge(&name)
+                        .and_then(super::conflicts::stopped_on_conflicts)
+                },
+                window,
+                cx,
+            );
+        }))
+    };
+    let rebase = {
+        let name = name.clone();
+        item(
+            trf!(
+                "Rebaser '{head}' sur '{}'",
+                "Rebase '{head}' onto '{}'",
+                b.name
+            ),
+            Lucide::GitBranch,
+        )
+        .disabled(b.is_head || ctx.head_branch.is_none())
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            let name = name.clone();
+            this.run_op(
+                "Rebase",
+                move |r| {
+                    r.rebase(&name)
+                        .and_then(super::conflicts::stopped_on_conflicts)
+                },
+                window,
+                cx,
+            );
+        }))
+    };
     let push = {
         let (name, remote) = (name.clone(), remote.clone());
         item(
@@ -277,6 +326,9 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
 
     menu.item(checkout)
         .item(worktree)
+        .separator()
+        .item(merge)
+        .item(rebase)
         .separator()
         .item(fast_forward)
         .item(push)

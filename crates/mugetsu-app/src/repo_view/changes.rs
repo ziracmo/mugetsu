@@ -35,7 +35,8 @@ impl RepoView {
             .status
             .files
             .iter()
-            .find(|f| f.is_unstaged())
+            .find(|f| f.index == Change::Conflicted)
+            .or_else(|| self.data.status.files.iter().find(|f| f.is_unstaged()))
             .map(|f| SelectedChange {
                 path: f.path.clone(),
                 staged: false,
@@ -58,6 +59,11 @@ impl RepoView {
 
     pub(super) fn load_change(&mut self, sel: SelectedChange, cx: &mut Context<Self>) {
         self.selected_change = Some(sel.clone());
+        if !sel.staged && self.is_conflicted(&sel.path) {
+            self.load_conflict(sel.path, cx);
+            return;
+        }
+        self.conflict = None;
         let untracked = self
             .data
             .status
@@ -165,38 +171,40 @@ impl RepoView {
                     .text_color(cx.theme().muted_foreground)
                     .child(dir.to_string()),
             )
-            .child(
-                Button::new(SharedString::from(format!("toggle:{staged}:{}", f.path)))
-                    .ghost()
-                    .xsmall()
-                    .icon(Icon::new(if staged { Lucide::Minus } else { Lucide::Plus }))
-                    .tooltip(if staged {
-                        tr("Retirer de l'index", "Unstage")
-                    } else {
-                        tr("Ajouter à l'index", "Stage")
-                    })
-                    .on_click(cx.listener({
-                        let path = path.clone();
-                        move |this, _, window, cx| {
+            .when(change != Change::Conflicted, |row| {
+                row.child(
+                    Button::new(SharedString::from(format!("toggle:{staged}:{}", f.path)))
+                        .ghost()
+                        .xsmall()
+                        .icon(Icon::new(if staged { Lucide::Minus } else { Lucide::Plus }))
+                        .tooltip(if staged {
+                            tr("Retirer de l'index", "Unstage")
+                        } else {
+                            tr("Ajouter à l'index", "Stage")
+                        })
+                        .on_click(cx.listener({
                             let path = path.clone();
-                            this.run_op(
-                                if staged { "Unstage" } else { "Stage" },
-                                move |r| {
-                                    if staged {
-                                        r.unstage(&[&path])
-                                    } else {
-                                        r.stage(&[&path])
-                                    }
-                                },
-                                window,
-                                cx,
-                            );
-                        }
-                    })),
-            )
+                            move |this, _, window, cx| {
+                                let path = path.clone();
+                                this.run_op(
+                                    if staged { "Unstage" } else { "Stage" },
+                                    move |r| {
+                                        if staged {
+                                            r.unstage(&[&path])
+                                        } else {
+                                            r.stage(&[&path])
+                                        }
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            }
+                        })),
+                )
+            })
             .on_click(
                 cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
-                    if ev.click_count() >= 2 {
+                    if ev.click_count() >= 2 && change != Change::Conflicted {
                         let path = path.clone();
                         this.run_op(
                             "Stage",
@@ -298,7 +306,17 @@ impl RepoView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let status = self.data.status.clone();
-        let unstaged: Vec<_> = status.unstaged().cloned().collect();
+        let conflicted: Vec<_> = status
+            .files
+            .iter()
+            .filter(|f| f.index == Change::Conflicted)
+            .cloned()
+            .collect();
+        let unstaged: Vec<_> = status
+            .unstaged()
+            .filter(|f| f.index != Change::Conflicted)
+            .cloned()
+            .collect();
         let staged: Vec<_> = status.staged().cloned().collect();
         let can_commit = (!staged.is_empty() || self.amend) && self.busy.is_none();
         let unstaged_rows: Vec<_> = unstaged
@@ -306,6 +324,10 @@ impl RepoView {
             .map(|f| self.file_row(f, false, cx))
             .collect();
         let staged_rows: Vec<_> = staged.iter().map(|f| self.file_row(f, true, cx)).collect();
+        let conflict_rows: Vec<_> = conflicted
+            .iter()
+            .map(|f| self.file_row(f, false, cx))
+            .collect();
 
         let left = v_flex()
             .w(px(380.))
@@ -313,6 +335,18 @@ impl RepoView {
             .h_full()
             .border_r_1()
             .border_color(cx.theme().border)
+            .children(self.render_operation_banner(cx))
+            .when(!conflicted.is_empty(), |el| {
+                el.child(self.list_header(tr("Conflits", "Conflicts"), conflicted.len(), None, cx))
+                    .child(
+                        div()
+                            .id("conflicted")
+                            .flex_none()
+                            .max_h(px(220.))
+                            .overflow_y_scroll()
+                            .children(conflict_rows),
+                    )
+            })
             .child(self.list_header(
                 tr("Non indexés", "Unstaged"),
                 unstaged.len(),
@@ -417,17 +451,24 @@ impl RepoView {
                     ),
             );
 
+        let in_conflict = self.conflict.as_ref().is_some_and(|c| {
+            self.selected_change
+                .as_ref()
+                .is_some_and(|s| s.path == c.path)
+        });
         let right = v_flex()
             .flex_1()
             .min_w_0()
             .h_full()
-            .children(self.render_hunk_bar(cx))
+            .when(!in_conflict, |el| el.children(self.render_hunk_bar(cx)))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
-                    .p_2()
-                    .child(if self.selected_change.is_some() {
+                    .when(!in_conflict, |el| el.p_2())
+                    .child(if in_conflict {
+                        self.render_conflict(cx)
+                    } else if self.selected_change.is_some() {
                         Diff::new(&self.change_diff)
                             .line_number(true)
                             .into_any_element()

@@ -4,6 +4,7 @@
 mod changes;
 mod commit_files;
 mod compact;
+mod conflicts;
 pub(crate) mod forms;
 mod history;
 mod menus;
@@ -163,6 +164,10 @@ pub struct RepoView {
     change_hunks: Option<FileDiff>,
     message: Entity<TextareaState>,
     amend: bool,
+    /// Three-pane resolver on the selected conflicted file.
+    conflict: Option<conflicts::ConflictEditor>,
+    /// A file was just marked resolved (sequence), for the banner's pill.
+    resolved_flash: Option<usize>,
 
     // Commit search (⌘F)
     search_open: bool,
@@ -306,6 +311,8 @@ impl RepoView {
             change_hunks: None,
             message,
             amend: false,
+            conflict: None,
+            resolved_flash: None,
             collapsed: crate::settings::get()
                 .collapsed_sections
                 .iter()
@@ -492,6 +499,7 @@ impl RepoView {
     fn install(&mut self, data: Arc<RepoData>, cx: &mut Context<Self>) {
         self.load_error = None;
         let first_load = self.data.history.is_empty();
+        let had_conflicts = self.data.conflicted().next().is_some();
         let fresh: HashSet<ObjectId> = if first_load {
             HashSet::new()
         } else {
@@ -514,6 +522,18 @@ impl RepoView {
         match keep.or(self.data.refs.head) {
             Some(id) if keep.is_none() || first_load => self.select_commit(id, true, cx),
             _ => {}
+        }
+        // New conflicts (a merge, rebase, cherry-pick or stash pop stopped on
+        // them, here or in a terminal): straight to the resolver.
+        if !had_conflicts && self.data.conflicted().next().is_some() {
+            self.open_conflicts(None, cx);
+        }
+        if self
+            .conflict
+            .as_ref()
+            .is_some_and(|c| !self.is_conflicted(&c.path))
+        {
+            self.conflict = None;
         }
         if self.mode == Mode::Changes {
             let still_there = self.selected_change.as_ref().is_some_and(|sel| {
@@ -792,12 +812,26 @@ impl RepoView {
         self.busy = Some(label);
         let repo = self.repo.clone();
         self._op = cx.spawn_in(window, async move |this, cx| {
-            let result = cx.background_spawn(async move { op(&repo) }).await;
+            let (result, conflicts) = cx
+                .background_spawn(async move {
+                    let result = op(&repo);
+                    let conflicts = repo.conflicted_paths().map_or(0, |p| p.len());
+                    (result, conflicts)
+                })
+                .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.busy = None;
                 this.flash_op(label, result.is_ok(), cx);
                 match result {
                     Ok(()) => on_success(this, window, cx),
+                    // Stopped on conflicts: the resolver takes over.
+                    Err(_) if conflicts > 0 => window.push_notification(
+                        gpui_kit::component::notification::Notification::warning(trf!(
+                            "{label} : {conflicts} fichier(s) en conflit à résoudre",
+                            "{label}: {conflicts} conflicted file(s) to resolve"
+                        )),
+                        cx,
+                    ),
                     Err(e) => window.push_notification(
                         gpui_kit::component::notification::Notification::error(trf!(
                             "{label} : {e:#}",
