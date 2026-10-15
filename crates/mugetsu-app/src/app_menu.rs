@@ -6,7 +6,7 @@ use crate::i18n::tr;
 use crate::repo_view as repo;
 use crate::workspace as ws;
 
-gpui_kit::actions!(app, [OpenSettings, Quit]);
+gpui_kit::actions!(app, [OpenSettings, Quit, ClearRecent]);
 
 /// File > Open Recent > n-th repository of `Settings::recent`.
 #[derive(Clone, PartialEq, serde::Deserialize, gpui_kit::Action)]
@@ -18,6 +18,14 @@ pub struct OpenRecent {
 /// The main window's workspace, for menu actions without a focused view.
 pub struct MainWorkspace(pub AnyWindowHandle, pub Entity<crate::workspace::Workspace>);
 impl Global for MainWorkspace {}
+
+/// `~/Workspace/x` for a path in the home folder, like VS Code's Open Recent.
+pub fn display_path(path: &std::path::Path) -> String {
+    match dirs::home_dir().and_then(|h| path.strip_prefix(h).ok().map(|p| p.to_path_buf())) {
+        Some(rel) => format!("~/{}", rel.display()),
+        None => path.display().to_string(),
+    }
+}
 
 fn open_recent(action: &OpenRecent, cx: &mut App) {
     let Some(path) = crate::settings::get().recent.get(action.index).cloned() else {
@@ -40,6 +48,7 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &OpenSettings, cx| crate::settings_view::open(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(open_recent);
+    cx.on_action(|_: &ClearRecent, cx| crate::settings::update(cx, |s| s.recent.clear()));
     set(cx);
 }
 
@@ -62,13 +71,14 @@ pub fn set(cx: &mut App) {
                         .recent
                         .iter()
                         .enumerate()
-                        .map(|(index, p)| {
-                            let name = p
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                                .unwrap_or_else(|| p.display().to_string());
-                            MenuItem::action(name, OpenRecent { index })
-                        }),
+                        .map(|(index, p)| MenuItem::action(display_path(p), OpenRecent { index }))
+                        .chain([
+                            MenuItem::separator(),
+                            MenuItem::action(
+                                tr("Effacer la liste", "Clear Recently Opened"),
+                                ClearRecent,
+                            ),
+                        ]),
                 ),
             ),
             MenuItem::separator(),
@@ -101,4 +111,20 @@ pub fn set(cx: &mut App) {
             MenuItem::action(tr("Barre latérale", "Toggle Sidebar"), repo::ToggleSidebar),
         ]),
     ]);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn home_paths_are_shortened() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(
+            super::display_path(&home.join("Workspace/mugetsu")),
+            "~/Workspace/mugetsu"
+        );
+        assert_eq!(
+            super::display_path(std::path::Path::new("/opt/x")),
+            "/opt/x"
+        );
+    }
 }
