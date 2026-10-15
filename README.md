@@ -1,125 +1,141 @@
 <p align="center"><img src="docs/banner.png" alt="Mugetsu"></p>
 
-# 月 Mugetsu
+<h1 align="center">月 Mugetsu</h1>
 
-A fast desktop Git client for macOS, written in Rust. Inspired by Fork (density, efficiency) and GitKraken (colourful graph), with a dark, frosted-glass look.
+<p align="center">
+  <b>A fast, GPU-rendered Git client for macOS and Windows, written in Rust.</b><br>
+  The density of Fork, the colourful graph of GitKraken, a dark frosted-glass look.
+</p>
 
-## Features
+<p align="center">
+  <a href="https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu.dmg"><b>Download for macOS</b></a>
+  ·
+  <a href="https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu-Setup.exe"><b>Download for Windows</b></a>
+  ·
+  <a href="https://ziracmo.github.io/mugetsu/">Website</a>
+  ·
+  <a href="https://ziracmo.github.io/mugetsu/releases.html">Release notes</a>
+</p>
 
-- **Multi-repository tabs**: only the active tab is rendered; the others keep their data in memory at no drawing cost. Open repositories are restored at launch. Tabs show an icon when the repository has uncommitted changes; right-click a tab to give the repository an emoji.
-- **Workspaces** (like Fork): named lists of repositories, switched from the title bar menu (new, rename, delete).
-- **Open repository** (⌘O): recent repositories and those found in the folders set in Settings, with search; File › Open Recent in the menu bar.
-- **Settings** (⌘,): French or English, accent colour (red by default), commit order (topological or by date), repository folders.
-- **Commit graph** rendered on the GPU (GPUI) in a virtualized list: only visible rows are drawn, even with 100k+ commits.
-- **Sidebar**: branches grouped into folders like Fork (`feat/…`, `fix/…`), the checked-out branch and main/develop/master/staging highlighted, GitHub icon on pushed branches, ahead/behind counts, remotes, worktrees (click to open in a tab), tags, stashes, and a filter field. Sections can be reordered by dragging their headers. Collapsible with ⌃⌘S.
-- **Ref chips**: a local branch identical to its remote counterpart shows as a single chip with a dark remote icon.
-- **Right-click menus** on branches, remote branches, tags and commits: checkout, checkout as worktree, fast-forward, push, reset to the upstream, create/open pull request, rename, delete, new branch/tag here, reset (soft/mixed/hard), cherry-pick, revert, save as patch, copy name/SHA.
-- **Commit search** (⌘F / Ctrl+F) by message, author, branch / tag name or SHA, with next/previous match; matched text and chips are highlighted.
-- **Commit details**: changed files as a tree (created / modified / deleted / renamed icons, click to jump), description folded, SHA copy with a "Copied" burst.
-- **Optimistic checkout**: the new HEAD shows at once; the real state is reloaded when git finishes (rolled back on failure).
-- **Author avatars** from GitHub (noreply addresses) or Gravatar, cached on disk, with initials as a fallback.
-- **Diff** view with syntax highlighting and intra-line changes.
-- **Changes**: stage/unstage per file or per hunk, commit, amend, commit and push.
-- **Automatic fetch** every 10 s for the focused repository and every 5 min for the others. A pulsing dot appears on a tab when one of its remotes moved.
-- **GitHub pull requests**: each branch with a PR shows a `#123` chip coloured by state, with its CI result and unresolved conversations; hovering shows failing checks and the review decision; clicking opens the PR.
-- **Tab switcher**: hold ⌃ and press Tab to pick a repository among cards, release to switch (Dia-like).
-- **Worktrees**: branches checked out in another worktree carry a worktree icon; double-click opens that worktree in a tab.
-- **Feedback**: new commits shimmer after a reload, a pushed branch chip gets a moving gradient edge.
-- **Layout memory**: folded sections are remembered; sidebar width and tab are shared by every repository (Settings).
-- **PRs tab** in the sidebar (quick filters: all / mine / to review; right-click → Show branch): open PRs (reviews you owe first, flagged with an eye), drafts, GitHub stacks and PRs merged in the last 3 / 7 / 14 / 30 days (Settings). Branches in a stack show their `n/total` position.
-- **Stats view** (⌘3, next to History and Changes), from commits only (no GitHub API, no rate limit): top authors with lines added / removed, reviewers (`Reviewed-by` trailers), PR mergers, committers, co-authors, activity chart, weekday × hour heatmap and hot files on the default branch, over 7 / 30 / 90 days, a year or all history. Identities are merged (mailmap, email, name, GitHub login); line counts stream in after the first numbers.
-- **Checkout** like Fork: double-click a branch (sidebar or graph chip); with uncommitted changes, or for a remote branch, a sheet offers to keep, stash and reapply, or discard them, and to name the local branch.
-- **Push sheet**: branch, target remote branch, push tags, force with lease.
-- Pull (fast-forward only), stash and pop, a particle burst on the branch after a checkout.
+---
 
-## Keyboard shortcuts
+## Why Mugetsu
 
-Same as Fork on macOS where they exist.
-
-| Action | Keys |
-| --- | --- |
-| Commit / Commit and push | ⌘↩ / ⇧⌘↩ |
-| Fetch | ⇧⌘F |
-| Pull | ⇧⌘L |
-| Push | ⇧⌘P |
-| New branch / New tag | ⇧⌘B / ⇧⌘G |
-| Stash | ⇧⌘H |
-| Stage all / Stash (in Changes) | ⌘A / ⌘S |
-| Settings | ⌘, |
-| Show changes / All commits / Stats | ⌘1 / ⌘2 / ⌘3 |
-| Reveal HEAD | ⌘0 |
-| Search commits | ⌘F (or ⌃F) |
-| Checkout branch | ⌘B |
-| Refresh | ⌘R |
-| Open repository / New tab | ⌘O / ⌘T |
-| Close tab | ⌘W |
-| Next / previous tab | ⌃Tab / ⌃⇧Tab |
-| Toggle sidebar | ⌃⌘S |
-| Previous / next commit | ↑ ↓ (or k j) |
+- **Fast on huge repositories.** The commit graph is drawn on the GPU and only visible rows are rendered.
+  git.git's 85k commits load in under a second.
+- **Many repositories at once.** Tabs, workspaces, a ⌃Tab switcher, and background fetches that tell you
+  when a remote moved.
+- **GitHub built in.** Pull requests, CI status and reviews right on your branches.
+- **Fork's muscle memory.** Same layout ideas, same shortcuts where they exist.
 
 ## Download
 
-**[Latest release](https://github.com/ziracmo/mugetsu/releases/latest)**:
+| Platform | File |
+| --- | --- |
+| macOS 12+ (Apple silicon and Intel) | [Mugetsu.dmg](https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu.dmg) |
+| Windows 10/11 x64 | [Mugetsu-Setup.exe](https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu-Setup.exe) |
 
-- macOS 12+ (Apple silicon and Intel): [Mugetsu.dmg](https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu.dmg)
-- Windows 10/11 x64: [Mugetsu-Setup.exe](https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu-Setup.exe)
+All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/releases).
 
-Builds are not signed yet. On macOS, drag the app to Applications, then **right-click › Open** the first time (on macOS 15+: System Settings › Privacy & Security › Open Anyway, or `xattr -dr com.apple.quarantine /Applications/Mugetsu.app`). On Windows, SmartScreen may warn: **More info › Run anyway**.
+> **First launch.** Builds are not signed yet.
+> **macOS:** drag Mugetsu to Applications, then **right-click › Open** the first time.
+> On macOS 15+, use **System Settings › Privacy & Security › Open Anyway**, or run
+> `xattr -dr com.apple.quarantine /Applications/Mugetsu.app`.
+> **Windows:** if SmartScreen warns, click **More info › Run anyway**.
 
-### Cutting a release
+## Features
 
-Bump `version` in `Cargo.toml` and `crates/*/Cargo.toml`, then push a tag:
+### History
+
+- **GPU commit graph**, virtualized: smooth with 100k+ commits.
+- **Commit search** (⌘F) by message, author, branch, tag or SHA, with matches highlighted.
+- **Commit details**: changed files as a tree, folded description, one-click SHA copy.
+- **Diff view** with syntax highlighting and intra-line changes.
+- **Author avatars** from GitHub or Gravatar, cached on disk.
+
+### Branches and sidebar
+
+- Branches grouped into folders (`feat/…`, `fix/…`), with ahead/behind counts and a GitHub icon when pushed.
+- Remotes, tags, stashes and worktrees, with a filter field and sections you can reorder by dragging.
+- **Double-click to checkout**, Fork-style: keep, stash or discard local changes, name the local branch.
+  The new HEAD shows instantly.
+- **Right-click menus** everywhere: checkout (or as worktree), fast-forward, push, rename, delete,
+  reset, cherry-pick, revert, save as patch, create or open a pull request…
+
+### Changes
+
+- Stage and unstage by file or by hunk.
+- Commit, amend, commit and push.
+- **Push sheet**: target branch, tags, force with lease. Pull (fast-forward), stash and pop.
+
+### Multi-repository
+
+- **Tabs** with an indicator for uncommitted changes and an optional emoji per repository; reopened at launch.
+- **Workspaces**: named sets of repositories, switched from the title bar.
+- **Tab switcher**: hold ⌃ and press Tab to pick a repository from cards.
+- **Auto-fetch** every 10 s for the focused repository, every 5 min for the others; a pulsing dot shows when
+  a remote moved.
+- **Open repository** (⌘O) from recents or your project folders.
+
+### GitHub pull requests
+
+- A `#123` chip on each branch with a PR, coloured by state, with CI result and unresolved conversations.
+  Hover for failing checks and review decision.
+- **PRs tab**: open PRs (reviews you owe first), drafts, stacks with their `n/total` position, and recently
+  merged PRs. Filters: all / mine / to review.
+
+### Stats
+
+A **Stats view** (⌘3) built from commits only, so no API rate limit: top authors and lines changed,
+reviewers, mergers, co-authors, activity chart, weekday × hour heatmap and hot files, from 7 days to all
+history.
+
+### Look and feel
+
+- Dark frosted-glass theme with a configurable accent colour.
+- English or French.
+- Small touches: new commits shimmer in, pushed branches glow, a particle burst after checkout.
+
+## Keyboard shortcuts
+
+Fork's shortcuts where they exist. On Windows, use Ctrl instead of ⌘.
+
+| Action | Keys |
+| --- | --- |
+| Changes / History / Stats | ⌘1 / ⌘2 / ⌘3 |
+| Commit / Commit and push | ⌘↩ / ⇧⌘↩ |
+| Fetch / Pull / Push | ⇧⌘F / ⇧⌘L / ⇧⌘P |
+| New branch / New tag | ⇧⌘B / ⇧⌘G |
+| Checkout branch | ⌘B |
+| Stash | ⇧⌘H |
+| Search commits | ⌘F |
+| Reveal HEAD | ⌘0 |
+| Previous / next commit | ↑ ↓ (or k j) |
+| Open repository / New tab / Close tab | ⌘O / ⌘T / ⌘W |
+| Switch tab | ⌃Tab / ⌃⇧Tab |
+| Toggle sidebar | ⌃⌘S |
+| Refresh | ⌘R |
+| Settings | ⌘, |
+
+In Changes, ⌘A stages everything and ⌘S stashes.
+
+## Build from source
+
+Requirements: recent stable Rust and `git` (on macOS, the Xcode Command Line Tools).
+For pull requests, run `gh auth login` or set `GITHUB_TOKEN`.
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
-```
+# Run, optionally opening repositories
+cargo run --release -p mugetsu-app -- ~/code/my-repo
 
-`.github/workflows/release.yml` builds a universal `Mugetsu.dmg` and `Mugetsu-Setup.exe` (Inno Setup) and publishes them on the release; the notes come from `packaging/release-notes.md`. To rebuild an existing tag, run the workflow by hand with that tag.
-
-### Signing later
-
-- **macOS**: an Apple Developer Program membership ($99/year) gives a *Developer ID Application* certificate. The workflow would import it (secrets: the `.p12` and its password), sign with `codesign --options runtime --timestamp`, notarize with `xcrun notarytool` (Apple ID app-specific password or App Store Connect API key) and `xcrun stapler staple` the dmg. Gatekeeper then opens the app with no warning.
-- **Windows**: an OV/EV code-signing certificate (or Azure Trusted Signing) and `signtool sign` on `Mugetsu.exe` and the installer. SmartScreen warnings fade as the signed builds gain reputation (immediately with EV).
-
-## Install as a macOS app from source
-
-```sh
+# macOS: build Mugetsu.app and install it in /Applications (--no-install to only build it)
 scripts/bundle-macos.sh
-```
 
-This builds `Mugetsu.app` with its icon, signs it ad hoc and copies it to `/Applications`, so it shows up in Launchpad, Spotlight and the Dock. Use `--no-install` to only build `target/release/Mugetsu.app`.
-
-Every push to `main` also produces a downloadable `Mugetsu-macos` artifact (zipped app) on the CI run.
-
-## Run from source
-
-```sh
-cargo run --release -p mugetsu-app -- ~/code/my-repo ~/code/another-repo
-```
-
-Paths given on the command line are added to the previously open repositories.
-
-Requirements: a recent stable Rust and the Xcode Command Line Tools (`git`). For pull requests: `gh auth login` or a `GITHUB_TOKEN` variable.
-
-## Architecture
-
-```
-crates/
-  mugetsu-git    Git engine: history through gix (in-process, parallel decoding),
-                 everything else through the git CLI (config, hooks, credentials, fsmonitor)
-                 graph.rs: lane layout in O(n log n) time, O(n) memory
-  mugetsu-forge  GitHub: remote URL → owner/repo, pull requests, avatars
-  mugetsu-app    GPUI UI (gpui-kit): workspace, tabs, views
-```
-
-Measured on git.git (85,593 commits, 1,017 refs, 4 cores): refs in 40 ms, full history in 0.66 s with a commit-graph, graph layout in 13 ms, segments for 60 visible rows in 0.1 ms.
-
-## Tests
-
-```sh
+# Tests
 cargo test --workspace
 ```
 
-- `mugetsu-git`: unit tests (parsers, graph, ordering) and integration tests against real temporary repositories.
-- `mugetsu-forge`: URL parsing, PR state mapping and grouping, avatar URLs.
-- `mugetsu-app`: UI integration tests in headless windows (branch click and double-click checkout, keyboard navigation, folders and sidebar filter, right-click rename, collapsible commit body, commit search, sidebar toggle) and end-to-end flows (stage then commit from the UI, background tab dot after a fetch).
+## More
+
+- [Architecture, performance and tests](docs/ARCHITECTURE.md)
+- [Releasing and code signing](docs/RELEASING.md)
