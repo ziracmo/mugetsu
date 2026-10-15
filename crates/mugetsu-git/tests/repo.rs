@@ -1,4 +1,5 @@
 //! Integration tests against real repositories built with the git CLI.
+#![allow(clippy::disallowed_methods)] // test fixtures
 
 use std::path::Path;
 use std::process::Command;

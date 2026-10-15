@@ -1,6 +1,7 @@
 //! Forge integration (GitHub, GitLab, Bitbucket): find the pull request
 //! associated with a branch, its CI and review state.
 
+use std::ffi::OsStr;
 use std::process::Command;
 
 mod bitbucket;
@@ -409,10 +410,7 @@ pub fn token(gh_binary: &str) -> Option<String> {
             return Some(t);
         }
     }
-    let out = Command::new(gh_binary)
-        .args(["auth", "token"])
-        .output()
-        .ok()?;
+    let out = command(gh_binary).args(["auth", "token"]).output().ok()?;
     let t = String::from_utf8(out.stdout).ok()?.trim().to_string();
     (out.status.success() && !t.is_empty()).then_some(t)
 }
@@ -596,7 +594,7 @@ pub fn gitlab_token(glab_binary: &str, host: &str) -> Option<String> {
         return Some(t);
     }
     let host = host.split(':').next().unwrap_or(host);
-    let out = Command::new(glab_binary)
+    let out = command(glab_binary)
         .args(["config", "get", "token", "--host", host])
         .output()
         .ok()?;
@@ -621,6 +619,19 @@ pub fn client(repo: &ForgeRepo, token: Option<String>) -> Box<dyn Forge> {
         ForgeKind::Gitlab => Box::new(Gitlab::new(&repo.host, token)),
         ForgeKind::Bitbucket => Box::new(Bitbucket::new(token)),
     }
+}
+
+/// Same as `mugetsu_git::process::command`: no console window on Windows.
+#[allow(clippy::disallowed_methods, unused_mut)]
+fn command(program: impl AsRef<OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
 }
 
 #[cfg(test)]

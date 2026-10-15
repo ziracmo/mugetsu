@@ -1,0 +1,4 @@
+# GUI app: a bare `Command::new` opens a console window per process on Windows.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "use mugetsu_git::process::command (no console window on Windows)" },
+]

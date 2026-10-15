@@ -10,6 +10,7 @@ pub mod diff;
 pub mod graph;
 pub mod log;
 pub mod ops;
+pub mod process;
 pub mod rebase;
 pub mod refs;
 pub mod restack;
