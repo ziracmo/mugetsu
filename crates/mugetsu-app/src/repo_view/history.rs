@@ -582,33 +582,87 @@ impl RepoView {
                                     .child(format!("{} <{}>", commit.author, commit.email)),
                             )
                             .child(fmt::absolute_time(commit.time))
-                            .child(
-                                h_flex()
-                                    .id("copy-sha")
-                                    .gap_1()
-                                    .cursor_pointer()
-                                    .font_family(cx.theme().mono_font_family.clone())
-                                    .text_color(theme::accent())
-                                    .hover(|s| s.text_color(theme::magenta()))
-                                    .child(Icon::new(Lucide::Copy).xsmall())
-                                    .child(commit.id.to_hex_with_len(10).to_string())
-                                    .on_click(move |_, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            sha.clone(),
-                                        ))
-                                    }),
-                            )
+                            .child(self.render_copy_sha(sha, &commit, cx))
                             .child(div().flex_1())
                             .child(trf!("{} fichier(s)", "{} file(s)", self.commit_files)),
                     ),
             )
             .child(
-                div()
+                h_flex()
                     .flex_1()
                     .min_h_0()
-                    .p_2()
-                    .child(Diff::new(&self.commit_diff).line_number(true)),
+                    .when(self.commit_files > 0, |s| {
+                        s.child(self.render_commit_files(cx))
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .p_2()
+                            .child(Diff::new(&self.commit_diff).line_number(true)),
+                    ),
             )
+            .into_any_element()
+    }
+
+    /// The short SHA; a click copies the full one, with a "Copied" burst.
+    fn render_copy_sha(
+        &self,
+        sha: String,
+        commit: &mugetsu_git::Commit,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let copied = self.copied;
+        h_flex()
+            .id("copy-sha")
+            .test_support()
+            .relative()
+            .gap_1()
+            .cursor_pointer()
+            .font_family(cx.theme().mono_font_family.clone())
+            .text_color(theme::accent())
+            .hover(|s| s.text_color(theme::magenta()))
+            .map(|s| match copied {
+                Some(seq) => s
+                    .text_color(theme::lime())
+                    .child(Icon::new(Lucide::Check).xsmall())
+                    .child(
+                        div()
+                            .font_family(cx.theme().font_family.clone())
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(tr("Copié !", "Copied!"))
+                            .with_animation(
+                                ("copied", seq),
+                                Animation::new(Duration::from_millis(260))
+                                    .with_easing(gpui_kit::ease_out_quint()),
+                                |el, t| el.opacity(t).ml(px(6. * (1. - t))),
+                            ),
+                    )
+                    .child(super::particles::burst(seq)),
+                None => s
+                    .child(Icon::new(Lucide::Copy).xsmall())
+                    .child(commit.id.to_hex_with_len(10).to_string()),
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(sha.clone()));
+                this.celebrate_seq += 1;
+                let seq = this.celebrate_seq;
+                this.copied = Some(seq);
+                cx.notify();
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(1300))
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.copied == Some(seq) {
+                            this.copied = None;
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+            }))
             .into_any_element()
     }
 }

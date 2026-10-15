@@ -2,6 +2,7 @@
 //! history graph with commit details, and the working-copy "Changes" view.
 
 mod changes;
+mod commit_files;
 mod forms;
 mod history;
 mod menus;
@@ -129,6 +130,10 @@ pub struct RepoView {
     commit_diff: Entity<DiffState>,
     commit_message: SharedString,
     commit_files: usize,
+    /// File picked in the commit's file tree.
+    commit_file: Option<SharedString>,
+    /// "Copied" feedback on the SHA (sequence, restarts the burst).
+    copied: Option<usize>,
     /// Long commit bodies start collapsed.
     body_expanded: bool,
 
@@ -242,6 +247,8 @@ impl RepoView {
             commit_diff,
             commit_message: SharedString::default(),
             commit_files: 0,
+            commit_file: None,
+            copied: None,
             body_expanded: false,
             selected_change: None,
             change_diff,
@@ -466,6 +473,7 @@ impl RepoView {
         }
         self.selected = Some(id);
         self.body_expanded = false;
+        self.commit_file = None;
         self.commit_message = SharedString::default();
         let repo = self.repo.clone();
         let rev = id.to_string();
@@ -857,6 +865,11 @@ impl RepoView {
     }
 
     /// Particle burst for a branch label, while its checkout is being celebrated.
+    #[cfg(test)]
+    pub fn copied_feedback(&self) -> bool {
+        self.copied.is_some()
+    }
+
     pub(super) fn burst_for(&self, branch: &str) -> Option<usize> {
         self.celebrate
             .as_ref()

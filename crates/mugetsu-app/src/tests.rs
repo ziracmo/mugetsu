@@ -736,3 +736,33 @@ fn changes_shortcuts_stage_all_and_stash(cx: &mut TestAppContext) {
     );
     assert_eq!(git(dir.path(), &["stash", "list"]).lines().count(), 1);
 }
+
+#[gpui_kit::test]
+fn commit_details_list_files_and_confirm_copies(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/new.rs"), "fn main() {}\n").unwrap();
+    git(dir.path(), &["rm", "-q", "b.txt"]);
+    git(dir.path(), &["add", "src/new.rs"]);
+    git(dir.path(), &["commit", "-q", "-m", "files"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    settle(cx, &view);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("commit-file-src/new.rs").is_some());
+        assert!(window.try_find("commit-file-b.txt").is_some());
+        window.click("commit-file-src/new.rs", cx);
+        window.click("copy-sha", cx);
+    })
+    .unwrap();
+    let head = cx.read(|cx| view.read(cx).data().refs.head.unwrap());
+    cx.read(|cx| {
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|c| c.text()),
+            Some(head.to_string())
+        );
+        assert!(view.read(cx).copied_feedback());
+    });
+}
