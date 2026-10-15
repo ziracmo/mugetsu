@@ -200,6 +200,8 @@ impl RepoView {
             github: self.data.github.clone(),
             default_remote: default_remote(&self.data.refs),
             head_branch: self.data.refs.head_branch.clone(),
+            head: self.data.refs.head,
+            rebasing: self.data.rebase.is_some(),
         }
     }
 

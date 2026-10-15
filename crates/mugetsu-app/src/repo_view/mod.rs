@@ -11,6 +11,7 @@ mod particles;
 mod pr_panel;
 mod pr_tip;
 mod pr_view;
+mod rebase;
 mod search;
 mod shimmer;
 mod sidebar;
@@ -1282,7 +1283,8 @@ impl Render for RepoView {
                                 .bg(crate::theme::glass_edge()),
                         )
                         .child(main)
-                        .children(self.render_search(cx)),
+                        .children(self.render_search(cx))
+                        .children(self.render_rebase_bar(cx)),
                 );
             if self.sidebar_collapsed {
                 card.into_any_element()

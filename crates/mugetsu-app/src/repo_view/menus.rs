@@ -47,6 +47,9 @@ pub struct MenuContext {
     pub github: Option<GithubRepo>,
     pub default_remote: Option<String>,
     pub head_branch: Option<String>,
+    pub head: Option<ObjectId>,
+    /// A rebase is stopped mid-way.
+    pub rebasing: bool,
 }
 
 /// A local branch as shown in a menu.
@@ -600,6 +603,22 @@ pub fn commit_menu(
                     ResetMode::Hard,
                 ))
             },
+        );
+    }
+
+    if let Some(head) = ctx.head_branch.clone() {
+        menu = menu.item(
+            item(
+                trf!(
+                    "Rebase interactif de '{head}' ici…",
+                    "Interactive rebase '{head}' here…"
+                ),
+                Lucide::ListOrdered,
+            )
+            .disabled(ctx.rebasing || ctx.head == Some(id))
+            .on_click(act(&ctx.view, move |this, window, cx| {
+                this.open_rebase(id, window, cx)
+            })),
         );
     }
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use gix::ObjectId;
 use mugetsu_forge::GithubRepo;
-use mugetsu_git::{Graph, History, RefLabel, RefsSnapshot, Repo, Status};
+use mugetsu_git::{Graph, History, RebaseProgress, RefLabel, RefsSnapshot, Repo, Status};
 
 #[derive(Clone, Default)]
 pub struct RepoData {
@@ -16,6 +16,8 @@ pub struct RepoData {
     pub decorations: HashMap<ObjectId, Vec<RefLabel>>,
     pub status: Status,
     pub github: Option<GithubRepo>,
+    /// Interactive rebase stopped mid-way (conflict), if any.
+    pub rebase: Option<RebaseProgress>,
 }
 
 impl RepoData {
@@ -25,6 +27,7 @@ impl RepoData {
         let graph = mugetsu_git::layout(&history.commits);
         let decorations = refs.decorations();
         let status = repo.status()?;
+        let rebase = repo.rebase_progress();
         let github = refs
             .remotes
             .iter()
@@ -38,6 +41,7 @@ impl RepoData {
             decorations,
             status,
             github,
+            rebase,
         }))
     }
 

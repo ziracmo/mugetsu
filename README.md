@@ -63,6 +63,8 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
   The new HEAD shows instantly.
 - **Right-click menus** everywhere: checkout (or as worktree), fast-forward, push, rename, delete,
   reset, cherry-pick, revert, save as patch, create or open a pull request…
+- **Visual interactive rebase**: right-click a commit, drag the commits after it into a new order and pick,
+  reword, squash, fixup or drop each one. A stop on a conflict shows a bar to continue, skip or abort.
 
 ### Changes
 

@@ -357,3 +357,163 @@ fn stats_merge_identities_and_count_lines() {
     assert_eq!(stats.files[0].commits, 2);
     assert_eq!(stats.activity.iter().sum::<u32>(), 2);
 }
+
+/// main: base - one - two - three (each on its own file).
+fn linear() -> (tempfile::TempDir, Repo, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    git(p, &["init", "-q", "-b", "main"]);
+    git(p, &["config", "user.name", "Test"]);
+    git(p, &["config", "user.email", "test@example.com"]);
+    commit_file(p, "base.txt", "base\n", "base");
+    let base = rev(p, "HEAD");
+    commit_file(p, "one.txt", "1\n", "one");
+    commit_file(p, "two.txt", "2\n", "two");
+    commit_file(p, "three.txt", "3\n", "three");
+    let repo = Repo::open(p).unwrap();
+    (dir, repo, base)
+}
+
+fn rev(dir: &Path, rev: &str) -> String {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(["rev-parse", rev])
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+fn subjects(dir: &Path) -> Vec<String> {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(["log", "--format=%B%x1e", "--reverse"])
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .split('\x1e')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[test]
+fn interactive_rebase_reorders_squashes_rewords_and_drops() {
+    use mugetsu_git::{RebaseAction as A, RebaseOutcome, RebaseStep};
+    let (dir, repo, base) = linear();
+    let plan = repo.rebase_plan(&base).unwrap();
+    let names: Vec<_> = plan.iter().map(|c| c.summary()).collect();
+    assert_eq!(names, ["one", "two", "three"]);
+    let step = |i: usize, action, message: Option<&str>| RebaseStep {
+        id: plan[i].id.clone(),
+        action,
+        message: message.map(str::to_string),
+    };
+    let outcome = repo
+        .rebase_interactive(
+            &base,
+            &[
+                step(2, A::Reword, Some("three, reworded\n\nwith a body")),
+                step(0, A::Pick, None),
+                step(1, A::Squash, None),
+            ],
+        )
+        .unwrap();
+    assert_eq!(outcome, RebaseOutcome::Done);
+    assert_eq!(
+        subjects(dir.path()),
+        ["base", "three, reworded\n\nwith a body", "one\n\ntwo"]
+    );
+    assert!(dir.path().join("two.txt").exists());
+    assert!(repo.rebase_progress().is_none());
+
+    // Drop and fixup.
+    let plan = repo.rebase_plan(&base).unwrap();
+    let outcome = repo
+        .rebase_interactive(
+            &base,
+            &[
+                RebaseStep {
+                    id: plan[0].id.clone(),
+                    action: A::Drop,
+                    message: None,
+                },
+                RebaseStep {
+                    id: plan[1].id.clone(),
+                    action: A::Pick,
+                    message: None,
+                },
+            ],
+        )
+        .unwrap();
+    assert_eq!(outcome, RebaseOutcome::Done);
+    assert_eq!(subjects(dir.path()), ["base", "one\n\ntwo"]);
+    assert!(!dir.path().join("three.txt").exists());
+}
+
+#[test]
+fn interactive_rebase_stops_on_conflicts_then_aborts_or_continues() {
+    use mugetsu_git::{RebaseAction as A, RebaseOutcome, RebaseStep};
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    git(p, &["init", "-q", "-b", "main"]);
+    git(p, &["config", "user.name", "Test"]);
+    git(p, &["config", "user.email", "test@example.com"]);
+    commit_file(p, "a.txt", "base\n", "base");
+    let base = rev(p, "HEAD");
+    commit_file(p, "a.txt", "one\n", "one");
+    commit_file(p, "a.txt", "two\n", "two");
+    let head = rev(p, "HEAD");
+    let repo = Repo::open(p).unwrap();
+    let plan = repo.rebase_plan(&base).unwrap();
+    // Swapping two edits of the same line conflicts.
+    let swapped = [
+        RebaseStep {
+            id: plan[1].id.clone(),
+            action: A::Pick,
+            message: None,
+        },
+        RebaseStep {
+            id: plan[0].id.clone(),
+            action: A::Pick,
+            message: None,
+        },
+    ];
+    assert_eq!(
+        repo.rebase_interactive(&base, &swapped).unwrap(),
+        RebaseOutcome::Stopped
+    );
+    let progress = repo.rebase_progress().unwrap();
+    assert_eq!(progress.branch.as_deref(), Some("main"));
+    assert_eq!((progress.step, progress.total), (1, 2));
+    assert!(repo.rebase_continue().is_err(), "conflicts are unresolved");
+    repo.rebase_abort().unwrap();
+    assert!(repo.rebase_progress().is_none());
+    assert_eq!(rev(p, "HEAD"), head);
+
+    // Resolve each stop by taking the commit's side, then continue.
+    assert_eq!(
+        repo.rebase_interactive(&base, &swapped).unwrap(),
+        RebaseOutcome::Stopped
+    );
+    std::fs::write(p.join("a.txt"), "two\n").unwrap();
+    git(p, &["add", "a.txt"]);
+    assert_eq!(repo.rebase_continue().unwrap(), RebaseOutcome::Stopped);
+    std::fs::write(p.join("a.txt"), "one\n").unwrap();
+    git(p, &["add", "a.txt"]);
+    assert_eq!(repo.rebase_continue().unwrap(), RebaseOutcome::Done);
+    assert_eq!(subjects(p), ["base", "two", "one"]);
+}
+
+#[test]
+fn rebase_plan_refuses_merges_and_non_ancestors() {
+    let (_dir, repo) = fixture();
+    let c1 = repo
+        .git()
+        .run(["rev-list", "--max-parents=0", "HEAD"])
+        .unwrap();
+    assert!(repo.rebase_plan(c1.trim()).is_err(), "range holds a merge");
+    repo.git().run(["switch", "-q", "feature"]).unwrap();
+    assert_eq!(repo.rebase_plan(c1.trim()).unwrap().len(), 3);
+    assert!(repo.rebase_plan("main").is_err(), "main is not an ancestor");
+}
