@@ -113,13 +113,14 @@ impl RenderOnce for MenuItemElement {
                 // Not `group_hover` on the item's own group: GPUI styles an
                 // element before registering its group, and that fallback keeps
                 // the pointer's item lit after a key moves the highlight away.
+                // Mugetsu: the highlighted row takes the app's accent, like macOS menus.
                 this.hover(|this| {
-                    this.bg(cx.theme().tokens.accent)
-                        .text_color(cx.theme().accent_foreground)
+                    this.bg(cx.theme().primary.alpha(0.85))
+                        .text_color(gpui::white())
                 })
                 .when(self.selected, |this| {
-                    this.bg(cx.theme().tokens.accent)
-                        .text_color(cx.theme().accent_foreground)
+                    this.bg(cx.theme().primary.alpha(0.85))
+                        .text_color(gpui::white())
                 })
                 .when_some(self.on_click, |this, on_click| {
                     this.on_mouse_down(MouseButton::Left, move |_, _, cx| {

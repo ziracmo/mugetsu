@@ -1499,8 +1499,8 @@ impl Render for PopupMenu {
             // around an opaque surface, instead of the flat hairline ring.
             .bg(gpui::linear_gradient(
                 180.,
-                gpui::linear_color_stop(gpui::hsla(0., 0., 0.62, 1.), 0.),
-                gpui::linear_color_stop(gpui::hsla(0., 0., 0.2, 1.), 1.),
+                gpui::linear_color_stop(gpui::hsla(0., 0., 0.7, 1.), 0.),
+                gpui::linear_color_stop(gpui::hsla(0., 0., 0.22, 1.), 1.),
             ))
             .p(px(1.))
             .rounded(cx.theme().radius + px(1.))
@@ -1511,7 +1511,12 @@ impl Render for PopupMenu {
             .child(
                 v_flex()
                     .id("items")
-                    .bg(cx.theme().popover)
+                    // Same dark glass family as the app's panels, lit from the top.
+                    .bg(gpui::linear_gradient(
+                        180.,
+                        gpui::linear_color_stop(gpui::hsla(240. / 360., 0.04, 0.17, 1.), 0.),
+                        gpui::linear_color_stop(gpui::hsla(240. / 360., 0.05, 0.115, 1.), 1.),
+                    ))
                     .rounded(cx.theme().radius)
                     .p_1()
                     .gap_y_0p5()
