@@ -1,11 +1,9 @@
 //! Visual interactive rebase: a sheet listing the commits after a base, to
-//! reorder by drag and drop and to pick, reword, squash, fix up or drop; plus
-//! the floating bar shown while a rebase is stopped (Continue / Skip / Abort).
+//! reorder by drag and drop and to pick, reword, squash, fix up or drop. A stop
+//! on conflicts is handed to the conflict resolver and its operation banner.
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gix::ObjectId;
@@ -15,19 +13,15 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Entity, Hsla,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
-use mugetsu_git::{
-    Change, RebaseAction, RebaseCommit, RebaseOutcome, RebaseProgress, RebaseStep, Repo,
-};
+use mugetsu_git::{RebaseAction, RebaseCommit, RebaseStep};
 
-use super::{Mode, RepoView};
+use super::RepoView;
 use crate::i18n::tr;
 use crate::theme;
 
@@ -800,184 +794,32 @@ impl RepoView {
                     }
                     let steps = f.steps(cx);
                     let base = base.clone();
-                    let _ = view.update(cx, |this, cx| {
-                        this.run_rebase(move |r| r.rebase_interactive(&base, &steps), window, cx)
-                    });
+                    let _ = view.update(cx, |this, cx| this.run_rebase(base, steps, window, cx));
                     true
                 })
         });
     }
 
-    /// Runs a rebase step in the background; a stop on conflicts lands in the
-    /// Changes view with the rebase bar.
+    /// Runs the rebase in the background. A stop on conflicts fails the
+    /// operation, so `run_op` reports it and the resolver opens on reload.
     pub(crate) fn run_rebase(
         &mut self,
-        op: impl FnOnce(&Repo) -> anyhow::Result<RebaseOutcome> + Send + 'static,
+        base: String,
+        steps: Vec<RebaseStep>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let stopped = Arc::new(AtomicBool::new(false));
-        let flag = stopped.clone();
-        self.run_op_then(
+        self.run_op(
             "Rebase",
             move |r| {
-                if op(r)? == RebaseOutcome::Stopped {
-                    flag.store(true, Ordering::Relaxed);
-                }
-                Ok(())
-            },
-            move |this, window, cx| {
-                if stopped.load(Ordering::Relaxed) {
-                    window.push_notification(
-                        Notification::warning(tr(
-                            "Rebase arrêté sur un conflit : résous les fichiers, indexe-les, puis Continuer.",
-                            "Rebase stopped on a conflict: resolve the files, stage them, then Continue.",
-                        )),
-                        cx,
-                    );
-                    this.set_mode(Mode::Changes, cx);
+                if r.rebase_interactive(&base, &steps)? {
+                    Ok(())
+                } else {
+                    anyhow::bail!("stopped on conflicts")
                 }
             },
             window,
             cx,
         );
-    }
-
-    /// Floating bar over the content while a rebase is in progress.
-    pub(super) fn render_rebase_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let progress: &RebaseProgress = self.data.rebase.as_ref()?;
-        let conflicts = self
-            .data
-            .status
-            .files
-            .iter()
-            .filter(|f| f.index == Change::Conflicted || f.worktree == Change::Conflicted)
-            .count();
-        let busy = self.busy.is_some();
-        let branch = progress.branch.clone().unwrap_or_else(|| "HEAD".into());
-        let step = (progress.total > 0).then(|| format!("{}/{}", progress.step, progress.total));
-        let tone = if conflicts > 0 {
-            theme::amber()
-        } else {
-            theme::accent()
-        };
-        let bar = h_flex()
-            .id("rebase-bar")
-            .test_support()
-            .gap_3()
-            .pl_3()
-            .pr_1p5()
-            .py_1p5()
-            .rounded_full()
-            .bg(theme::popover())
-            .border_1()
-            .border_color(theme::alpha(tone, 0.55))
-            .shadow_xl()
-            .text_sm()
-            // Breathing dot: the repository is mid-operation.
-            .child(
-                div()
-                    .flex_none()
-                    .size(px(8.))
-                    .rounded_full()
-                    .bg(tone)
-                    .with_animation(
-                        "rebase-breath",
-                        Animation::new(Duration::from_millis(1600)).repeat(),
-                        move |el, t| {
-                            let k = (t * std::f32::consts::TAU).sin() * 0.5 + 0.5;
-                            el.opacity(0.45 + 0.55 * k)
-                                .shadow(vec![gpui_kit::BoxShadow {
-                                    color: theme::alpha(tone, 0.6 * k),
-                                    offset: gpui_kit::point(px(0.), px(0.)),
-                                    blur_radius: px(8.),
-                                    spread_radius: px(2. * k),
-                                    inset: false,
-                                }])
-                        },
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        div()
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .child(trf!("Rebase de {branch}", "Rebasing {branch}")),
-                    )
-                    .when_some(step, |s, step| {
-                        s.child(div().text_color(theme::muted()).child(step))
-                    }),
-            )
-            .when(conflicts > 0, |s| {
-                s.child(
-                    h_flex()
-                        .id("rebase-conflicts")
-                        .test_support()
-                        .gap_1()
-                        .px_2()
-                        .h(px(22.))
-                        .rounded_full()
-                        .cursor_pointer()
-                        .text_xs()
-                        .text_color(theme::amber())
-                        .bg(theme::alpha(theme::amber(), 0.14))
-                        .hover(|s| s.bg(theme::alpha(theme::amber(), 0.24)))
-                        .child(Icon::new(Lucide::TriangleAlert).xsmall())
-                        .child(trf!("{conflicts} conflit(s)", "{conflicts} conflict(s)"))
-                        .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Changes, cx))),
-                )
-            })
-            .child(
-                Button::new("rebase-abort")
-                    .ghost()
-                    .small()
-                    .disabled(busy)
-                    .label(tr("Annuler le rebase", "Abort"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.run_rebase(
-                            |r| r.rebase_abort().map(|_| RebaseOutcome::Done),
-                            window,
-                            cx,
-                        )
-                    })),
-            )
-            .child(
-                Button::new("rebase-skip")
-                    .ghost()
-                    .small()
-                    .disabled(busy)
-                    .label(tr("Ignorer ce commit", "Skip commit"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.run_rebase(|r| r.rebase_skip(), window, cx)
-                    })),
-            )
-            .child(
-                Button::new("rebase-continue")
-                    .primary()
-                    .small()
-                    .disabled(busy || conflicts > 0)
-                    .icon(Icon::new(Lucide::Play))
-                    .label(tr("Continuer", "Continue"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.run_rebase(|r| r.rebase_continue(), window, cx)
-                    })),
-            );
-        Some(
-            h_flex()
-                .absolute()
-                .bottom_4()
-                .left_0()
-                .right_0()
-                .justify_center()
-                .child(bar)
-                .with_animation(
-                    "rebase-bar-in",
-                    Animation::new(Duration::from_millis(480))
-                        .with_easing(gpui_kit::ease_out_quint()),
-                    |el, t| el.opacity(t).bottom(px(16. - 24. * (1. - t))),
-                )
-                .into_any_element(),
-        )
     }
 }

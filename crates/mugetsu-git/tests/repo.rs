@@ -358,6 +358,107 @@ fn stats_merge_identities_and_count_lines() {
     assert_eq!(stats.activity.iter().sum::<u32>(), 2);
 }
 
+/// main and `topic` both change line 2 of a.txt; `topic` also deletes gone.txt
+/// that main edits.
+fn conflicting() -> (tempfile::TempDir, Repo) {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    git(p, &["init", "-q", "-b", "main"]);
+    git(p, &["config", "user.name", "Test"]);
+    git(p, &["config", "user.email", "test@example.com"]);
+    commit_file(p, "a.txt", "one\ntwo\nthree\nfour\nfive\n", "base");
+    commit_file(p, "gone.txt", "x\n", "gone");
+    git(p, &["switch", "-q", "-c", "topic"]);
+    commit_file(
+        p,
+        "a.txt",
+        "one\nTWO-topic\nthree\nfour\nfive!\n",
+        "topic a",
+    );
+    git(p, &["rm", "-q", "gone.txt"]);
+    git(p, &["commit", "-q", "-m", "topic rm"]);
+    git(p, &["switch", "-q", "main"]);
+    commit_file(
+        p,
+        "a.txt",
+        "zero\none\nTWO-main\nthree\nfour\nfive\n",
+        "main a",
+    );
+    commit_file(p, "gone.txt", "y\n", "main gone");
+    let repo = Repo::open(p).unwrap();
+    (dir, repo)
+}
+
+#[test]
+fn merge_conflict_resolves_and_continues() {
+    use mugetsu_git::{Chunk, Operation, Resolution};
+    let (dir, repo) = conflicting();
+    assert_eq!(repo.operation().unwrap(), None);
+    assert!(!repo.merge("topic").unwrap(), "stops on conflicts");
+
+    let state = repo.operation().unwrap().unwrap();
+    assert_eq!(state.op, Operation::Merge);
+    assert_eq!(state.ours, "main");
+    assert_eq!(state.theirs, "topic");
+    assert_eq!(repo.conflicted_paths().unwrap(), ["a.txt", "gone.txt"]);
+    let status = repo.status().unwrap();
+    assert!(status.files.iter().all(|f| f.index == Change::Conflicted));
+
+    let a = repo.conflict_file("a.txt").unwrap();
+    assert!(!a.whole_file_only());
+    assert_eq!(a.conflict_count(), 1);
+    // Non-conflicting changes from both sides are already merged.
+    assert!(matches!(&a.chunks[0], Chunk::Clean(l) if l[0] == "zero\n"));
+    let c = a.conflicts().next().unwrap();
+    assert_eq!(c.ours, ["TWO-main\n"]);
+    assert_eq!(c.base, ["two\n"]);
+    assert_eq!(c.theirs, ["TWO-topic\n"]);
+    let merged = a.render(&[Some(Resolution::Theirs)]);
+    assert_eq!(merged, "zero\none\nTWO-topic\nthree\nfour\nfive!\n");
+
+    let gone = repo.conflict_file("gone.txt").unwrap();
+    assert!(gone.whole_file_only());
+    assert!(gone.theirs.is_none());
+
+    repo.resolve_with("a.txt", &merged).unwrap();
+    repo.resolve_side("gone.txt", false).unwrap();
+    assert!(repo.conflicted_paths().unwrap().is_empty());
+    assert!(!dir.path().join("gone.txt").exists());
+    assert!(repo.continue_operation(Operation::Merge).unwrap());
+    assert_eq!(repo.operation().unwrap(), None);
+    let parents = repo.git().run(["log", "-1", "--format=%p"]).unwrap();
+    assert_eq!(parents.split_whitespace().count(), 2);
+}
+
+#[test]
+fn rebase_conflict_reports_progress_and_aborts() {
+    use mugetsu_git::Operation;
+    let (_dir, repo) = conflicting();
+    let before = repo.git().run(["rev-parse", "HEAD"]).unwrap();
+    assert!(!repo.rebase("topic").unwrap());
+    let state = repo.operation().unwrap().unwrap();
+    assert_eq!(state.op, Operation::Rebase);
+    assert!(state.theirs.ends_with("main a"), "{state:?}");
+    assert_eq!(state.step.map(|(_, total)| total), Some(2));
+    repo.abort_operation(Some(state.op)).unwrap();
+    assert_eq!(repo.operation().unwrap(), None);
+    assert_eq!(repo.git().run(["rev-parse", "HEAD"]).unwrap(), before);
+}
+
+#[test]
+fn cherry_pick_conflict_is_detected() {
+    use mugetsu_git::Operation;
+    let (_dir, repo) = conflicting();
+    assert!(repo.cherry_pick("topic~1", false).is_err());
+    let state = repo.operation().unwrap().unwrap();
+    assert_eq!(state.op, Operation::CherryPick);
+    assert!(state.theirs.ends_with("topic a"));
+    repo.resolve_side("a.txt", true).unwrap();
+    // Keeping ours leaves nothing to commit: skip it.
+    assert!(repo.skip_operation(Operation::CherryPick).unwrap());
+    assert_eq!(repo.operation().unwrap(), None);
+}
+
 /// main: base - one - two - three (each on its own file).
 fn linear() -> (tempfile::TempDir, Repo, String) {
     let dir = tempfile::tempdir().unwrap();
@@ -399,7 +500,7 @@ fn subjects(dir: &Path) -> Vec<String> {
 
 #[test]
 fn interactive_rebase_reorders_squashes_rewords_and_drops() {
-    use mugetsu_git::{RebaseAction as A, RebaseOutcome, RebaseStep};
+    use mugetsu_git::{RebaseAction as A, RebaseStep};
     let (dir, repo, base) = linear();
     let plan = repo.rebase_plan(&base).unwrap();
     let names: Vec<_> = plan.iter().map(|c| c.summary()).collect();
@@ -419,13 +520,13 @@ fn interactive_rebase_reorders_squashes_rewords_and_drops() {
             ],
         )
         .unwrap();
-    assert_eq!(outcome, RebaseOutcome::Done);
+    assert!(outcome, "finished");
     assert_eq!(
         subjects(dir.path()),
         ["base", "three, reworded\n\nwith a body", "one\n\ntwo"]
     );
     assert!(dir.path().join("two.txt").exists());
-    assert!(repo.rebase_progress().is_none());
+    assert_eq!(repo.operation().unwrap(), None);
 
     // Drop and fixup.
     let plan = repo.rebase_plan(&base).unwrap();
@@ -446,14 +547,14 @@ fn interactive_rebase_reorders_squashes_rewords_and_drops() {
             ],
         )
         .unwrap();
-    assert_eq!(outcome, RebaseOutcome::Done);
+    assert!(outcome, "finished");
     assert_eq!(subjects(dir.path()), ["base", "one\n\ntwo"]);
     assert!(!dir.path().join("three.txt").exists());
 }
 
 #[test]
 fn interactive_rebase_stops_on_conflicts_then_aborts_or_continues() {
-    use mugetsu_git::{RebaseAction as A, RebaseOutcome, RebaseStep};
+    use mugetsu_git::{Operation, RebaseAction as A, RebaseStep};
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path();
     git(p, &["init", "-q", "-b", "main"]);
@@ -479,29 +580,34 @@ fn interactive_rebase_stops_on_conflicts_then_aborts_or_continues() {
             message: None,
         },
     ];
-    assert_eq!(
-        repo.rebase_interactive(&base, &swapped).unwrap(),
-        RebaseOutcome::Stopped
+    assert!(
+        !repo.rebase_interactive(&base, &swapped).unwrap(),
+        "stopped"
     );
-    let progress = repo.rebase_progress().unwrap();
-    assert_eq!(progress.branch.as_deref(), Some("main"));
-    assert_eq!((progress.step, progress.total), (1, 2));
-    assert!(repo.rebase_continue().is_err(), "conflicts are unresolved");
-    repo.rebase_abort().unwrap();
-    assert!(repo.rebase_progress().is_none());
+    let state = repo.operation().unwrap().unwrap();
+    assert_eq!(state.op, Operation::Rebase);
+    assert_eq!(state.step, Some((1, 2)));
+    repo.abort_operation(Some(Operation::Rebase)).unwrap();
+    assert_eq!(repo.operation().unwrap(), None);
     assert_eq!(rev(p, "HEAD"), head);
 
     // Resolve each stop by taking the commit's side, then continue.
-    assert_eq!(
-        repo.rebase_interactive(&base, &swapped).unwrap(),
-        RebaseOutcome::Stopped
+    assert!(
+        !repo.rebase_interactive(&base, &swapped).unwrap(),
+        "stopped"
     );
     std::fs::write(p.join("a.txt"), "two\n").unwrap();
     git(p, &["add", "a.txt"]);
-    assert_eq!(repo.rebase_continue().unwrap(), RebaseOutcome::Stopped);
+    assert!(
+        !repo.continue_operation(Operation::Rebase).unwrap(),
+        "stopped"
+    );
     std::fs::write(p.join("a.txt"), "one\n").unwrap();
     git(p, &["add", "a.txt"]);
-    assert_eq!(repo.rebase_continue().unwrap(), RebaseOutcome::Done);
+    assert!(
+        repo.continue_operation(Operation::Rebase).unwrap(),
+        "finished"
+    );
     assert_eq!(subjects(p), ["base", "two", "one"]);
 }
 

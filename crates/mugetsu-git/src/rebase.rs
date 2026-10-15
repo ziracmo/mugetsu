@@ -65,26 +65,6 @@ pub struct RebaseStep {
     pub message: Option<String>,
 }
 
-/// How a rebase run ended.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RebaseOutcome {
-    Done,
-    /// Stopped on a conflict: see [`Repo::rebase_progress`].
-    Stopped,
-}
-
-/// A rebase in progress (`.git/rebase-merge` or `.git/rebase-apply`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct RebaseProgress {
-    /// Branch being rebased (without `refs/heads/`), `None` when detached.
-    pub branch: Option<String>,
-    /// Steps done so far, the current one included.
-    pub step: usize,
-    pub total: usize,
-    /// Commit git stopped on, when it did.
-    pub stopped_at: Option<String>,
-}
-
 /// A planned commit group: a kept commit and what melds into it.
 struct Group<'a> {
     lines: Vec<String>,
@@ -203,14 +183,15 @@ impl Repo {
 
     /// Rebases the commits after `base` following `steps` (oldest first).
     /// Uncommitted changes are stashed and reapplied (`--autostash`).
-    pub fn rebase_interactive(
-        &self,
-        base: &str,
-        steps: &[RebaseStep],
-    ) -> anyhow::Result<RebaseOutcome> {
+    /// `Ok(false)`: stopped on conflicts, finished with
+    /// [`Repo::continue_operation`] like any other rebase.
+    pub fn rebase_interactive(&self, base: &str, steps: &[RebaseStep]) -> anyhow::Result<bool> {
         let commits = self.rebase_plan(base)?;
         let (mut lines, messages) = todo(&commits, steps)?;
         let dir = self.git_dir().map(|d| d.join("mugetsu-rebase"))?;
+        // Messages of an earlier run stay until now: its `exec` lines read
+        // them when a stopped rebase is continued.
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir)?;
         for (i, message) in messages.iter().enumerate() {
             let file = dir.join(format!("msg{i}"));
@@ -244,89 +225,14 @@ impl Repo {
         match result {
             Ok(_) => {
                 let _ = std::fs::remove_dir_all(&dir);
-                Ok(RebaseOutcome::Done)
+                Ok(true)
             }
-            Err(_) if self.rebase_progress().is_some() => Ok(RebaseOutcome::Stopped),
+            Err(_) if !self.conflicted_paths()?.is_empty() => Ok(false),
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&dir);
                 Err(e)
             }
         }
-    }
-
-    /// The rebase in progress, if any.
-    pub fn rebase_progress(&self) -> Option<RebaseProgress> {
-        let read = |dir: &PathBuf, name: &str| {
-            std::fs::read_to_string(dir.join(name))
-                .ok()
-                .map(|s| s.trim().to_string())
-        };
-        let num = |s: Option<String>| s.and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
-        let git_dir = self.git_dir().ok()?;
-        for (name, step, total) in [
-            ("rebase-merge", "msgnum", "end"),
-            ("rebase-apply", "next", "last"),
-        ] {
-            let dir = git_dir.join(name);
-            if !dir.is_dir() {
-                continue;
-            }
-            let branch = read(&dir, "head-name")
-                .filter(|h| h != "detached HEAD")
-                .map(|h| h.trim_start_matches("refs/heads/").to_string());
-            return Some(RebaseProgress {
-                branch,
-                step: num(read(&dir, step)),
-                total: num(read(&dir, total)),
-                stopped_at: read(&dir, "stopped-sha").filter(|s| !s.is_empty()),
-            });
-        }
-        None
-    }
-
-    fn rebase_step(&self, flag: &str) -> anyhow::Result<RebaseOutcome> {
-        let result = self
-            .git()
-            .run_with_env(["rebase", flag], &[("GIT_EDITOR", OsStr::new("true"))]);
-        let finished = self.rebase_progress().is_none();
-        if finished && let Ok(dir) = self.git_dir().map(|d| d.join("mugetsu-rebase")) {
-            let _ = std::fs::remove_dir_all(dir);
-        }
-        match result {
-            Ok(_) if finished => Ok(RebaseOutcome::Done),
-            Ok(_) => Ok(RebaseOutcome::Stopped),
-            // Stopped on the next conflict: that's progress, not a failure.
-            Err(_) if !finished && flag != "--abort" && self.unmerged()? => {
-                Ok(RebaseOutcome::Stopped)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    fn unmerged(&self) -> anyhow::Result<bool> {
-        Ok(!self
-            .git()
-            .run(["diff", "--name-only", "--diff-filter=U"])?
-            .trim()
-            .is_empty())
-    }
-
-    /// `git rebase --continue` (messages are kept as they are).
-    pub fn rebase_continue(&self) -> anyhow::Result<RebaseOutcome> {
-        if self.unmerged()? {
-            bail!("resolve and stage the conflicted files first");
-        }
-        self.rebase_step("--continue")
-    }
-
-    /// Skips the commit git stopped on.
-    pub fn rebase_skip(&self) -> anyhow::Result<RebaseOutcome> {
-        self.rebase_step("--skip")
-    }
-
-    /// Puts the branch back where it was before the rebase.
-    pub fn rebase_abort(&self) -> anyhow::Result<()> {
-        self.rebase_step("--abort").map(drop)
     }
 }
 
