@@ -1,4 +1,4 @@
-<p align="center"><img src="crates/mugetsu-app/assets/icon/mugetsu.png" width="128" alt="Mugetsu icon"></p>
+<p align="center"><img src="docs/banner.png" alt="Mugetsu"></p>
 
 # 月 Mugetsu
 
