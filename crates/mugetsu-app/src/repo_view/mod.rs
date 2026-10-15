@@ -6,6 +6,7 @@ mod commit_files;
 mod compact;
 pub(crate) mod forms;
 mod history;
+pub(crate) mod links;
 mod menus;
 mod particles;
 mod pr_panel;
@@ -65,7 +66,8 @@ gpui_kit::actions!(
         Commit,
         CommitAndPush,
         StageAll,
-        StashChanges
+        StashChanges,
+        CopyGithubLink
     ]
 );
 
@@ -90,6 +92,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-3", ShowStats, Some("Repo")),
         KeyBinding::new("secondary-0", RevealHead, Some("Repo")),
         KeyBinding::new("secondary-shift-k", ToggleCompact, Some("Repo")),
+        KeyBinding::new("secondary-alt-c", CopyGithubLink, Some("Repo")),
         KeyBinding::new("secondary-f", SearchCommits, Some("Repo")),
         KeyBinding::new("ctrl-f", SearchCommits, Some("Repo")),
         KeyBinding::new("secondary-b", CheckoutBranch, Some("Repo")),
@@ -145,6 +148,8 @@ pub struct RepoView {
     history_scroll: UniformListScrollHandle,
     history_focus: FocusHandle,
     changes_focus: FocusHandle,
+    /// Stats, Stack and PR views (no list to hold the focus).
+    root_focus: FocusHandle,
     commit_diff: Entity<DiffState>,
     commit_message: SharedString,
     commit_files: usize,
@@ -156,6 +161,13 @@ pub struct RepoView {
     shimmer: Option<(Arc<HashSet<ObjectId>>, usize)>,
     /// Long commit bodies start collapsed.
     body_expanded: bool,
+    /// Lines picked in the commit diff's gutter (GitHub link pill).
+    line_selection: Option<gpui_kit::component::diff::DiffLineRange>,
+    /// Bumped when a new selection appears, to replay the pill's entrance.
+    line_selection_seq: usize,
+    /// "Link copied" flourish: where, and its sequence.
+    link_copied: Option<(links::LinkSpot, usize)>,
+    _diff_events: Subscription,
 
     // Changes
     selected_change: Option<SelectedChange>,
@@ -279,6 +291,22 @@ impl RepoView {
                     _ => {}
                 },
             );
+        let _diff_events = cx.subscribe(
+            &commit_diff,
+            |this, _, event: &gpui_kit::component::diff::DiffEvent, cx| {
+                use gpui_kit::component::diff::DiffEvent;
+                let range = match event {
+                    DiffEvent::SelectionChanged(r) => r.clone(),
+                    DiffEvent::SelectionEnded(r) => Some(r.clone()),
+                    _ => return,
+                };
+                if this.line_selection.is_none() && range.is_some() {
+                    this.line_selection_seq += 1;
+                }
+                this.line_selection = range;
+                cx.notify();
+            },
+        );
         if let Some(avatars) = crate::avatars::store(cx) {
             cx.observe(&avatars, |_, _, cx| cx.notify()).detach();
         }
@@ -294,6 +322,7 @@ impl RepoView {
             history_scroll: UniformListScrollHandle::new(),
             history_focus: cx.focus_handle().tab_stop(true),
             changes_focus: cx.focus_handle(),
+            root_focus: cx.focus_handle(),
             commit_diff,
             commit_message: SharedString::default(),
             commit_files: 0,
@@ -301,6 +330,10 @@ impl RepoView {
             copied: None,
             shimmer: None,
             body_expanded: false,
+            line_selection: None,
+            line_selection_seq: 0,
+            link_copied: None,
+            _diff_events,
             selected_change: None,
             change_diff,
             change_hunks: None,
@@ -566,6 +599,7 @@ impl RepoView {
         }
         self.selected = Some(id);
         self.body_expanded = false;
+        self.line_selection = None;
         self.commit_file = None;
         self.commit_message = SharedString::default();
         let repo = self.repo.clone();
@@ -1171,6 +1205,25 @@ impl RepoView {
         self.history_focus.clone()
     }
 
+    /// Where keyboard actions should land: the list of the current view.
+    pub fn focus_target(&self) -> FocusHandle {
+        match self.mode {
+            Mode::Changes => self.changes_focus.clone(),
+            Mode::History => self.history_focus.clone(),
+            Mode::Stats | Mode::Stack | Mode::Pr => self.root_focus.clone(),
+        }
+    }
+
+    /// Local branch names, and whether each is HEAD.
+    pub fn local_branches(&self) -> Vec<(String, bool)> {
+        self.data
+            .refs
+            .branches
+            .iter()
+            .map(|b| (b.name.clone(), b.is_head))
+            .collect()
+    }
+
     #[cfg(test)]
     pub fn prs_tab_open(&self) -> bool {
         self.sidebar_tab == SidebarTab::Prs
@@ -1200,6 +1253,13 @@ impl Render for RepoView {
             && (window.focused(cx).is_none() || self.history_focus.is_focused(window))
         {
             self.changes_focus.focus(window, cx);
+        }
+        // Stats, Stack and PR draw no list: keep keys on the tab.
+        if self.focused
+            && matches!(self.mode, Mode::Stats | Mode::Stack | Mode::Pr)
+            && (window.focused(cx).is_none() || self.history_focus.is_focused(window))
+        {
+            self.root_focus.focus(window, cx);
         }
         let body = if let Some(err) = &self.load_error {
             v_flex()
@@ -1251,9 +1311,15 @@ impl Render for RepoView {
                     )
                     .into_any_element(),
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
-                Mode::Stats => self.render_stats(cx),
-                Mode::Stack => self.render_stack(cx),
-                Mode::Pr => self.render_pr_page(cx),
+                Mode::Stats | Mode::Stack | Mode::Pr => div()
+                    .size_full()
+                    .track_focus(&self.root_focus)
+                    .child(match self.mode {
+                        Mode::Stats => self.render_stats(cx),
+                        Mode::Stack => self.render_stack(cx),
+                        _ => self.render_pr_page(cx),
+                    })
+                    .into_any_element(),
             };
             // The content floats as a frosted card over the window glass.
             let card = div()
@@ -1356,6 +1422,7 @@ impl Render for RepoView {
                 }
             }))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.reload(cx)))
+            .on_action(cx.listener(|this, _: &CopyGithubLink, _, cx| this.copy_github_link(cx)))
             .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.set_mode(Mode::History, cx)))
             .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))
             .on_action(cx.listener(|this, _: &ShowStats, _, cx| this.set_mode(Mode::Stats, cx)))
