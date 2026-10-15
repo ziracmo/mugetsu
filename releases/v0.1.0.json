@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "date": "2026-10-15",
+  "title": "First release",
+  "summary": "A fast Git client for macOS written in Rust: the commit graph drawn on the GPU, tabs for every repository, GitHub pull requests in the sidebar and a stats view, all built from what git already knows.",
+  "features": [
+    { "id": "commit-graph", "title": "GPU commit graph", "body": "The history is drawn on the GPU in a virtualized list, colourful lanes and ref chips included, smooth even past 100,000 commits.", "scene": "graph", "highlight": true },
+    { "id": "repository-tabs", "title": "Repository tabs and workspaces", "body": "Every repository in a tab, restored at launch, grouped in named workspaces. Hold ⌃ and press Tab to pick one among cards.", "scene": "sidebar" },
+    { "id": "pull-requests", "title": "Pull requests in the sidebar", "body": "Each branch with a PR gets a #123 chip coloured by state with its CI result; a PRs tab lists the reviews you owe, drafts, stacks and recent merges.", "scene": "pr", "highlight": true },
+    { "id": "stats-view", "title": "Stats view", "body": "Top authors, reviewers, activity chart, weekday × hour heatmap and hot files, computed from commits only.", "highlight": true },
+    { "id": "changes", "title": "Stage, commit and push", "body": "Stage per file or per hunk, commit, amend, commit and push, with a syntax-highlighted diff and intra-line changes.", "scene": "diff" },
+    { "id": "checkout-sheet", "title": "Checkout like Fork", "body": "Double-click a branch; with local changes a sheet offers to keep, stash and reapply, or discard them. The new HEAD shows at once.", "scene": "graph" },
+    { "id": "commit-search", "title": "Commit search", "body": "Search by message, author, branch, tag or SHA with matches highlighted in the graph.", "scene": "search" },
+    { "id": "auto-fetch", "title": "Automatic fetch", "body": "Every 10 s for the focused repository, every 5 min for the others, with a pulsing dot on tabs whose remotes moved.", "scene": "fetch" }
+  ],
+  "fixes": [],
+  "improvements": []
+}

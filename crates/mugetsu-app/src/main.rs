@@ -1,3 +1,6 @@
+// Release builds on Windows: no console window behind the app.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app_menu;
 mod avatars;
 mod branch_tree;

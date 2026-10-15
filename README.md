@@ -57,7 +57,31 @@ Same as Fork on macOS where they exist.
 | Toggle sidebar | ⌃⌘S |
 | Previous / next commit | ↑ ↓ (or k j) |
 
-## Install as a macOS app
+## Download
+
+**[Latest release](https://github.com/ziracmo/mugetsu/releases/latest)**:
+
+- macOS 12+ (Apple silicon and Intel): [Mugetsu.dmg](https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu.dmg)
+- Windows 10/11 x64: [Mugetsu-Setup.exe](https://github.com/ziracmo/mugetsu/releases/latest/download/Mugetsu-Setup.exe)
+
+Builds are not signed yet. On macOS, drag the app to Applications, then **right-click › Open** the first time (on macOS 15+: System Settings › Privacy & Security › Open Anyway, or `xattr -dr com.apple.quarantine /Applications/Mugetsu.app`). On Windows, SmartScreen may warn: **More info › Run anyway**.
+
+### Cutting a release
+
+Bump `version` in `Cargo.toml` and `crates/*/Cargo.toml`, then push a tag:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` builds a universal `Mugetsu.dmg` and `Mugetsu-Setup.exe` (Inno Setup) and publishes them on the release; the notes come from `packaging/release-notes.md`. To rebuild an existing tag, run the workflow by hand with that tag.
+
+### Signing later
+
+- **macOS**: an Apple Developer Program membership ($99/year) gives a *Developer ID Application* certificate. The workflow would import it (secrets: the `.p12` and its password), sign with `codesign --options runtime --timestamp`, notarize with `xcrun notarytool` (Apple ID app-specific password or App Store Connect API key) and `xcrun stapler staple` the dmg. Gatekeeper then opens the app with no warning.
+- **Windows**: an OV/EV code-signing certificate (or Azure Trusted Signing) and `signtool sign` on `Mugetsu.exe` and the installer. SmartScreen warnings fade as the signed builds gain reputation (immediately with EV).
+
+## Install as a macOS app from source
 
 ```sh
 scripts/bundle-macos.sh
