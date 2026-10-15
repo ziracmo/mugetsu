@@ -11,6 +11,7 @@ mod graph_view;
 mod model;
 mod open_repo;
 mod pr;
+mod repo_icon;
 mod repo_view;
 mod session;
 mod settings;

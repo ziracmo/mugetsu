@@ -521,7 +521,7 @@ impl Workspace {
                                 .flex()
                                 .items_center()
                                 .line_height(px(16.))
-                                .child(e),
+                                .child(crate::repo_icon::view(&e, 15.)),
                         )
                     })
                     // Name and branch share a baseline (different font sizes).
@@ -620,12 +620,6 @@ impl Workspace {
     }
 }
 
-/// Emoji offered to tell repositories apart in tabs and lists.
-const REPO_EMOJI: [&str; 24] = [
-    "🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "⚫", "⚪", "🚀", "🔥", "⭐", "🌙", "⚡", "🧪", "🛠️", "📦",
-    "🎨", "🧠", "🛡️", "🌐", "📱", "🐳", "🦀", "🐍",
-];
-
 /// Right-click on a tab.
 fn icon_menu(
     menu: gpui_kit::component::menu::PopupMenu,
@@ -634,82 +628,8 @@ fn icon_menu(
     menu.item(
         PopupMenuItem::new(tr("Choisir une icône…", "Choose Icon…"))
             .icon(Icon::new(Lucide::Palette))
-            .on_click(move |_, window, cx| icon_picker(root.clone(), window, cx)),
+            .on_click(move |_, window, cx| crate::repo_icon::open_picker(root.clone(), window, cx)),
     )
-}
-
-fn set_icon(root: &std::path::Path, icon: Option<&str>, cx: &mut gpui_kit::App) {
-    let root = root.to_path_buf();
-    let icon = icon.map(str::to_string);
-    crate::settings::update(cx, move |s| match icon {
-        Some(i) => {
-            s.repo_icons.insert(root, i);
-        }
-        None => {
-            s.repo_icons.remove(&root);
-        }
-    });
-}
-
-/// Emoji grid for a repository.
-fn icon_picker(root: PathBuf, window: &mut Window, cx: &mut gpui_kit::App) {
-    let name = root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-    window.open_dialog(cx, move |dialog, _, _| {
-        let current = crate::settings::get().repo_icons.get(&root).cloned();
-        let cells = REPO_EMOJI.iter().map(|e| {
-            let root = root.clone();
-            let selected = current.as_deref() == Some(*e);
-            div()
-                .id(SharedString::from(format!("emoji-{e}")))
-                .test_support()
-                .size(px(40.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_lg()
-                .text_xl()
-                .cursor_pointer()
-                .hover(|s| s.bg(theme::raised()))
-                .when(selected, |s| {
-                    s.bg(theme::alpha(theme::accent(), 0.3))
-                        .border_1()
-                        .border_color(theme::accent())
-                })
-                .child(*e)
-                .on_click(move |_, window, cx| {
-                    set_icon(&root, Some(e), cx);
-                    window.close_dialog(cx);
-                })
-        });
-        let none_root = root.clone();
-        dialog
-            .bg(crate::theme::sheet())
-            .title(trf!("Icône de « {name} »", "Icon for “{name}”"))
-            .w(px(420.))
-            .child(h_flex().flex_wrap().gap_1().children(cells))
-            .footer(
-                h_flex()
-                    .w_full()
-                    .child(
-                        Button::new("emoji-none")
-                            .ghost()
-                            .small()
-                            .label(tr("Aucune icône", "No icon"))
-                            .on_click(move |_, window, cx| {
-                                set_icon(&none_root, None, cx);
-                                window.close_dialog(cx);
-                            }),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        gpui_kit::component::dialog::DialogClose::new()
-                            .trigger(|b| b.ghost().small().label(tr("Fermer", "Close"))),
-                    ),
-            )
-    });
 }
 
 impl Render for Workspace {
@@ -878,17 +798,19 @@ impl Workspace {
                             theme::hairline()
                         })
                         .bg(theme::sheet())
-                        .child(
-                            div().text_3xl().child(match &emoji {
-                                Some(e) => e.clone(),
-                                None => name
-                                    .chars()
-                                    .next()
-                                    .unwrap_or('?')
-                                    .to_uppercase()
-                                    .to_string(),
-                            }),
-                        )
+                        .child(match &emoji {
+                            Some(e) => crate::repo_icon::view(e, 34.),
+                            None => div()
+                                .text_3xl()
+                                .child(
+                                    name.chars()
+                                        .next()
+                                        .unwrap_or('?')
+                                        .to_uppercase()
+                                        .to_string(),
+                                )
+                                .into_any_element(),
+                        })
                         .child(
                             h_flex()
                                 .gap_1()

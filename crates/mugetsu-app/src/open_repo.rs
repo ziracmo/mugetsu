@@ -111,7 +111,10 @@ fn repo_row(index: usize, path: &Path, pick: Pick) -> impl IntoElement {
         .cursor_pointer()
         .hover(|s| s.bg(theme::raised()))
         .child(match icon {
-            Some(emoji) => div().w(px(16.)).child(emoji).into_any_element(),
+            Some(icon) => div()
+                .w(px(16.))
+                .child(crate::repo_icon::view(&icon, 15.))
+                .into_any_element(),
             None => Icon::new(Lucide::FolderGit2)
                 .xsmall()
                 .text_color(theme::muted())
