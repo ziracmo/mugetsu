@@ -1,4 +1,5 @@
-//! Stamps the build with its commit and date, shown in the About window.
+//! Stamps the build with its commit and date, shown in the About window, and
+//! on Windows embeds the app icon in the executable.
 
 use std::process::Command;
 
@@ -19,4 +20,18 @@ fn main() {
         println!("cargo:rerun-if-changed={dir}/HEAD");
         println!("cargo:rerun-if-changed={dir}/refs/heads");
     }
+    #[cfg(windows)]
+    windows_icon();
+}
+
+/// Resource icon 1: Explorer and the taskbar show it, and gpui loads it for
+/// the window (`LoadImageW(module, 1)`).
+#[cfg(windows)]
+fn windows_icon() {
+    println!("cargo:rerun-if-changed=assets/icon/mugetsu.ico");
+    let mut res = winresource::WindowsResource::new();
+    res.set_icon("assets/icon/mugetsu.ico")
+        .set("ProductName", "Mugetsu")
+        .set("FileDescription", "Mugetsu");
+    res.compile().expect("embed Windows resources");
 }

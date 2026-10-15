@@ -22,6 +22,7 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\Mugetsu.exe
+SetupIconFile=..\..\crates\mugetsu-app\assets\icon\mugetsu.ico
 WizardStyle=modern
 
 [Tasks]
