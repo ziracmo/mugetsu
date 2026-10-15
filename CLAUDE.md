@@ -25,7 +25,8 @@ Releases are fully automated by `.github/workflows/release.yml`; nothing is uplo
 Pull requests that touch `scripts/`, `packaging/`, `releases/` or the workflow build the dmg and installer
 without publishing, so packaging breakage shows up before a release.
 
-Builds are unsigned for now (README › Download explains first launch and what signing would need).
+Signing, notarization and the Sparkle auto-update each switch on when their GitHub secrets exist
+(docs/RELEASING.md › Signing lists them); without them builds are ad-hoc signed with no updater.
 
 ## Conventions
 

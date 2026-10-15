@@ -22,6 +22,7 @@ mod session;
 mod settings;
 mod settings_view;
 mod theme;
+mod updater;
 mod welcome;
 mod workspace;
 
@@ -109,6 +110,7 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             dock_icon::set();
+            updater::init();
             settings::install(settings::Settings::load(), cx);
             avatars::init(cx);
             workspace::init(cx);
