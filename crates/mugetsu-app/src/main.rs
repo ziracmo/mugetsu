@@ -41,12 +41,7 @@ fn inherit_shell_path() {
 fn main() {
     inherit_shell_path();
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    let (paths, active) = if args.is_empty() {
-        let s = Session::load();
-        (s.repos, s.active)
-    } else {
-        (args, 0)
-    };
+    let (paths, active) = Session::load().with_args(args);
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)

@@ -28,7 +28,7 @@ pub fn violet() -> Hsla {
 }
 /// Frosted surface: translucent so the window blur shows through.
 pub fn panel() -> Hsla {
-    alpha(rgb(0x121826).into(), 0.55)
+    alpha(rgb(0x1f1f1f).into(), 0.6)
 }
 /// Hover / raised overlay, works on any surface.
 pub fn raised() -> Hsla {
@@ -39,7 +39,7 @@ pub fn hairline() -> Hsla {
     alpha(rgb(0xffffff).into(), 0.08)
 }
 pub fn muted() -> Hsla {
-    rgb(0x7d8798).into()
+    rgb(0x8a8a8a).into()
 }
 
 /// Graph lane palette, cycled by lane color index.
