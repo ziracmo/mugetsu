@@ -11,6 +11,7 @@ mod pr_panel;
 mod search;
 mod shimmer;
 mod sidebar;
+mod stats_panel;
 mod toolbar;
 
 use std::collections::{HashMap, HashSet};
@@ -200,12 +201,28 @@ pub struct RepoView {
     pushed: Option<(String, usize)>,
     /// Branch just deleted (name, sequence): its chip is slashed before it goes.
     slashed: Option<(String, usize)>,
+    /// Stats tab (computed on demand, kept per tab).
+    stats: stats_panel::StatsState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarTab {
     Repo,
     Prs,
+    Stats,
+}
+
+impl SidebarTab {
+    /// The tab the settings remember (shared layout).
+    fn remembered(settings: &crate::settings::Settings) -> Self {
+        if settings.sidebar_stats {
+            SidebarTab::Stats
+        } else if settings.sidebar_prs {
+            SidebarTab::Prs
+        } else {
+            SidebarTab::Repo
+        }
+    }
 }
 
 impl EventEmitter<RepoEvent> for RepoView {}
@@ -301,10 +318,8 @@ impl RepoView {
             commit_order: crate::settings::get().commit_order,
             pr_list: Arc::default(),
             pr_me: None,
-            sidebar_tab: if crate::settings::get().shared_layout
-                && crate::settings::get().sidebar_prs
-            {
-                SidebarTab::Prs
+            sidebar_tab: if crate::settings::get().shared_layout {
+                SidebarTab::remembered(&crate::settings::get())
             } else {
                 SidebarTab::Repo
             },
@@ -314,6 +329,7 @@ impl RepoView {
             menu_open: false,
             pushed: None,
             slashed: None,
+            stats: Default::default(),
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
                 if order != this.commit_order {
@@ -941,11 +957,7 @@ impl RepoView {
         if !settings.shared_layout {
             return;
         }
-        self.sidebar_tab = if settings.sidebar_prs {
-            SidebarTab::Prs
-        } else {
-            SidebarTab::Repo
-        };
+        self.sidebar_tab = SidebarTab::remembered(&settings);
         if let Some(w) = settings.sidebar_width {
             let current = self.sidebar_split.read(cx).sizes().first().copied();
             let w = w as f32;
@@ -1095,6 +1107,7 @@ impl Render for RepoView {
         if std::mem::take(&mut self.adopt_layout) {
             self.adopt_shared_layout(window, cx);
         }
+        self.ensure_stats(cx);
         // Keep keyboard shortcuts working in the Changes view (⌘A, ⌘S…).
         if self.focused
             && self.mode == Mode::Changes

@@ -25,8 +25,8 @@ type Click = Box<dyn Fn(&ClickEvent, &mut Window, &mut gpui_kit::App)>;
 
 const INDENT: f32 = 14.;
 
-/// Every foldable section key (repository and PR tabs).
-pub const SECTION_KEYS: [&str; 9] = [
+/// Every foldable section key (repository, PR and stats tabs).
+pub const SECTION_KEYS: [&str; 16] = [
     "branches",
     "remotes",
     "worktrees",
@@ -36,6 +36,13 @@ pub const SECTION_KEYS: [&str; 9] = [
     "pr-drafts",
     "pr-stacks",
     "pr-merged",
+    "stats-authors",
+    "stats-reviewers",
+    "stats-mergers",
+    "stats-committers",
+    "stats-coauthors",
+    "stats-when",
+    "stats-files",
 ];
 
 struct Row {
@@ -891,6 +898,7 @@ impl RepoView {
         let sections: Vec<AnyElement> = match self.sidebar_tab {
             super::SidebarTab::Repo => sections.into_iter().filter_map(|(_, el)| el).collect(),
             super::SidebarTab::Prs => self.pr_sections(&query, cx),
+            super::SidebarTab::Stats => self.stats_sections(&query, cx),
         };
         let empty = searching && sections.is_empty();
         v_flex()
