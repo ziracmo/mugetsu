@@ -202,7 +202,7 @@ impl RepoView {
                 this.reload(cx);
                 // PR heads moved: refresh their state.
                 this.prs = Default::default();
-                this.refresh_prs(cx);
+                this.refresh_prs(true, cx);
             });
             cx.background_executor().timer(Duration::from_secs(6)).await;
             let _ = this.update(cx, |this, cx| {
