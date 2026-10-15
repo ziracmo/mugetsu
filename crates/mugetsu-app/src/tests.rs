@@ -1090,3 +1090,23 @@ fn a_manual_fetch_plays_its_outcome_on_the_button(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn compact_view_lists_branches_and_goes_back(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("toggle-compact", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("compact-history").is_some());
+        assert!(window.try_find("compact-topic").is_some());
+        window.click("toggle-compact", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("compact-history").is_none());
+    })
+    .unwrap();
+    settle(cx, &view);
+}

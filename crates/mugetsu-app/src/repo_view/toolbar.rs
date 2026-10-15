@@ -471,6 +471,44 @@ impl RepoView {
                         s.child(tab("mode-stack", "Stack".into(), "", true))
                     }),
             )
+            .when(mode == Mode::History, |s| {
+                let compact = self.compact;
+                s.child(
+                    h_flex()
+                        .id("toggle-compact")
+                        .test_support()
+                        .size(px(26.))
+                        .justify_center()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .when(compact, |s| {
+                            s.bg(theme::alpha(theme::accent(), 0.18))
+                                .text_color(theme::accent())
+                        })
+                        .when(!compact, |s| s.text_color(theme::muted()))
+                        .hover(|s| s.bg(theme::raised()))
+                        .child(
+                            Icon::new(if compact {
+                                Lucide::Rows3
+                            } else {
+                                Lucide::ListCollapse
+                            })
+                            .small(),
+                        )
+                        .tooltip(move |window, cx| {
+                            Tooltip::new(if compact {
+                                tr("Tous les commits (⇧⌘K)", "All commits (⇧⌘K)")
+                            } else {
+                                tr(
+                                    "Vue compacte : branches (⇧⌘K)",
+                                    "Compact view: branches (⇧⌘K)",
+                                )
+                            })
+                            .build(window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_compact(cx))),
+                )
+            })
             .child(div().flex_1())
             .child(self.fetch_button(cx))
             .child(op_button(

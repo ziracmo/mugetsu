@@ -3,6 +3,7 @@
 
 mod changes;
 mod commit_files;
+mod compact;
 pub(crate) mod forms;
 mod history;
 mod menus;
@@ -55,6 +56,7 @@ gpui_kit::actions!(
         NewTag,
         Stash,
         RevealHead,
+        ToggleCompact,
         SearchCommits,
         CloseSearch,
         CheckoutBranch,
@@ -87,6 +89,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-2", ShowHistory, Some("Repo")),
         KeyBinding::new("secondary-3", ShowStats, Some("Repo")),
         KeyBinding::new("secondary-0", RevealHead, Some("Repo")),
+        KeyBinding::new("secondary-shift-k", ToggleCompact, Some("Repo")),
         KeyBinding::new("secondary-f", SearchCommits, Some("Repo")),
         KeyBinding::new("ctrl-f", SearchCommits, Some("Repo")),
         KeyBinding::new("secondary-b", CheckoutBranch, Some("Repo")),
@@ -201,6 +204,10 @@ pub struct RepoView {
     _settings: Subscription,
     /// Recent PRs of the repository (sidebar PR tab, stacks).
     pr_list: Arc<Vec<mugetsu_forge::PullRequest>>,
+    /// History as one row per branch (see `compact`).
+    compact: bool,
+    compact_seq: usize,
+    compact_cache: Option<(Arc<RepoData>, Arc<Vec<compact::BranchSummary>>)>,
     /// Head of a PR in the stack shown by `Mode::Stack`.
     stack_focus: Option<String>,
     /// Restarts the stack view's entrance animation.
@@ -323,6 +330,9 @@ impl RepoView {
             _commit_search,
             commit_order: crate::settings::get().commit_order,
             pr_list: Arc::default(),
+            compact: crate::settings::get().history_compact,
+            compact_seq: 0,
+            compact_cache: None,
             stack_focus: None,
             stack_seq: 0,
             pr_me: None,
@@ -1197,11 +1207,28 @@ impl Render for RepoView {
         } else {
             let main = match self.mode {
                 Mode::History => v_resizable("history-split")
-                    .child(
-                        resizable_panel()
-                            .size_range(rem * 8. ..rem * 400.)
-                            .child(self.render_history(window, cx)),
-                    )
+                    .child(resizable_panel().size_range(rem * 8. ..rem * 400.).child(
+                        if self.compact {
+                            self.render_compact(cx)
+                        } else if self.compact_seq > 0 {
+                            // Back from the compact view: the list eases in.
+                            let seq = self.compact_seq;
+                            div()
+                                .size_full()
+                                .child(self.render_history(window, cx))
+                                .with_animation(
+                                    ("history-in", seq),
+                                    gpui_kit::Animation::new(std::time::Duration::from_millis(380)),
+                                    |el, t| {
+                                        let k = 1. - (1. - t).powi(3);
+                                        el.opacity(k).mt(gpui_kit::px(12. * (1. - k)))
+                                    },
+                                )
+                                .into_any_element()
+                        } else {
+                            self.render_history(window, cx).into_any_element()
+                        },
+                    ))
                     .child(
                         resizable_panel()
                             .size(rem * 22.)
@@ -1294,6 +1321,10 @@ impl Render for RepoView {
                 this.checkout_branch_prompt(window, cx)
             }))
             .on_action(cx.listener(|this, _: &RevealHead, _, cx| this.reveal_head(cx)))
+            .on_action(cx.listener(|this, _: &ToggleCompact, _, cx| {
+                this.set_mode(Mode::History, cx);
+                this.toggle_compact(cx)
+            }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &SearchCommits, window, cx| {
                 this.set_mode(Mode::History, cx);
