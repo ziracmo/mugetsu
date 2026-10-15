@@ -1,11 +1,12 @@
 //! The Settings window (⌘,): sections listed on the left (general,
-//! appearance, history, repositories, PRs, AI), applied live.
+//! appearance, history, repositories, PRs, notifications, AI), applied live.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, TitleBar, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, Global,
@@ -15,7 +16,7 @@ use gpui_kit::{
 };
 
 use crate::i18n::tr;
-use crate::settings::{self, ACCENTS, AiTool, CommitSort, Lang, MERGED_DAYS};
+use crate::settings::{self, ACCENTS, AiTool, CommitSort, Lang, MERGED_DAYS, Notifications};
 use crate::theme;
 
 struct OpenSettingsWindow(AnyWindowHandle);
@@ -51,16 +52,18 @@ pub enum Section {
     History,
     Repositories,
     PullRequests,
+    Notifications,
     Ai,
 }
 
 impl Section {
-    const ALL: [Section; 6] = [
+    const ALL: [Section; 7] = [
         Section::General,
         Section::Appearance,
         Section::History,
         Section::Repositories,
         Section::PullRequests,
+        Section::Notifications,
         Section::Ai,
     ];
 
@@ -71,6 +74,7 @@ impl Section {
             Section::History => "history",
             Section::Repositories => "repositories",
             Section::PullRequests => "prs",
+            Section::Notifications => "notifications",
             Section::Ai => "ai",
         }
     }
@@ -82,6 +86,7 @@ impl Section {
             Section::History => tr("Historique", "History"),
             Section::Repositories => tr("Dépôts", "Repositories"),
             Section::PullRequests => "Pull requests",
+            Section::Notifications => "Notifications",
             Section::Ai => tr("IA", "AI"),
         }
     }
@@ -93,6 +98,7 @@ impl Section {
             Section::History => Lucide::GitCommitVertical,
             Section::Repositories => Lucide::FolderGit2,
             Section::PullRequests => Lucide::GitPullRequest,
+            Section::Notifications => Lucide::Bell,
             Section::Ai => Lucide::Sparkles,
         }
     }
@@ -472,6 +478,85 @@ impl Render for SettingsView {
                 )
                 .into_any_element(),
             ],
+            Section::Notifications => {
+                let prefs = current.notifications;
+                let switch = |id: &'static str,
+                              label: &'static str,
+                              checked: bool,
+                              set: fn(&mut Notifications, bool)| {
+                    Switch::new(id)
+                        .checked(checked)
+                        .color(theme::accent())
+                        .label(label)
+                        .on_click(move |on: &bool, _, cx| {
+                            let on = *on;
+                            settings::update(cx, |s| set(&mut s.notifications, on))
+                        })
+                };
+                vec![
+                    row(
+                        tr("Me prévenir quand", "Notify me when"),
+                        v_flex()
+                            .gap_2p5()
+                            .child(switch(
+                                "notify-ci",
+                                tr("La CI d'une PR est terminée", "A PR's CI finishes"),
+                                prefs.ci,
+                                |n, on| n.ci = on,
+                            ))
+                            .child(switch(
+                                "notify-review",
+                                tr("Ma review est demandée", "My review is requested"),
+                                prefs.review,
+                                |n, on| n.review = on,
+                            ))
+                            .child(switch(
+                                "notify-merged",
+                                tr("Une PR est mergée", "A PR is merged"),
+                                prefs.merged,
+                                |n, on| n.merged = on,
+                            )),
+                    )
+                    .into_any_element(),
+                    row(
+                        tr("Portée", "Scope"),
+                        switch(
+                            "notify-others",
+                            tr(
+                                "CI et merges des PRs des autres aussi",
+                                "CI and merges of other people's PRs too",
+                            ),
+                            prefs.others,
+                            |n, on| n.others = on,
+                        ),
+                    )
+                    .into_any_element(),
+                    row(
+                        "",
+                        Button::new("notify-test")
+                            .outline()
+                            .xsmall()
+                            .icon(Icon::new(Lucide::BellRing))
+                            .label(tr("Envoyer un test", "Send a test"))
+                            .on_click(|_, _, _| {
+                                crate::notify::show(&crate::notify::Note {
+                                    title: "Mugetsu".into(),
+                                    body: tr(
+                                        "Les notifications fonctionnent.",
+                                        "Notifications work.",
+                                    )
+                                    .into(),
+                                    url: String::new(),
+                                })
+                            }),
+                    )
+                    .into_any_element(),
+                    hint(tr(
+                        "Pour les dépôts GitHub ouverts en onglet, avec un token (gh auth login). Les onglets en arrière-plan vérifient leurs PRs toutes les 3 min.",
+                        "For GitHub repositories open in a tab, with a token (gh auth login). Background tabs check their PRs every 3 min.",
+                    )),
+                ]
+            }
             Section::Ai => {
                 let tools =
                     AiTool::ALL.iter().map(|&tool| {

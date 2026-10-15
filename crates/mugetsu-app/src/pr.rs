@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 use mugetsu_forge::{Github, GithubRepo, PullRequest};
 
 const TTL: Duration = Duration::from_secs(120);
+/// Background tabs list their PRs only for notifications, less often (rate limits).
+const BACKGROUND_TTL: Duration = Duration::from_secs(180);
 
 fn github() -> &'static Github {
     static GITHUB: OnceLock<Github> = OnceLock::new();
@@ -66,8 +68,9 @@ pub struct PrCache {
 
 impl PrCache {
     /// True when the repository-wide PR list should be refreshed.
-    pub fn needs_bulk(&self, now: Instant) -> bool {
-        self.bulk_at.is_none_or(|at| now.duration_since(at) > TTL)
+    pub fn needs_bulk(&self, now: Instant, focused: bool) -> bool {
+        let ttl = if focused { TTL } else { BACKGROUND_TTL };
+        self.bulk_at.is_none_or(|at| now.duration_since(at) > ttl)
     }
 
     pub fn mark_bulk(&mut self, now: Instant) {
