@@ -37,6 +37,8 @@ struct ChipContext {
     worktrees: HashMap<String, std::path::PathBuf>,
     /// Branch just pushed (name, sequence).
     pushed: Option<(String, usize)>,
+    /// Branch just deleted (name, sequence).
+    slashed: Option<(String, usize)>,
 }
 
 /// Rings a chip whose name matches the ⌘F query.
@@ -159,6 +161,8 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
     let mut merged = HashSet::new();
     let mut out = Vec::new();
     for label in labels {
+        // A deleted branch's chip is replaced by its slash animation.
+        let mut return_slash: Option<AnyElement> = None;
         let element = match label {
             RefLabel::Branch { name, head } => {
                 let synced = ctx
@@ -196,6 +200,20 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     false,
                     ctx,
                 );
+                if let Some((_, seq)) = ctx.slashed.as_ref().filter(|(b, _)| b == name) {
+                    let half = || {
+                        chip(
+                            name.clone(),
+                            color,
+                            Lucide::GitBranch,
+                            theme::is_main_branch(name),
+                            *head,
+                            None,
+                            false,
+                        )
+                    };
+                    return_slash = Some(super::shimmer::slash(half, *seq));
+                }
                 match &ctx.pushed {
                     Some((b, seq)) if b == name => super::shimmer::pushed(el, *seq),
                     _ => el,
@@ -227,6 +245,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
             Some(name) => mark_match(element, name, ctx),
             None => element,
         };
+        let element = return_slash.take().unwrap_or(element);
         out.push(element);
     }
     // Remote branches not merged into a local chip (ahead/behind or remote-only).
@@ -354,6 +373,7 @@ impl RepoView {
             search: search.clone(),
             worktrees: self.other_worktrees(),
             pushed: self.pushed.clone(),
+            slashed: self.slashed.clone(),
         });
         let hits = Rc::new(self.search_hits.clone());
         let shimmer = self.shimmer.clone();

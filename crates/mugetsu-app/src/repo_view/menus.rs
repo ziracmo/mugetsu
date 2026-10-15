@@ -268,15 +268,7 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
                     )
                     .into(),
                     tr("Supprimer", "Delete"),
-                    move |this, window, cx| {
-                        let name = name.clone();
-                        this.run_op(
-                            tr("Supprimer", "Delete"),
-                            move |r| r.delete_branch(&name, false),
-                            window,
-                            cx,
-                        );
-                    },
+                    move |this, window, cx| this.delete_branch(name.clone(), window, cx),
                     window,
                     cx,
                 );

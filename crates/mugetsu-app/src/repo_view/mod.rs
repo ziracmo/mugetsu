@@ -198,6 +198,8 @@ pub struct RepoView {
     menu_open: bool,
     /// Branch whose push just succeeded (name, sequence), for its chip animation.
     pushed: Option<(String, usize)>,
+    /// Branch just deleted (name, sequence): its chip is slashed before it goes.
+    slashed: Option<(String, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -311,6 +313,7 @@ impl RepoView {
             pr_filter: crate::settings::get().pr_filter,
             menu_open: false,
             pushed: None,
+            slashed: None,
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
                 if order != this.commit_order {
@@ -951,6 +954,58 @@ impl RepoView {
                     .update(cx, |s, cx| s.resize_panel(0, gpui_kit::px(w), window, cx));
             }
         }
+    }
+
+    /// Deletes a local branch; on success its chip is slashed in two, then the
+    /// view reloads (the chip goes away).
+    pub fn delete_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy.is_some() {
+            return;
+        }
+        self.busy = Some("Delete");
+        let repo = self.repo.clone();
+        let branch = name.clone();
+        self._op = cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { repo.delete_branch(&branch, false) })
+                .await;
+            let ok = result.is_ok();
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.busy = None;
+                match result {
+                    Ok(()) => {
+                        this.celebrate_seq += 1;
+                        this.slashed = Some((name, this.celebrate_seq));
+                        cx.notify();
+                    }
+                    Err(e) => {
+                        window.push_notification(
+                            gpui_kit::component::notification::Notification::error(trf!(
+                                "Supprimer : {e:#}",
+                                "Delete: {e:#}"
+                            )),
+                            cx,
+                        );
+                        this.reload(cx);
+                    }
+                }
+            });
+            if ok {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(750))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.slashed = None;
+                    this.reload(cx);
+                });
+            }
+        });
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn slashed_branch(&self) -> Option<String> {
+        self.slashed.as_ref().map(|(b, _)| b.clone())
     }
 
     /// Plays the "pushed" animation on a branch chip.

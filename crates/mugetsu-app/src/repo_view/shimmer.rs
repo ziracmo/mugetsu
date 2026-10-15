@@ -122,3 +122,67 @@ pub fn checkout(seq: usize) -> AnyElement {
         .children(particles)
         .into_any_element()
 }
+
+/// Deleted branch chip: a bright slash crosses it, then the two halves fly
+/// apart and fade, with a few sparks. `chip` draws the chip (used three times).
+pub fn slash(chip: impl Fn() -> gpui_kit::Div, seq: usize) -> AnyElement {
+    const H: f32 = 18.;
+    let half = |chip: gpui_kit::Div, upper: bool| {
+        div()
+            .absolute()
+            .left_0()
+            .top(gpui_kit::px(if upper { 0. } else { H / 2. }))
+            .h(gpui_kit::px(H / 2.))
+            .overflow_hidden()
+            .child(
+                div()
+                    .mt(gpui_kit::px(if upper { 0. } else { -H / 2. }))
+                    .child(chip),
+            )
+            .with_animation(
+                ("slash-half", seq * 2 + upper as usize),
+                Animation::new(Duration::from_millis(700)),
+                move |el, t| {
+                    // Still while the blade passes, then apart with a kick.
+                    let k = ((t - 0.3) / 0.7).clamp(0., 1.);
+                    let push = 1. - (1. - k).powi(3);
+                    let (dx, dy) = if upper { (-10., -5.) } else { (10., 5.) };
+                    el.ml(gpui_kit::px(dx * push))
+                        .mt(gpui_kit::px(dy * push))
+                        .opacity(1. - k * k)
+                },
+            )
+    };
+    // Invisible copy keeps the chip's width in the row.
+    let ghost = div().opacity(0.).child(chip());
+    let blade = div()
+        .absolute()
+        .top(gpui_kit::px(H / 2. - 1.))
+        .left_0()
+        .h(gpui_kit::px(2.))
+        .rounded_full()
+        .bg(linear_gradient(
+            90.,
+            linear_color_stop(theme::alpha(gpui_kit::white(), 0.), 0.),
+            linear_color_stop(gpui_kit::white(), 1.),
+        ))
+        .shadow_md()
+        .with_animation(
+            ("slash-blade", seq),
+            Animation::new(Duration::from_millis(700)),
+            |el, t| {
+                let k = (t / 0.3).clamp(0., 1.);
+                el.w(relative(1.1 * k))
+                    .opacity(if t < 0.3 { 1. } else { 1. - (t - 0.3) / 0.7 })
+            },
+        );
+    div()
+        .relative()
+        .flex_none()
+        .child(ghost)
+        .child(half(chip(), true))
+        .child(half(chip(), false))
+        .child(blade)
+        .child(crate::repo_view::particles::burst(seq))
+        .into_any_element()
+}

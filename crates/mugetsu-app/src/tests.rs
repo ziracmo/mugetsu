@@ -902,3 +902,20 @@ fn new_commits_shimmer_and_worktree_branches_open_their_tab(cx: &mut TestAppCont
     );
     let _ = std::fs::remove_dir_all(&wt);
 }
+
+#[gpui_kit::test]
+fn deleting_a_branch_slashes_its_chip(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.delete_branch("feature".into(), window, cx));
+    })
+    .unwrap();
+    settle(cx, &view);
+    assert!(!git(dir.path(), &["branch", "--list", "feature"]).contains("feature"));
+    cx.read(|cx| assert_eq!(view.read(cx).slashed_branch().as_deref(), Some("feature")));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+}
