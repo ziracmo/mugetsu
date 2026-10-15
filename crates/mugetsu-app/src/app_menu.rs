@@ -6,7 +6,7 @@ use crate::i18n::tr;
 use crate::repo_view as repo;
 use crate::workspace as ws;
 
-gpui_kit::actions!(app, [About, OpenSettings, Quit, ClearRecent]);
+gpui_kit::actions!(app, [About, OpenSettings, Quit, ClearRecent, NewWindow]);
 
 /// File > Open Recent > n-th repository of `Settings::recent`.
 #[derive(Clone, PartialEq, serde::Deserialize, gpui_kit::Action)]
@@ -40,12 +40,28 @@ fn open_recent(action: &OpenRecent, cx: &mut App) {
     });
 }
 
+/// File > New Window: a second repository window starting empty; its tabs
+/// are not saved (the first window keeps the session).
+pub(crate) fn new_window(cx: &mut App) {
+    let session = crate::session::Session::new(
+        vec![crate::session::RepoSet {
+            name: tr("Fenêtre", "Window").into(),
+            repos: Vec::new(),
+            active: 0,
+        }],
+        0,
+    );
+    let _ = crate::open_workspace_window(session, false, cx);
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-,", OpenSettings, None),
         KeyBinding::new("secondary-q", Quit, None),
+        KeyBinding::new("secondary-shift-n", NewWindow, None),
     ]);
     cx.on_action(|_: &About, cx| crate::about::open(cx));
+    cx.on_action(|_: &NewWindow, cx| new_window(cx));
     cx.on_action(|_: &OpenSettings, cx| crate::settings_view::open(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(open_recent);
@@ -64,6 +80,8 @@ pub fn set(cx: &mut App) {
             MenuItem::action(tr("Quitter Mugetsu", "Quit Mugetsu"), Quit),
         ]),
         Menu::new(tr("Fichier", "File")).items([
+            MenuItem::action(tr("Nouvelle fenêtre", "New Window"), NewWindow),
+            MenuItem::separator(),
             MenuItem::action(
                 tr("Ouvrir un dépôt…", "Open Repository…"),
                 ws::OpenRepository,
