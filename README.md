@@ -52,6 +52,8 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
 - **Commit details**: changed files as a tree, folded description, one-click SHA copy.
 - **Diff view** with syntax highlighting and intra-line changes.
 - **Author avatars** from GitHub or Gravatar, cached on disk.
+- **Compact view** (⇧⌘K): one row per branch with the commits it adds over the trunk; hover to list them.
+- Press **F** to jump back to the current branch.
 
 ### Branches and sidebar
 
@@ -80,9 +82,12 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
 ### GitHub pull requests
 
 - A `#123` chip on each branch with a PR, coloured by state, with CI result and unresolved conversations.
-  Hover for failing checks and review decision.
+  Hover for a card that appears at once: author avatar, failing checks, review decision.
 - **PRs tab**: open PRs (reviews you owe first), drafts, stacks with their `n/total` position, and recently
   merged PRs. Filters: all / mine / to review.
+- **Stack view**: click a stack to see its progress, which PRs are ready, and the next step to unblock it.
+- **AI review**: right-click a PR to run Claude Code (`/code-review`), Codex or your own command on it, in a
+  Terminal inside the repository (Settings › AI).
 
 ### Stats
 
@@ -93,8 +98,10 @@ history.
 ### Look and feel
 
 - Dark frosted-glass theme with a configurable accent colour.
-- English or French.
-- Small touches: new commits shimmer in, pushed branches glow, a particle burst after checkout.
+- English or French; settings in sections, including your git name and email.
+- **About Mugetsu** in the app menu, with the version and build.
+- Small touches: new commits shimmer in, pushed branches glow, a deleted branch gets slashed, a sweep after
+  checkout, a liquid wave on Fetch / Pull / Push while they run.
 
 ## Keyboard shortcuts
 
@@ -109,7 +116,8 @@ Fork's shortcuts where they exist. On Windows, use Ctrl instead of ⌘.
 | Checkout branch | ⌘B |
 | Stash | ⇧⌘H |
 | Search commits | ⌘F |
-| Reveal HEAD | ⌘0 |
+| Reveal HEAD | ⌘0 (or F) |
+| Compact history | ⇧⌘K |
 | Previous / next commit | ↑ ↓ (or k j) |
 | Open repository / New tab / Close tab | ⌘O / ⌘T / ⌘W |
 | Switch tab | ⌃Tab / ⌃⇧Tab |
