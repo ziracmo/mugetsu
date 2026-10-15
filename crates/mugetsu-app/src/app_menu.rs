@@ -102,6 +102,7 @@ pub fn set(cx: &mut App) {
         Menu::new(tr("Présentation", "View")).items([
             MenuItem::action(tr("Changements", "Changes"), repo::ShowChanges),
             MenuItem::action(tr("Historique", "History"), repo::ShowHistory),
+            MenuItem::action("Stats", repo::ShowStats),
             MenuItem::action(tr("Aller à HEAD", "Reveal HEAD"), repo::RevealHead),
             MenuItem::action(
                 tr("Rechercher des commits", "Search Commits"),

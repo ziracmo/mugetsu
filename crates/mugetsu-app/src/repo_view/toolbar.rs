@@ -356,6 +356,7 @@ impl RepoView {
         let tab = |id: &'static str, label: String, keys: &'static str, active: bool| {
             h_flex()
                 .id(id)
+                .test_support()
                 .h(px(24.))
                 .px_3()
                 .gap_1p5()
@@ -461,6 +462,10 @@ impl RepoView {
                             mode == Mode::Changes,
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Changes, cx))),
+                    )
+                    .child(
+                        tab("mode-stats", "Stats".into(), "⌘3", mode == Mode::Stats)
+                            .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Stats, cx))),
                     ),
             )
             .child(div().flex_1())

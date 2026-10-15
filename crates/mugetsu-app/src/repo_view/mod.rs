@@ -46,6 +46,7 @@ gpui_kit::actions!(
         Refresh,
         ShowHistory,
         ShowChanges,
+        ShowStats,
         Pull,
         Push,
         NewBranch,
@@ -80,6 +81,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-r", Refresh, Some("Repo")),
         KeyBinding::new("secondary-1", ShowChanges, Some("Repo")),
         KeyBinding::new("secondary-2", ShowHistory, Some("Repo")),
+        KeyBinding::new("secondary-3", ShowStats, Some("Repo")),
         KeyBinding::new("secondary-0", RevealHead, Some("Repo")),
         KeyBinding::new("secondary-f", SearchCommits, Some("Repo")),
         KeyBinding::new("ctrl-f", SearchCommits, Some("Repo")),
@@ -99,6 +101,8 @@ pub fn init(cx: &mut gpui_kit::App) {
 pub enum Mode {
     History,
     Changes,
+    /// Who works on the default branch, and when (commits only).
+    Stats,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -201,7 +205,7 @@ pub struct RepoView {
     pushed: Option<(String, usize)>,
     /// Branch just deleted (name, sequence): its chip is slashed before it goes.
     slashed: Option<(String, usize)>,
-    /// Stats tab (computed on demand, kept per tab).
+    /// Stats view (computed on demand, kept per tab).
     stats: stats_panel::StatsState,
 }
 
@@ -209,20 +213,6 @@ pub struct RepoView {
 pub enum SidebarTab {
     Repo,
     Prs,
-    Stats,
-}
-
-impl SidebarTab {
-    /// The tab the settings remember (shared layout).
-    fn remembered(settings: &crate::settings::Settings) -> Self {
-        if settings.sidebar_stats {
-            SidebarTab::Stats
-        } else if settings.sidebar_prs {
-            SidebarTab::Prs
-        } else {
-            SidebarTab::Repo
-        }
-    }
 }
 
 impl EventEmitter<RepoEvent> for RepoView {}
@@ -318,8 +308,10 @@ impl RepoView {
             commit_order: crate::settings::get().commit_order,
             pr_list: Arc::default(),
             pr_me: None,
-            sidebar_tab: if crate::settings::get().shared_layout {
-                SidebarTab::remembered(&crate::settings::get())
+            sidebar_tab: if crate::settings::get().shared_layout
+                && crate::settings::get().sidebar_prs
+            {
+                SidebarTab::Prs
             } else {
                 SidebarTab::Repo
             },
@@ -957,7 +949,11 @@ impl RepoView {
         if !settings.shared_layout {
             return;
         }
-        self.sidebar_tab = SidebarTab::remembered(&settings);
+        self.sidebar_tab = if settings.sidebar_prs {
+            SidebarTab::Prs
+        } else {
+            SidebarTab::Repo
+        };
         if let Some(w) = settings.sidebar_width {
             let current = self.sidebar_split.read(cx).sizes().first().copied();
             let w = w as f32;
@@ -1148,6 +1144,7 @@ impl Render for RepoView {
                     )
                     .into_any_element(),
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
+                Mode::Stats => self.render_stats(cx),
             };
             // The content floats as a frosted card over the window glass.
             let card = div()
@@ -1248,6 +1245,7 @@ impl Render for RepoView {
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.reload(cx)))
             .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.set_mode(Mode::History, cx)))
             .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))
+            .on_action(cx.listener(|this, _: &ShowStats, _, cx| this.set_mode(Mode::Stats, cx)))
             .child(self.render_toolbar(cx))
             .child(
                 div()

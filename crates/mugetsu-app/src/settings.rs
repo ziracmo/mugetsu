@@ -71,8 +71,6 @@ pub struct Settings {
     pub sidebar_width: Option<u32>,
     /// Sidebar shows the PRs tab (shared layout).
     pub sidebar_prs: bool,
-    /// Sidebar shows the Stats tab (shared layout).
-    pub sidebar_stats: bool,
     /// Keys of the folded sidebar sections.
     pub collapsed_sections: Vec<String>,
     /// Last PRs tab filter.
@@ -110,7 +108,6 @@ impl Default for Settings {
             shared_layout: true,
             sidebar_width: None,
             sidebar_prs: false,
-            sidebar_stats: false,
             collapsed_sections: vec!["tags".into()],
             pr_filter: PrFilter::All,
             pr_chips: PrFilter::All,

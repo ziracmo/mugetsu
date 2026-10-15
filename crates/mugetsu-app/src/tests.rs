@@ -821,7 +821,7 @@ fn command_f_finds_branch_names_and_sidebar_has_a_prs_tab(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
-fn stats_tab_ranks_authors_of_the_default_branch(cx: &mut TestAppContext) {
+fn stats_view_ranks_authors_of_the_default_branch(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
@@ -840,7 +840,7 @@ fn stats_tab_ranks_authors_of_the_default_branch(cx: &mut TestAppContext) {
     let (handle, view) = open_repo_view(cx, dir.path());
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.click("sidebar-tab-stats", cx);
+        window.click("mode-stats", cx);
         window.render_frame(cx);
     })
     .unwrap();
@@ -872,11 +872,7 @@ fn stats_tab_ranks_authors_of_the_default_branch(cx: &mut TestAppContext) {
     .unwrap();
     let all = wait_stats(cx);
     assert_eq!(all.commits, 5);
-    cx.update_window(handle, |_, window, cx| {
-        window.click("sidebar-tab-repo", cx);
-        window.render_frame(cx);
-    })
-    .unwrap();
+    cx.read(|cx| assert_eq!(view.read(cx).mode(), Mode::Stats));
 }
 
 #[gpui_kit::test]

@@ -209,10 +209,8 @@ impl RepoView {
                 })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sidebar_tab = which;
-                    crate::settings::remember(|s| {
-                        s.sidebar_prs = which == SidebarTab::Prs;
-                        s.sidebar_stats = which == SidebarTab::Stats;
-                    });
+                    let prs = which == SidebarTab::Prs;
+                    crate::settings::remember(|s| s.sidebar_prs = prs);
                     cx.notify();
                 }))
         };
@@ -232,7 +230,6 @@ impl RepoView {
                 0,
             ))
             .child(tab("sidebar-tab-prs", "PRs", SidebarTab::Prs, waiting))
-            .child(tab("sidebar-tab-stats", "Stats", SidebarTab::Stats, 0))
             .into_any_element()
     }
 

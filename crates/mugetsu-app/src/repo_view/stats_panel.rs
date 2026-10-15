@@ -1,4 +1,4 @@
-//! Sidebar "Stats" tab: who writes, commits, reviews and merges on the
+//! "Stats" view (next to History and Changes): who writes, commits, reviews and merges on the
 //! default branch, when, and which files move. Commits only (no forge API).
 //! Metadata shows at once; line counts stream in while bars keep filling.
 
@@ -125,20 +125,11 @@ fn compact(n: u64) -> String {
     }
 }
 
-fn matches(hay: &[&str], query: &str) -> bool {
-    let hay = hay.join(" ").to_lowercase();
-    query
-        .split_whitespace()
-        .all(|w| hay.contains(&w.to_lowercase()))
-}
-
 impl RepoView {
     /// Starts (or restarts) the computation when the period, the default
     /// branch's tip or the repository changed. Cheap when nothing did.
     pub(super) fn ensure_stats(&mut self, cx: &mut Context<Self>) {
-        if self.sidebar_tab != super::SidebarTab::Stats
-            || self.loading && self.data.history.is_empty()
-        {
+        if self.mode != super::Mode::Stats || self.loading && self.data.history.is_empty() {
             return;
         }
         let s = &self.stats;
@@ -260,27 +251,21 @@ impl RepoView {
         self.stats.stats.clone().map(|s| (s, self.stats.running))
     }
 
-    /// Content of the Stats tab.
-    pub(super) fn stats_sections(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let searching = !query.is_empty();
-        let mut out = vec![self.render_stats_header(cx)];
-        if let Some(err) = &self.stats.error {
-            out.push(
+    /// The Stats view, in place of the history.
+    pub(super) fn render_stats(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut body: Vec<AnyElement> = Vec::new();
+        let stats = self.stats.stats.clone();
+        match (&self.stats.error, &stats) {
+            (Some(err), _) => body.push(
                 div()
                     .p_4()
                     .text_sm()
                     .text_color(theme::red())
                     .child(err.clone())
                     .into_any_element(),
-            );
-            return out;
-        }
-        let Some(stats) = self.stats.stats.clone() else {
-            out.push(skeleton());
-            return out;
-        };
-        if stats.commits == 0 {
-            out.push(
+            ),
+            (None, None) => body.push(skeleton()),
+            (None, Some(stats)) if stats.commits == 0 => body.push(
                 div()
                     .p_4()
                     .text_sm()
@@ -294,105 +279,134 @@ impl RepoView {
                         None => trf!("Aucun commit sur {}.", "No commits on {}.", stats.branch),
                     })
                     .into_any_element(),
-            );
-            return out;
+            ),
+            (None, Some(stats)) => body.extend(self.stats_dashboard(stats, cx)),
         }
+        v_flex()
+            .id("stats-view")
+            .size_full()
+            .overflow_y_scroll()
+            .px_4()
+            .pt_3()
+            .pb_4()
+            .gap_3()
+            .child(self.render_stats_header(cx))
+            .children(body)
+            .into_any_element()
+    }
+
+    fn stats_dashboard(&self, stats: &RepoStats, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let seq = self.stats.seq;
-        if !searching {
-            out.push(tiles(&stats, seq));
-            out.push(activity(&stats, seq));
-        }
-        let people = |list: &[Person], key: &'static str, lines: bool, cx: &mut Context<Self>| {
-            let max = list.first().map_or(1, |p| p.commits).max(1);
-            list.iter()
-                .filter(|p| matches(&[&p.name, &p.email], query))
-                .take(if searching { usize::MAX } else { TOP })
-                .enumerate()
-                .map(|(i, p)| person_row(key, i, p, max, lines, seq, cx))
-                .collect::<Vec<_>>()
-        };
         let lines = stats.lines_scanned > 0;
-        let groups: [(&'static str, &'static str, Lucide, &[Person], bool); 5] = [
-            (
-                "stats-authors",
-                tr("Auteurs", "Authors"),
-                Lucide::Users,
-                &stats.authors,
-                lines,
-            ),
-            (
-                "stats-reviewers",
-                tr("Reviewers", "Reviewers"),
-                Lucide::Eye,
-                &stats.reviewers,
-                false,
-            ),
-            (
-                "stats-mergers",
-                tr("Merges de PR", "PR merges"),
-                Lucide::GitMerge,
-                &stats.mergers,
-                false,
-            ),
-            (
-                "stats-committers",
-                tr("Committers", "Committers"),
-                Lucide::GitCommitHorizontal,
-                &stats.committers,
-                false,
-            ),
-            (
-                "stats-coauthors",
-                tr("Co-auteurs", "Co-authors"),
-                Lucide::HeartHandshake,
-                &stats.coauthors,
-                false,
-            ),
-        ];
-        for (key, title, icon, list, lines) in groups {
-            if list.is_empty() {
-                continue;
-            }
-            let rows = people(list, key, lines, cx);
-            out.extend(self.section(key, title, icon, list.len(), rows, searching, None, cx));
-        }
-        if !searching {
-            out.extend(self.section(
-                "stats-when",
-                tr("Quand", "When"),
-                Lucide::CalendarClock,
-                stats.commits as usize,
-                vec![punchcard(&stats, seq)],
-                false,
-                None,
-                cx,
-            ));
-        }
-        let files: Vec<&FileHeat> = stats
-            .files
-            .iter()
-            .filter(|f| matches(&[&f.path], query))
-            .take(if searching { 50 } else { TOP })
-            .collect();
-        if !files.is_empty() {
+        let people = |key: &'static str,
+                      title: &'static str,
+                      icon: Lucide,
+                      list: &[Person],
+                      lines: bool,
+                      cx: &mut Context<Self>| {
+            (!list.is_empty()).then(|| {
+                let max = list.first().map_or(1, |p| p.commits).max(1);
+                let rows = list
+                    .iter()
+                    .take(TOP)
+                    .enumerate()
+                    .map(|(i, p)| person_row(key, i, p, max, lines, seq, cx))
+                    .collect();
+                panel(key, title, icon, list.len(), rows)
+            })
+        };
+        let files = (!stats.files.is_empty()).then(|| {
             let max = stats.files.first().map_or(1, |f| f.commits).max(1);
-            let rows = files
+            let rows = stats
+                .files
                 .iter()
+                .take(TOP)
                 .enumerate()
                 .map(|(i, f)| file_row(i, f, max, seq))
                 .collect();
-            out.extend(self.section(
+            panel(
                 "stats-files",
                 tr("Fichiers chauds", "Hot files"),
                 Lucide::Flame,
                 stats.files.len(),
                 rows,
-                searching,
-                None,
+            )
+        });
+        let left: Vec<AnyElement> = [
+            people(
+                "stats-authors",
+                tr("Auteurs", "Authors"),
+                Lucide::Users,
+                &stats.authors,
+                lines,
                 cx,
-            ));
-        }
-        out
+            ),
+            people(
+                "stats-committers",
+                tr("Committers", "Committers"),
+                Lucide::GitCommitHorizontal,
+                &stats.committers,
+                false,
+                cx,
+            ),
+            people(
+                "stats-coauthors",
+                tr("Co-auteurs", "Co-authors"),
+                Lucide::HeartHandshake,
+                &stats.coauthors,
+                false,
+                cx,
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let right: Vec<AnyElement> = [
+            people(
+                "stats-reviewers",
+                tr("Reviewers", "Reviewers"),
+                Lucide::Eye,
+                &stats.reviewers,
+                false,
+                cx,
+            ),
+            people(
+                "stats-mergers",
+                tr("Merges de PR", "PR merges"),
+                Lucide::GitMerge,
+                &stats.mergers,
+                false,
+                cx,
+            ),
+            files,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        vec![
+            tiles(stats, seq),
+            panel(
+                "stats-activity",
+                tr("Activité", "Activity"),
+                Lucide::ChartColumn,
+                stats.commits as usize,
+                vec![activity(stats, seq)],
+            ),
+            h_flex()
+                .w_full()
+                .items_start()
+                .gap_3()
+                .child(v_flex().flex_1().min_w_0().gap_3().children(left))
+                .child(v_flex().flex_1().min_w_0().gap_3().children(right))
+                .into_any_element(),
+            panel(
+                "stats-when",
+                tr("Quand", "When"),
+                Lucide::CalendarClock,
+                stats.commits as usize,
+                vec![punchcard(stats, seq)],
+            ),
+        ]
     }
 
     /// Branch, progress and the period picker.
@@ -432,62 +446,117 @@ impl RepoView {
             .filter(|s| !s.lines_done && s.lines_total() > 0)
             .map(|s| (s.lines_scanned as f32 / s.lines_total() as f32).min(1.));
         v_flex()
-            .px_2()
-            .pb_1()
-            .gap_1()
+            .gap_1p5()
             .child(
                 h_flex()
-                    .gap_1()
-                    .text_xs()
-                    .text_color(theme::muted())
-                    .child(Icon::new(Lucide::GitBranch).xsmall())
+                    .gap_2()
+                    .child(
+                        Icon::new(Lucide::ChartNoAxesCombined)
+                            .small()
+                            .text_color(theme::accent()),
+                    )
                     .child(
                         div()
-                            .flex_1()
-                            .truncate()
+                            .text_lg()
+                            .font_weight(gpui_kit::FontWeight::BOLD)
                             .text_color(gpui_kit::white())
+                            .child("Stats"),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .px_2()
+                            .h(px(20.))
+                            .rounded_full()
+                            .text_xs()
+                            .bg(theme::raised())
+                            .text_color(gpui_kit::white())
+                            .child(Icon::new(Lucide::GitBranch).xsmall())
                             .child(branch.unwrap_or_else(|| "…".into())),
                     )
                     .when(self.stats.running, |s| {
-                        s.child(div().child(match progress {
-                            Some(p) => {
-                                trf!("lignes {}%", "lines {}%", (p * 100.).round() as u32)
-                            }
-                            None => tr("calcul…", "computing…").to_string(),
-                        }))
-                    }),
+                        s.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme::muted())
+                                .child(match progress {
+                                    Some(p) => {
+                                        trf!("lignes {}%", "lines {}%", (p * 100.).round() as u32)
+                                    }
+                                    None => tr("calcul…", "computing…").to_string(),
+                                }),
+                        )
+                    })
+                    .child(div().flex_1())
+                    .child(h_flex().w(px(320.)).gap_1().children(Period::ALL.map(chip))),
             )
-            .child(h_flex().gap_1().children(Period::ALL.map(chip)))
-            .when_some(progress, |s, p| {
-                s.child(
-                    div()
-                        .relative()
-                        .h(px(2.))
-                        .w_full()
-                        .rounded_full()
-                        .overflow_hidden()
-                        .bg(theme::raised())
-                        .child(
+            .child(
+                div()
+                    .relative()
+                    .h(px(2.))
+                    .w_full()
+                    .rounded_full()
+                    .overflow_hidden()
+                    .when_some(progress, |s, p| {
+                        s.bg(theme::raised()).child(
                             div()
                                 .h_full()
                                 .w(relative(p))
                                 .rounded_full()
                                 .bg(fill(270., 0.9)),
-                        ),
-                )
-            })
+                        )
+                    }),
+            )
             .into_any_element()
     }
+}
+
+/// A frosted card with a title row, holding one block of the dashboard.
+fn panel(
+    key: &'static str,
+    title: &'static str,
+    icon: Lucide,
+    count: usize,
+    rows: Vec<AnyElement>,
+) -> AnyElement {
+    v_flex()
+        .id(key)
+        .w_full()
+        .pb_1()
+        .rounded_xl()
+        .border_1()
+        .border_color(theme::hairline())
+        .bg(theme::alpha(gpui_kit::white(), 0.025))
+        .child(
+            h_flex()
+                .h(px(32.))
+                .px_3()
+                .gap_1p5()
+                .text_sm()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(theme::alpha(gpui_kit::white(), 0.82))
+                .child(Icon::new(icon).xsmall().text_color(theme::accent()))
+                .child(div().flex_1().child(title))
+                .child(
+                    div()
+                        .px_1p5()
+                        .rounded_md()
+                        .text_xs()
+                        .bg(theme::raised())
+                        .child(count.to_string()),
+                ),
+        )
+        .children(rows)
+        .into_any_element()
 }
 
 /// Placeholder while the first numbers load.
 fn skeleton() -> AnyElement {
     v_flex()
-        .px_2()
-        .gap_1p5()
+        .gap_2()
         .children((0..6usize).map(|i| {
             div()
-                .h(px(18.))
+                .h(px(28.))
                 .w(relative(0.9 - i as f32 * 0.1))
                 .rounded_md()
                 .bg(theme::raised())
@@ -512,12 +581,12 @@ fn tiles(stats: &RepoStats, seq: usize) -> AnyElement {
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .px_2()
-                .py_1()
-                .rounded_lg()
+                .px_3()
+                .py_2()
+                .rounded_xl()
                 .border_1()
                 .border_color(theme::hairline())
-                .bg(fill(180., 0.12))
+                .bg(fill(180., 0.14))
                 .child(
                     div()
                         .text_xs()
@@ -527,7 +596,7 @@ fn tiles(stats: &RepoStats, seq: usize) -> AnyElement {
                 )
                 .child(
                     div()
-                        .text_base()
+                        .text_2xl()
                         .font_weight(gpui_kit::FontWeight::BOLD)
                         .text_color(color)
                         .truncate()
@@ -546,46 +615,36 @@ fn tiles(stats: &RepoStats, seq: usize) -> AnyElement {
                         ),
                 )
         };
-    v_flex()
-        .px_2()
-        .pb_1()
-        .gap_1()
-        .child(
-            h_flex()
-                .gap_1()
-                .child(tile(
-                    0,
-                    tr("Commits", "Commits"),
-                    Some(stats.commits as u64),
-                    "",
-                    gpui_kit::white(),
-                ))
-                .child(tile(
-                    1,
-                    tr("Auteurs", "Authors"),
-                    Some(people),
-                    "",
-                    gpui_kit::white(),
-                )),
-        )
-        .child(
-            h_flex()
-                .gap_1()
-                .child(tile(
-                    2,
-                    tr("Ajouts", "Added"),
-                    lines_known.then_some(stats.additions),
-                    "+",
-                    theme::lime(),
-                ))
-                .child(tile(
-                    3,
-                    tr("Suppressions", "Removed"),
-                    lines_known.then_some(stats.deletions),
-                    "−",
-                    theme::red(),
-                )),
-        )
+    h_flex()
+        .gap_3()
+        .child(tile(
+            0,
+            tr("Commits", "Commits"),
+            Some(stats.commits as u64),
+            "",
+            gpui_kit::white(),
+        ))
+        .child(tile(
+            1,
+            tr("Auteurs", "Authors"),
+            Some(people),
+            "",
+            gpui_kit::white(),
+        ))
+        .child(tile(
+            2,
+            tr("Ajouts", "Added"),
+            lines_known.then_some(stats.additions),
+            "+",
+            theme::lime(),
+        ))
+        .child(tile(
+            3,
+            tr("Suppressions", "Removed"),
+            lines_known.then_some(stats.deletions),
+            "−",
+            theme::red(),
+        ))
         .into_any_element()
 }
 
@@ -636,19 +695,18 @@ fn activity(stats: &RepoStats, seq: usize) -> AnyElement {
     v_flex()
         .px_2()
         .pb_2()
-        .gap_0p5()
+        .gap_1()
         .child(
-            h_flex()
+            div()
                 .text_xs()
                 .text_color(theme::muted())
-                .child(div().flex_1().child(tr("Activité", "Activity")))
                 .child(trf!("max {max} / {unit}", "max {max} / {unit}")),
         )
         .child(
             h_flex()
-                .h(px(56.))
+                .h(px(120.))
                 .items_end()
-                .gap(px(1.))
+                .gap(px(2.))
                 .border_b_1()
                 .border_color(theme::hairline())
                 .children(bars),
@@ -832,10 +890,10 @@ fn punchcard(stats: &RepoStats, seq: usize) -> AnyElement {
     };
     let rows = stats.punchcard.iter().enumerate().map(|(d, hours)| {
         h_flex()
-            .gap(px(2.))
+            .gap(px(3.))
             .child(
                 div()
-                    .w(px(10.))
+                    .w(px(14.))
                     .flex_none()
                     .text_xs()
                     .text_color(theme::muted())
@@ -847,7 +905,7 @@ fn punchcard(stats: &RepoStats, seq: usize) -> AnyElement {
                 div()
                     .id(("stats-punch", d * 24 + h))
                     .flex_1()
-                    .h(px(10.))
+                    .h(px(18.))
                     .rounded_sm()
                     .bg(if v == 0 {
                         theme::alpha(gpui_kit::white(), 0.04)
@@ -870,11 +928,11 @@ fn punchcard(stats: &RepoStats, seq: usize) -> AnyElement {
     v_flex()
         .px_2()
         .pb_2()
-        .gap(px(2.))
+        .gap(px(3.))
         .children(rows)
         .child(
             h_flex()
-                .pl(px(12.))
+                .pl(px(17.))
                 .text_xs()
                 .text_color(theme::muted())
                 .child(div().flex_1().child("0h"))
