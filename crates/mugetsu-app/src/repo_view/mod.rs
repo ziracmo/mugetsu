@@ -308,7 +308,7 @@ impl RepoView {
             },
             sidebar_split: cx.new(|_| ResizableState::default()),
             adopt_layout: true,
-            pr_filter: Default::default(),
+            pr_filter: crate::settings::get().pr_filter,
             pr_menu_open: false,
             pushed: None,
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
@@ -919,6 +919,7 @@ impl RepoView {
             .filter_map(|k| sidebar::SECTION_KEYS.iter().find(|s| **s == k.as_str()))
             .copied()
             .collect();
+        self.pr_filter = settings.pr_filter;
         if !settings.shared_layout {
             return;
         }

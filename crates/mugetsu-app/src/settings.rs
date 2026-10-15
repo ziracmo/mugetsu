@@ -73,6 +73,20 @@ pub struct Settings {
     pub sidebar_prs: bool,
     /// Keys of the folded sidebar sections.
     pub collapsed_sections: Vec<String>,
+    /// Last PRs tab filter.
+    pub pr_filter: PrFilter,
+}
+
+/// PRs tab quick filter, shared by every repository.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PrFilter {
+    #[default]
+    All,
+    /// Authored by me.
+    Mine,
+    /// My review is requested.
+    Review,
 }
 
 /// Choices offered for [`Settings::merged_days`].
@@ -93,6 +107,7 @@ impl Default for Settings {
             sidebar_width: None,
             sidebar_prs: false,
             collapsed_sections: vec!["tags".into()],
+            pr_filter: PrFilter::All,
         }
     }
 }

@@ -68,15 +68,7 @@ pub fn stack_badge(pos: usize, total: usize) -> AnyElement {
         .into_any_element()
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PrFilter {
-    #[default]
-    All,
-    /// Authored by me.
-    Mine,
-    /// My review is requested.
-    Review,
-}
+pub use crate::settings::PrFilter;
 
 pub fn keep(pr: &PullRequest, filter: PrFilter, me: Option<&str>) -> bool {
     match filter {
@@ -144,6 +136,7 @@ impl RepoView {
                 .child(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.pr_filter = filter;
+                    crate::settings::remember(|s| s.pr_filter = filter);
                     cx.notify();
                 }))
         };
