@@ -46,7 +46,7 @@ pub fn recent(repo: &GithubRepo) -> Result<RecentPrs, String> {
 #[derive(Clone, Debug)]
 pub enum PrLookup {
     Loading,
-    Found(PullRequest),
+    Found(Box<PullRequest>),
     None,
     Failed(String),
 }
@@ -70,7 +70,8 @@ impl PrCache {
     /// Records every PR of a repository-wide listing.
     pub fn set_bulk(&mut self, prs: HashMap<String, PullRequest>, now: Instant) {
         for (branch, pr) in prs {
-            self.entries.insert(branch, (PrLookup::Found(pr), now));
+            self.entries
+                .insert(branch, (PrLookup::Found(Box::new(pr)), now));
         }
     }
 

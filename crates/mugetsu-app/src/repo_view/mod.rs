@@ -564,7 +564,7 @@ impl RepoView {
                 .background_spawn(async move { pr::lookup(&gh, &key) })
                 .await;
             let lookup = match result {
-                Ok(Some(found)) => PrLookup::Found(found),
+                Ok(Some(found)) => PrLookup::Found(Box::new(found)),
                 Ok(None) => PrLookup::None,
                 Err(e) => PrLookup::Failed(e),
             };

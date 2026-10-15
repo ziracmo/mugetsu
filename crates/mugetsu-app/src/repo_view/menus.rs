@@ -63,7 +63,7 @@ pub struct BranchMenu {
 
 pub fn found_pr(lookup: Option<&PrLookup>) -> Option<PullRequest> {
     match lookup {
-        Some(PrLookup::Found(pr)) => Some(pr.clone()),
+        Some(PrLookup::Found(pr)) => Some((**pr).clone()),
         _ => None,
     }
 }
