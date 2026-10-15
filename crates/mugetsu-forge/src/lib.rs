@@ -35,6 +35,65 @@ impl GithubRepo {
             name: name.to_string(),
         })
     }
+
+    pub fn web_url(&self) -> String {
+        format!("https://github.com/{}/{}", self.owner, self.name)
+    }
+
+    /// `…/commit/<sha>`.
+    pub fn commit_url(&self, sha: &str) -> String {
+        format!("{}/commit/{sha}", self.web_url())
+    }
+
+    /// Permalink to a file at a commit, optionally to lines (`#L3`, `#L3-L9`).
+    pub fn blob_url(&self, sha: &str, path: &str, lines: Option<(usize, usize)>) -> String {
+        let anchor = match lines {
+            Some((a, b)) if a == b => format!("#L{a}"),
+            Some((a, b)) => format!("#L{}-L{}", a.min(b), a.max(b)),
+            None => String::new(),
+        };
+        format!(
+            "{}/blob/{sha}/{}{anchor}",
+            self.web_url(),
+            encode_path(path)
+        )
+    }
+
+    /// A file's diff in a commit's page, optionally to lines: `L` for the old
+    /// side, `R` for the new one (`#diff-<sha256(path)>L4-R6`).
+    pub fn commit_diff_url(
+        &self,
+        sha: &str,
+        path: &str,
+        lines: Option<((bool, usize), (bool, usize))>,
+    ) -> String {
+        use sha2::Digest as _;
+        let hash: String = sha2::Sha256::digest(path.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let side = |(new, n): (bool, usize)| format!("{}{n}", if new { 'R' } else { 'L' });
+        let lines = match lines {
+            Some((a, b)) if a == b => side(a),
+            Some((a, b)) => format!("{}-{}", side(a), side(b)),
+            None => String::new(),
+        };
+        format!("{}#diff-{hash}{lines}", self.commit_url(sha))
+    }
+}
+
+/// Percent-encodes a repository path for a URL, keeping its slashes.
+fn encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for b in path.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -485,6 +544,32 @@ impl Github {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builds_web_links() {
+        let gh = GithubRepo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        assert_eq!(gh.commit_url("abc"), "https://github.com/o/r/commit/abc");
+        assert_eq!(
+            gh.blob_url("abc", "src/a b#.rs", None),
+            "https://github.com/o/r/blob/abc/src/a%20b%23.rs"
+        );
+        assert_eq!(
+            gh.blob_url("abc", "x.rs", Some((9, 3))),
+            "https://github.com/o/r/blob/abc/x.rs#L3-L9"
+        );
+        assert_eq!(
+            gh.blob_url("abc", "x.rs", Some((4, 4))),
+            "https://github.com/o/r/blob/abc/x.rs#L4"
+        );
+        // sha256("a.txt")
+        assert_eq!(
+            gh.commit_diff_url("abc", "a.txt", Some(((false, 4), (true, 6)))),
+            "https://github.com/o/r/commit/abc#diff-18b7cb099a9ea3f50ba899b5ba81e0d377a5f3b16f8f6eeb8b3e58cd4692b993L4-R6"
+        );
+    }
 
     #[test]
     fn parses_github_remote_urls() {

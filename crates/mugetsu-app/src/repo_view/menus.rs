@@ -8,7 +8,10 @@ use gix::ObjectId;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{Icon, WindowExt as _};
-use gpui_kit::{App, AppContext as _, ClickEvent, ClipboardItem, Context, WeakEntity, Window};
+use gpui_kit::{
+    App, AppContext as _, ClickEvent, ClipboardItem, Context, WeakEntity, Window,
+    prelude::FluentBuilder as _,
+};
 use mugetsu_forge::{GithubRepo, PullRequest};
 use mugetsu_git::{RefLabel, ResetMode};
 
@@ -633,7 +636,32 @@ pub fn commit_menu(
     .item(simple("Revert", Lucide::Undo2, |r, s, m| r.revert(s, m)))
     .item(save_patch)
     .separator()
-    .item(item(tr("Copier le SHA", "Copy SHA"), Lucide::Copy).on_click(copy(sha)))
+    .item(item(tr("Copier le SHA", "Copy SHA"), Lucide::Copy).on_click(copy(sha.clone())))
+    .when_some(ctx.github.clone(), |menu, gh| {
+        let url = gh.commit_url(&sha);
+        menu.item(
+            item(
+                tr("Copier le lien GitHub", "Copy GitHub Link"),
+                Lucide::Link,
+            )
+            .on_click(act(&ctx.view, move |this, _, cx| {
+                if this.selected != Some(id) {
+                    this.select_commit(id, false, cx);
+                }
+                this.copy_link(super::links::LinkSpot::Commit, url.clone(), cx)
+            })),
+        )
+        .item(
+            item(
+                tr("Ouvrir sur GitHub", "Open on GitHub"),
+                Lucide::ExternalLink,
+            )
+            .on_click({
+                let url = gh.commit_url(&sha);
+                move |_, _, cx| cx.open_url(&url)
+            }),
+        )
+    })
 }
 
 impl RepoView {

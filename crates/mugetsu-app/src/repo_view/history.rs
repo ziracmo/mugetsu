@@ -667,6 +667,7 @@ impl RepoView {
                             )
                             .child(fmt::absolute_time(commit.time))
                             .child(self.render_copy_sha(sha, &commit, cx))
+                            .children(self.render_commit_link(cx))
                             .child(div().flex_1())
                             .child(trf!("{} fichier(s)", "{} file(s)", self.commit_files)),
                     ),
@@ -680,11 +681,19 @@ impl RepoView {
                     })
                     .child(
                         div()
+                            .relative()
                             .flex_1()
                             .min_w_0()
                             .h_full()
                             .p_2()
-                            .child(Diff::new(&self.commit_diff).line_number(true)),
+                            .child(
+                                Diff::new(&self.commit_diff)
+                                    .line_number(true)
+                                    .when_some(self.file_link_renderer(cx), |d, render| {
+                                        d.render_header_suffix(render)
+                                    }),
+                            )
+                            .children(self.render_lines_link(cx)),
                     ),
             )
             .into_any_element()

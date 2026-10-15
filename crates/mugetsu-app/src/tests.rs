@@ -73,6 +73,7 @@ fn init(cx: &mut TestAppContext) {
         crate::theme::init(cx);
         crate::workspace::init(cx);
         crate::repo_view::init(cx);
+        crate::palette::init(cx);
     });
 }
 
@@ -1136,4 +1137,171 @@ fn new_window_opens_an_empty_repository_window(cx: &mut TestAppContext) {
     cx.update(crate::app_menu::new_window);
     cx.run_until_parked();
     assert_eq!(cx.update(|cx| cx.windows().len()), before + 1);
+}
+
+#[gpui_kit::test]
+fn github_links_of_a_commit_its_files_and_lines(cx: &mut TestAppContext) {
+    use crate::repo_view::links::LinkSpot;
+    use gpui_kit::component::diff::{DiffLineRange, DiffSide};
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let gh = mugetsu_forge::GithubRepo {
+        owner: "o".into(),
+        name: "r".into(),
+    };
+    cx.update(|cx| view.update(cx, |v, cx| v.set_github(gh, cx)));
+    // HEAD is the merge; pick c2, which changes a.txt.
+    let (c2, c1) = cx.read(|cx| {
+        let data = view.read(cx).data().clone();
+        let c2 = data
+            .history
+            .commits
+            .iter()
+            .find(|c| c.summary == "c2")
+            .unwrap()
+            .clone();
+        (c2.id.to_string(), c2.parents[0].to_string())
+    });
+    let id = gix::ObjectId::from_hex(c2.as_bytes()).unwrap();
+    cx.update(|cx| view.update(cx, |v, cx| v.select_commit(id, true, cx)));
+    settle(cx, &view);
+    let clipboard =
+        |cx: &TestAppContext| cx.read(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    let feedback = |cx: &TestAppContext| cx.read(|cx| view.read(cx).link_feedback());
+
+    ui_step(cx, handle, &|window, cx| {
+        window.click("copy-commit-link", cx)
+    });
+    assert_eq!(
+        clipboard(cx),
+        Some(format!("https://github.com/o/r/commit/{c2}"))
+    );
+    assert_eq!(feedback(cx), Some(LinkSpot::Commit));
+
+    ui_step(cx, handle, &|window, cx| {
+        window.click("copy-file-link-a.txt", cx)
+    });
+    assert_eq!(
+        clipboard(cx),
+        Some(format!("https://github.com/o/r/blob/{c2}/a.txt"))
+    );
+    assert_eq!(feedback(cx), Some(LinkSpot::File("a.txt".into())));
+
+    // Removed lines link to the parent's file.
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_line_selection(DiffLineRange::new("a.txt", DiffSide::Original, 1, 1), cx)
+        })
+    });
+    ui_step(cx, handle, &|window, cx| {
+        window.click("copy-lines-link", cx)
+    });
+    assert_eq!(
+        clipboard(cx),
+        Some(format!("https://github.com/o/r/blob/{c1}/a.txt#L1"))
+    );
+    assert_eq!(feedback(cx), Some(LinkSpot::Lines));
+
+    // ⌥⌘C copies the selected lines too.
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_line_selection(DiffLineRange::new("a.txt", DiffSide::Modified, 2, 1), cx)
+        })
+    });
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    ui_step(&mut vcx, handle, &|window, cx| {
+        view.read(cx).history_focus_handle().focus(window, cx)
+    });
+    vcx.simulate_keystrokes("secondary-alt-c");
+    vcx.run_until_parked();
+    assert_eq!(
+        clipboard(cx),
+        Some(format!("https://github.com/o/r/blob/{c2}/a.txt#L1-L2"))
+    );
+}
+
+#[gpui_kit::test]
+fn command_k_palette_runs_actions_and_switches_repositories(cx: &mut TestAppContext) {
+    init(cx);
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    fixture(a.path());
+    fixture(b.path());
+    let session = session_of(vec![a.path().to_path_buf(), b.path().to_path_buf()], 0);
+    let (handle, ws) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| Workspace::new(session, false, window, cx))
+        })
+        .unwrap()
+    });
+    let palette = |cx: &TestAppContext| cx.read(|cx| ws.read(cx).palette());
+    let view_a = cx.read(|cx| ws.read(cx).tabs()[0].clone());
+    settle(cx, &view_a);
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.run_until_parked();
+
+    // ⌘K opens it over the tab, grouped, with the repositories and branches.
+    vcx.simulate_keystrokes("secondary-k");
+    vcx.run_until_parked();
+    let p = palette(cx).expect("⌘K opens the palette");
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("command-palette").is_some());
+        assert!(window.try_find("palette-fetch").is_some());
+    })
+    .unwrap();
+    let ids = cx.read(|cx| p.read(cx).result_ids());
+    let b_name = b.path().file_name().unwrap().to_string_lossy().to_string();
+    assert!(
+        ids.iter()
+            .any(|id| id.starts_with("repo:") && id.ends_with(&b_name))
+    );
+    assert!(ids.iter().any(|id| *id == "branch:topic"));
+
+    // Typing ranks the matches; arrows move, enter runs: Stats on the tab.
+    handle
+        .update(cx, |_, window, cx| {
+            p.update(cx, |p, cx| p.set_query("stats", window, cx))
+        })
+        .unwrap();
+    assert_eq!(
+        cx.read(|cx| p.read(cx).selected_id()),
+        Some("show-stats".into())
+    );
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("down up enter");
+    vcx.run_until_parked();
+    assert!(cx.read(|cx| p.read(cx).is_closing()));
+    assert_eq!(cx.read(|cx| view_a.read(cx).mode()), Mode::Stats);
+    cx.executor().advance_clock(Duration::from_millis(400));
+    cx.run_until_parked();
+    assert!(palette(cx).is_none(), "dropped after its exit");
+
+    // The other repository, by name.
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("secondary-k");
+    vcx.run_until_parked();
+    let p = palette(cx).unwrap();
+    handle
+        .update(cx, |_, window, cx| {
+            p.update(cx, |p, cx| p.set_query(&b_name, window, cx))
+        })
+        .unwrap();
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("enter");
+    vcx.run_until_parked();
+    assert_eq!(cx.read(|cx| ws.read(cx).active_index()), 1);
+
+    // Escape closes without running anything.
+    cx.executor().advance_clock(Duration::from_millis(400));
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("secondary-k");
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(400));
+    cx.run_until_parked();
+    assert!(palette(cx).is_none());
+    assert_eq!(cx.read(|cx| ws.read(cx).active_index()), 1);
 }
