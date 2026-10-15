@@ -19,8 +19,8 @@ The [site](https://ziracmo.github.io/mugetsu/releases.html) reads the GitHub rel
 do there.
 
 Pull requests touching `scripts/`, `packaging/`, `releases/` or the workflow build the dmg and installer
-without publishing, so packaging breakage shows up before a release. Every push to `main` also uploads a
-zipped `Mugetsu-macos` app as a CI artifact.
+without publishing, so packaging breakage shows up before a release. Running the CI workflow by hand also uploads
+a zipped `Mugetsu-macos` app as a CI artifact.
 
 ## Signing (not done yet)
 
