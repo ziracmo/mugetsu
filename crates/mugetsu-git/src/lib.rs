@@ -10,6 +10,7 @@ pub mod graph;
 pub mod log;
 pub mod ops;
 pub mod refs;
+pub mod restack;
 pub mod stats;
 pub mod status;
 
@@ -21,6 +22,7 @@ pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout};
 pub use log::{Commit, CommitOrder, History};
 pub use ops::{LocalChanges, PushOptions, ResetMode};
 pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};
+pub use restack::{Restack, StackLink};
 pub use stats::{FileHeat, Person, RepoStats};
 pub use status::{Change, FileStatus, Status};
 

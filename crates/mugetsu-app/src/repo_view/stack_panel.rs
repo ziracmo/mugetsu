@@ -216,7 +216,8 @@ impl RepoView {
                     .pt_5()
                     .pb_8()
                     .gap_5()
-                    .child(self.stack_header(&stack, ready, seq))
+                    .child(self.stack_header(&stack, ready, seq, cx))
+                    .children(self.restack_of(&stack).map(|r| self.restack_card(r)))
                     .child(next_step(&stack, seq))
                     .child(self.stack_feed(&stack, blocker, seq, cx)),
             )
@@ -225,7 +226,13 @@ impl RepoView {
 
     /// Title, a segmented progress bar (one segment per PR, bottom first)
     /// and how many PRs sit in each state.
-    fn stack_header(&self, stack: &[PullRequest], ready: usize, seq: usize) -> AnyElement {
+    fn stack_header(
+        &self,
+        stack: &[PullRequest],
+        ready: usize,
+        seq: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let total = stack.len();
         let base = stack.first().map(|p| p.base.clone()).unwrap_or_default();
         let top = stack.last().map(|p| p.head.clone()).unwrap_or_default();
@@ -375,7 +382,12 @@ impl RepoView {
                     ),
             )
             .child(h_flex().w_full().gap_1().children(segments))
-            .child(h_flex().flex_wrap().gap_1p5().children(pills))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(h_flex().flex_1().flex_wrap().gap_1p5().children(pills))
+                    .child(self.restack_button(stack, cx)),
+            )
             .into_any_element()
     }
 

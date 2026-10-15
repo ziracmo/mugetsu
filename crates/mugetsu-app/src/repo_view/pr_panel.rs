@@ -255,6 +255,7 @@ impl RepoView {
         let active = self.mode == super::Mode::Pr
             && self.pr_page.as_ref().is_some_and(|p| p.number == pr.number);
         let show_head = pr.head.clone();
+        let pr_head = pr.head.clone();
         let review_pr = pr.clone();
         let root = self.repo.root().to_path_buf();
         let view = cx.entity().downgrade();
@@ -370,6 +371,21 @@ impl RepoView {
                                 }
                             }),
                     );
+                let m = match stack {
+                    Some(_) => {
+                        let (view, head) = (view.clone(), pr_head.clone());
+                        m.item(
+                            PopupMenuItem::new(tr("Restacker la stack…", "Restack the stack…"))
+                                .icon(Icon::new(Lucide::RefreshCw))
+                                .on_click(move |_, window, cx| {
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.confirm_restack(head.clone(), window, cx)
+                                    });
+                                }),
+                        )
+                    }
+                    None => m,
+                };
                 match checkout_ref.clone().filter(|_| can_checkout) {
                     Some(r) => {
                         let view = view.clone();
