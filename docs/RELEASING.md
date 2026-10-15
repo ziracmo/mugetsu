@@ -22,15 +22,35 @@ Pull requests touching `scripts/`, `packaging/`, `releases/` or the workflow bui
 without publishing, so packaging breakage shows up before a release. Every push to `main` also uploads a
 zipped `Mugetsu-macos` app as a CI artifact.
 
-## Signing (not done yet)
+## Signing, notarization and auto-update
 
-Builds are unsigned, hence the right-click › Open / SmartScreen steps in the README.
+The macOS job does each of these only when its secrets exist, so the workflow works with none of them
+(ad-hoc signed app, no updater, Gatekeeper workaround in the notes).
 
-- **macOS**: an Apple Developer Program membership ($99/year) gives a *Developer ID Application*
-  certificate. The workflow would import it (secrets: the `.p12` and its password), sign with
-  `codesign --options runtime --timestamp`, notarize with `xcrun notarytool` (Apple ID app-specific password
-  or App Store Connect API key) and `xcrun stapler staple` the dmg. Gatekeeper then opens the app with no
-  warning.
-- **Windows**: an OV/EV code-signing certificate (or Azure Trusted Signing) and `signtool sign` on
-  `Mugetsu.exe` and the installer. SmartScreen warnings fade as signed builds gain reputation (immediately
-  with EV).
+| Secret / variable | What |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` (secret) | *Developer ID Application* certificate + private key exported as `.p12`, base64 (`base64 -i cert.p12 \| pbcopy`) |
+| `MACOS_CERTIFICATE_PASSWORD` (secret) | the `.p12` export password |
+| `APPLE_ID` (secret) | Apple ID email of the developer account |
+| `APPLE_APP_PASSWORD` (secret) | app-specific password for it (account.apple.com › Sign-In and Security) |
+| `APPLE_TEAM_ID` (secret) | 10-character Team ID (developer.apple.com › Membership) |
+| `SPARKLE_ED_PRIVATE_KEY` (secret) | Sparkle EdDSA private key (below) |
+| `SPARKLE_PUBLIC_ED_KEY` (variable) | the matching public key |
+
+- **Signing**: with the certificate, `bundle-macos.sh` signs Sparkle and the app with the hardened runtime
+  and a timestamp, `dmg-macos.sh` signs the dmg.
+- **Notarization**: with the Apple ID secrets too, `xcrun notarytool` notarizes the dmg and `stapler` staples
+  it. The release notes then drop the right-click › Open steps (`SIGNED=true` in `release-notes.py body`).
+- **Auto-update** (`src/updater.rs`): with the Sparkle key pair, the app embeds Sparkle
+  (`SPARKLE_VERSION` in `bundle-macos.sh`) and reads
+  `https://github.com/ziracmo/mugetsu/releases/latest/download/appcast.xml`. The workflow signs the dmg
+  with `sign_update` and attaches `appcast.xml` to the release, so every published (non-pre)release is
+  offered to installed apps; *Mugetsu › Check for Updates…* checks by hand. Builds from before the key
+  existed have no updater: those users download once by hand. Keys come from Sparkle's own tool:
+  `bin/generate_keys` in the [Sparkle release](https://github.com/sparkle-project/Sparkle/releases)
+  stores the private key in the login Keychain and prints the public key; `generate_keys -x key.txt`
+  exports the private one for the secret. Losing it means shipping one more manual-download release with
+  a new key.
+- **Windows**: not signed. New OV/EV certificates live on hardware tokens, which a hosted runner can't use;
+  Azure Trusted Signing would be the route (`azure/trusted-signing-action` on `Mugetsu.exe` and the
+  installer) once the account is eligible. SmartScreen warns until then.
