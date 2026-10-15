@@ -20,6 +20,13 @@ pub fn lookup(repo: &GithubRepo, branch: &str) -> Result<Option<PullRequest>, St
         .map_err(|e| e.to_string())
 }
 
+/// Blocking: description and size of one PR.
+pub fn details(repo: &GithubRepo, number: u64) -> Result<mugetsu_forge::PrDetails, String> {
+    github()
+        .pull_details(repo, number)
+        .map_err(|e| e.to_string())
+}
+
 /// Blocking: recent PRs of the repository keyed by head branch.
 /// Recent PRs of a repository and who "me" is on GitHub.
 pub struct RecentPrs {

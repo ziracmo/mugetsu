@@ -1070,9 +1070,27 @@ fn clicking_a_stack_shows_its_progress(cx: &mut TestAppContext) {
         assert!(window.try_find("stack-pr-1").is_some());
         assert!(window.try_find("stack-pr-2").is_some());
         assert!(window.try_find("stack-next").is_some());
+        // Clicking a card again and again: a hint about ⌃-click.
+        for _ in 0..3 {
+            window.click("stack-pr-1", cx);
+        }
     })
     .unwrap();
-    cx.read(|cx| assert_eq!(view.read(cx).mode(), crate::repo_view::Mode::Stack));
+    cx.read(|cx| {
+        assert_eq!(view.read(cx).mode(), crate::repo_view::Mode::Stack);
+        assert_eq!(view.read(cx).rage_hints(), 1);
+    });
+
+    // A PR from the PRs tab opens in the main view.
+    cx.update(|cx| view.update(cx, |v, cx| v.open_pr(2, cx)));
+    settle(cx, &view);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("pr-view").is_some());
+        assert!(window.try_find("pr-ci").is_some());
+    })
+    .unwrap();
+    cx.read(|cx| assert_eq!(view.read(cx).mode(), crate::repo_view::Mode::Pr));
 }
 
 #[gpui_kit::test]

@@ -469,7 +469,11 @@ impl RepoView {
                     )
                     .when(mode == Mode::Stack, |s| {
                         s.child(tab("mode-stack", "Stack".into(), "", true))
-                    }),
+                    })
+                    .when_some(
+                        self.pr_page.as_ref().filter(|_| mode == Mode::Pr),
+                        |s, page| s.child(tab("mode-pr", format!("PR #{}", page.number), "", true)),
+                    ),
             )
             .when(mode == Mode::History, |s| {
                 let compact = self.compact;

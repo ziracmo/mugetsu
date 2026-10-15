@@ -100,6 +100,7 @@ impl RepoView {
             return;
         };
         self.sidebar_tab = SidebarTab::Repo;
+        self.set_mode(super::Mode::History, cx);
         if self.data.refs.branches.iter().any(|b| b.name == head) {
             self.selected_ref = Some(SharedString::from(format!("branch:{head}")));
         }
@@ -250,6 +251,9 @@ impl RepoView {
         let open_url = pr.url.clone();
         let click_url = pr.url.clone();
         let head = pr.head.clone();
+        let number = pr.number;
+        let active = self.mode == super::Mode::Pr
+            && self.pr_page.as_ref().is_some_and(|p| p.number == pr.number);
         let show_head = pr.head.clone();
         let review_pr = pr.clone();
         let root = self.repo.root().to_path_buf();
@@ -269,7 +273,8 @@ impl RepoView {
             .rounded_md()
             .text_sm()
             .cursor_pointer()
-            .hover(|s| s.bg(theme::raised()))
+            .when(active, |s| s.bg(theme::alpha(theme::accent(), 0.2)))
+            .when(!active, |s| s.hover(|s| s.bg(theme::raised())))
             .child(Icon::new(icon).xsmall().text_color(pr_color(pr.state)))
             .child(
                 div()
@@ -316,27 +321,20 @@ impl RepoView {
                     cx.notify();
                 }
             }))
-            .on_click(
-                cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
-                    // ⌃/⌘-click: straight to GitHub.
-                    let m = ev.modifiers();
-                    if m.control || m.platform {
-                        cx.open_url(&click_url);
-                        return;
-                    }
-                    // Select the branch tip (local, else remote), double-click checks out.
-                    let remote_name = remote.as_ref().map(|r| format!("{r}/{head}"));
-                    if let Some(tip) = this.pr_tip(&head) {
-                        this.select_commit(tip, true, cx);
-                    }
-                    if ev.click_count() >= 2
-                        && can_checkout
-                        && let Some(r) = remote_name
-                    {
-                        this.request_checkout(r, true, window, cx);
-                    }
-                }),
-            )
+            .on_click(cx.listener(move |this, ev: &gpui_kit::ClickEvent, _, cx| {
+                // ⌃/⌘-click: straight to GitHub.
+                let m = ev.modifiers();
+                if m.control || m.platform {
+                    cx.open_url(&click_url);
+                    return;
+                }
+                // Click: the PR in the main view; double-click: its branch, shimmering.
+                if ev.click_count() >= 2 {
+                    this.show_pr_branch(&head, cx);
+                } else {
+                    this.open_pr(number, cx);
+                }
+            }))
             .context_menu(move |m, _, _| {
                 let url = open_url.clone();
                 let (show_view, show_head) = (view.clone(), show_head.clone());

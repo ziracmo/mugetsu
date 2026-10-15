@@ -66,8 +66,21 @@ pub fn trunk(refs: &RefsSnapshot) -> Option<(String, ObjectId)> {
 
 /// History rows reachable from `tip`, newest first, not crossing `stop`.
 fn walk(history: &History, tip: ObjectId, stop: &HashSet<usize>, cap: usize) -> Vec<usize> {
+    match history.index.get(&tip) {
+        Some(&row) => walk_rows(history, row, stop, cap),
+        None => Vec::new(),
+    }
+}
+
+/// [`walk`] from a history row.
+pub(super) fn walk_rows(
+    history: &History,
+    start: usize,
+    stop: &HashSet<usize>,
+    cap: usize,
+) -> Vec<usize> {
     let mut seen = HashSet::new();
-    let mut stack: Vec<usize> = history.index.get(&tip).copied().into_iter().collect();
+    let mut stack = vec![start];
     let mut out = Vec::new();
     while let Some(row) = stack.pop() {
         if stop.contains(&row) || !seen.insert(row) {

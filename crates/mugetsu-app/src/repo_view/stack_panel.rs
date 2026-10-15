@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, BoxShadow, Context, Hsla, InteractiveElement as _,
@@ -135,6 +136,40 @@ impl RepoView {
         self.celebrate_seq += 1;
         self.stack_seq = self.celebrate_seq;
         self.set_mode(super::Mode::Stack, cx);
+    }
+
+    /// Plain clicks on a stack card do nothing; several in a row mean the
+    /// user expects the PR to open, so say how.
+    fn note_stack_click(
+        &mut self,
+        number: u64,
+        window: &mut gpui_kit::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let now = std::time::Instant::now();
+        let (last, at, count) = self.rage;
+        let count = if last == number && now.duration_since(at).as_millis() < 900 {
+            count + 1
+        } else {
+            1
+        };
+        self.rage = (number, now, count);
+        if count == 3 {
+            self.rage_hints += 1;
+            gpui_kit::component::WindowExt::push_notification(
+                window,
+                gpui_kit::component::notification::Notification::info(tr(
+                    "Astuce : ⌃ / ⌘ + clic ouvre la PR sur GitHub.",
+                    "Tip: Ctrl / ⌘ + click opens the PR on GitHub.",
+                )),
+                cx,
+            );
+        }
+    }
+
+    #[cfg(test)]
+    pub fn rage_hints(&self) -> usize {
+        self.rage_hints
     }
 
     fn focused_stack(&self) -> Option<Vec<PullRequest>> {
@@ -366,7 +401,10 @@ impl RepoView {
                 let last = pos == 0;
                 let url = pr.url.clone();
                 let head = pr.head.clone();
+                let number = pr.number;
                 let view = cx.entity().downgrade();
+                let (details_view, branch_view) = (view.clone(), view.clone());
+                let branch_head = head.clone();
                 let author = pr.author.clone();
                 let avatar = crate::avatars::github(&author, 18., cx);
                 let node = div()
@@ -467,11 +505,12 @@ impl RepoView {
                     })
                     .cursor_pointer()
                     .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.05)))
-                    .on_click(move |ev, _, cx| {
+                    .on_click(move |ev, window, cx| {
                         if ev.modifiers().platform || ev.modifiers().control {
                             cx.open_url(&url);
                         } else {
-                            let _ = view.update(cx, |this, cx| this.show_pr_branch(&head, cx));
+                            let _ = view
+                                .update(cx, |this, cx| this.note_stack_click(number, window, cx));
                         }
                     })
                     .child(
@@ -520,7 +559,36 @@ impl RepoView {
                                     .child(format!("{} → {}", pr.head, pr.base)),
                             ),
                     )
-                    .child(h_flex().flex_wrap().gap_1().children(chips))
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(h_flex().flex_1().flex_wrap().gap_1().children(chips))
+                            .child(
+                                Button::new(("stack-details", number as usize))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(Lucide::PanelTop))
+                                    .label(tr("Détails", "Details"))
+                                    .on_click(move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        let _ = details_view
+                                            .update(cx, |this, cx| this.open_pr(number, cx));
+                                    }),
+                            )
+                            .child(
+                                Button::new(("stack-branch", number as usize))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(Lucide::GitBranch))
+                                    .label(tr("Branche", "Branch"))
+                                    .on_click(move |_, _, cx| {
+                                        cx.stop_propagation();
+                                        let _ = branch_view.update(cx, |this, cx| {
+                                            this.show_pr_branch(&branch_head, cx)
+                                        });
+                                    }),
+                            ),
+                    )
                     .when(r != Readiness::Ready, |c| {
                         c.child(
                             h_flex()

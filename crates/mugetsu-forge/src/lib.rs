@@ -66,6 +66,22 @@ pub struct PullRequest {
     pub merged_at: Option<String>,
 }
 
+/// What the PR list doesn't carry: description, size, labels.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PrDetails {
+    /// Markdown.
+    pub body: String,
+    pub additions: u64,
+    pub deletions: u64,
+    pub changed_files: u64,
+    pub commits: u64,
+    /// Conversation and review comments.
+    pub comments: u64,
+    pub labels: Vec<String>,
+    /// ISO 8601.
+    pub created_at: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckState {
     Passing,
@@ -403,6 +419,50 @@ impl Github {
             .body_mut()
             .read_json()?;
         Ok(parse_statuses(&json))
+    }
+
+    /// Description and size of PR `number`.
+    pub fn pull_details(&self, repo: &GithubRepo, number: u64) -> anyhow::Result<PrDetails> {
+        #[derive(Deserialize)]
+        struct Label {
+            name: String,
+        }
+        #[derive(Deserialize)]
+        struct Api {
+            #[serde(default)]
+            body: Option<String>,
+            #[serde(default)]
+            additions: u64,
+            #[serde(default)]
+            deletions: u64,
+            #[serde(default)]
+            changed_files: u64,
+            #[serde(default)]
+            commits: u64,
+            #[serde(default)]
+            comments: u64,
+            #[serde(default)]
+            review_comments: u64,
+            #[serde(default)]
+            labels: Vec<Label>,
+            #[serde(default)]
+            created_at: String,
+        }
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/pulls/{number}",
+            repo.owner, repo.name
+        );
+        let a: Api = self.get_json(&url)?;
+        Ok(PrDetails {
+            body: a.body.unwrap_or_default(),
+            additions: a.additions,
+            deletions: a.deletions,
+            changed_files: a.changed_files,
+            commits: a.commits,
+            comments: a.comments + a.review_comments,
+            labels: a.labels.into_iter().map(|l| l.name).collect(),
+            created_at: a.created_at,
+        })
     }
 
     /// PR whose head is `branch` in `repo` (same-repo branches; forks are matched by owner).

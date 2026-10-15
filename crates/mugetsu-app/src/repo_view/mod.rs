@@ -10,6 +10,7 @@ mod menus;
 mod particles;
 mod pr_panel;
 mod pr_tip;
+mod pr_view;
 mod search;
 mod shimmer;
 mod sidebar;
@@ -111,6 +112,8 @@ pub enum Mode {
     Stats,
     /// A PR stack's progress (see `stack_focus`).
     Stack,
+    /// One pull request (see `pr_page`).
+    Pr,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,6 +197,13 @@ pub struct RepoView {
 
     _load: Task<()>,
     _detail: Task<()>,
+    /// The PR shown by `Mode::Pr`, and its diff.
+    pr_page: Option<pr_view::PrPage>,
+    /// Fast clicks on a stack card: (PR, last click, count).
+    rage: (u64, Instant, u32),
+    rage_hints: usize,
+    pr_diff: Entity<DiffState>,
+    _pr_task: Task<()>,
     _fetch: Task<()>,
     _op: Task<()>,
     _search: Subscription,
@@ -323,6 +333,11 @@ impl RepoView {
             manual_fetch: false,
             _load: Task::ready(()),
             _detail: Task::ready(()),
+            pr_page: None,
+            rage: (0, Instant::now(), 0),
+            rage_hints: 0,
+            pr_diff: cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Unified)),
+            _pr_task: Task::ready(()),
             _fetch: Task::ready(()),
             _op: Task::ready(()),
             _search,
@@ -1238,6 +1253,7 @@ impl Render for RepoView {
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
                 Mode::Stats => self.render_stats(cx),
                 Mode::Stack => self.render_stack(cx),
+                Mode::Pr => self.render_pr_page(cx),
             };
             // The content floats as a frosted card over the window glass.
             let card = div()
