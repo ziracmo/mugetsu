@@ -5,7 +5,8 @@
 Releases are fully automated by `.github/workflows/release.yml`; nothing is uploaded by hand.
 
 1. Bump `version` in `Cargo.toml` (`[workspace.package]`) and in `crates/mugetsu-app/Cargo.toml` and
-   `crates/mugetsu-git/Cargo.toml` (they set it themselves), then `cargo check` so `Cargo.lock` follows.
+   `crates/mugetsu-git/Cargo.toml` (they set it themselves), plus the `version = "…"` of the `mugetsu-forge` and
+   `mugetsu-git` path dependencies in `crates/mugetsu-app/Cargo.toml`, then `cargo check` so `Cargo.lock` follows.
 2. Write `releases/vX.Y.Z.json` (format in `releases/README.md`): `title`, `summary`, then `features`,
    `improvements`, `fixes`, each item `{id, title, body, scene?, highlight?}`. Look at the commits since the
    previous tag to fill it. Only real new capabilities go in `features`. `scene` picks the animation on the

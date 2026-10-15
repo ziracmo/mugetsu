@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "date": "2026-10-15",
+  "title": "Command palette, GitLab and Bitbucket, conflicts and interactive rebase",
+  "summary": "Mugetsu now speaks GitLab and Bitbucket as well as GitHub, resolves conflicts and rewrites history visually, restacks PR stacks, notifies you when CI or reviews move, and puts every action one ⌘K away.",
+  "features": [
+    { "id": "command-palette", "title": "⌘K command palette", "body": "Every action, branch and repository one keystroke away, plus Copy GitHub link for a commit, a file or a range of lines.", "scene": "search", "highlight": true },
+    { "id": "gitlab-bitbucket", "title": "GitLab and Bitbucket", "body": "The forge is detected from the remote: merge requests and PRs, CI and reviews work the same as on GitHub. Tokens go in Settings › Accounts.", "scene": "pr", "highlight": true },
+    { "id": "conflict-resolution", "title": "Built-in conflict resolution", "body": "A 3-pane view (ours, result, theirs) to resolve merge and rebase conflicts without leaving the app.", "scene": "diff", "highlight": true },
+    { "id": "interactive-rebase", "title": "Visual interactive rebase", "body": "Drag commits to reorder them, then pick, reword, squash, fixup or drop each one.", "scene": "graph" },
+    { "id": "restack", "title": "Restack a PR stack", "body": "Rebase a whole stack of dependent PRs from the app in one go.", "scene": "pr" },
+    { "id": "notifications", "title": "PR notifications", "body": "Get notified when CI finishes, a review is requested or a PR is merged. Each one is off by default, in Settings › Notifications.", "scene": "pr" },
+    { "id": "pull-requests", "title": "PR view and stack view", "body": "A PR opens in the main pane; double-click it to show its branch. The stack view shows a stack's progress, what blocks it and a live PR feed.", "scene": "pr" },
+    { "id": "compact-history", "title": "Compact history", "body": "One row per branch with its own commit count, commits on hover (⇧⌘K).", "scene": "graph" },
+    { "id": "new-window", "title": "New Window", "body": "⇧⌘N opens another repository window; the app quits with the last one.", "scene": "sidebar" },
+    { "id": "fetch-all", "title": "Fetch everything with ⌃R", "body": "⌃R fetches every open repository; ⌃⇧R reloads the app and replays the opening eclipse.", "scene": "fetch" },
+    { "id": "ai-review", "title": "AI review", "body": "Ask for an AI review from a PR's menu." }
+  ],
+  "improvements": [
+    { "id": "opening", "title": "Opening eclipse and welcome screen", "body": "A new first launch animation and a welcome screen with recent repositories and shortcuts.", "scene": "eclipse" },
+    { "id": "remote-actions", "title": "Livelier Fetch, Pull and Push", "body": "A liquid wave while running, a ring and sparks on success, a shake on failure.", "scene": "fetch" },
+    { "id": "pr-hover", "title": "PR hover card", "body": "Shows instantly with a skeleton, then the author's avatar and details." },
+    { "id": "settings", "title": "Settings in sections", "body": "Settings are grouped in sections, with committer name and email." },
+    { "id": "jump-to-head", "title": "Jump to the current branch", "body": "F scrolls to the current branch's commit and makes it shimmer.", "scene": "graph" },
+    { "id": "about", "title": "About Mugetsu", "body": "An About window in the app menu with the version and build commit." }
+  ],
+  "fixes": []
+}
