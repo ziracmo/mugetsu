@@ -1495,12 +1495,12 @@ impl Render for PopupMenu {
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::dismiss))
             .on_mouse_down_out(cx.listener(Self::on_mouse_down_out))
-            // Mugetsu: a 1px gradient edge (accent glow fading out) around an
-            // opaque surface, instead of the flat hairline ring.
+            // Mugetsu: a 1px gradient edge (light grey fading to dark grey)
+            // around an opaque surface, instead of the flat hairline ring.
             .bg(gpui::linear_gradient(
-                160.,
-                gpui::linear_color_stop(cx.theme().primary.alpha(0.6), 0.),
-                gpui::linear_color_stop(gpui::white().alpha(0.07), 1.),
+                180.,
+                gpui::linear_color_stop(gpui::hsla(0., 0., 0.62, 1.), 0.),
+                gpui::linear_color_stop(gpui::hsla(0., 0., 0.2, 1.), 1.),
             ))
             .p(px(1.))
             .rounded(cx.theme().radius + px(1.))
