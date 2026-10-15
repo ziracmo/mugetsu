@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use mugetsu_forge::{Github, GithubRepo, PrState, PullRequest};
+use mugetsu_forge::{Github, GithubRepo, PullRequest};
 
 const TTL: Duration = Duration::from_secs(120);
 
@@ -21,8 +21,15 @@ pub fn lookup(repo: &GithubRepo, branch: &str) -> Result<Option<PullRequest>, St
 }
 
 /// Blocking: recent PRs of the repository keyed by head branch.
+/// With a token, open PRs also get their CI / review state.
 pub fn recent(repo: &GithubRepo) -> Result<HashMap<String, PullRequest>, String> {
-    github().recent_pulls(repo).map_err(|e| e.to_string())
+    let mut prs = github().recent_pulls(repo).map_err(|e| e.to_string())?;
+    if let Ok(statuses) = github().pr_statuses(repo) {
+        for pr in prs.values_mut() {
+            pr.status = statuses.get(&pr.number).cloned();
+        }
+    }
+    Ok(prs)
 }
 
 #[derive(Clone, Debug)]
@@ -81,15 +88,6 @@ pub fn forge_branch(name: &str, upstream: Option<&str>, is_remote: bool) -> Stri
     match source.and_then(|s| s.split_once('/')) {
         Some((_, branch)) => branch.to_string(),
         None => name.to_string(),
-    }
-}
-
-pub fn state_label(state: PrState) -> &'static str {
-    match state {
-        PrState::Open => "open",
-        PrState::Draft => "draft",
-        PrState::Merged => "merged",
-        PrState::Closed => "closed",
     }
 }
 

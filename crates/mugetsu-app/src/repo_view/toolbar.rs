@@ -1,15 +1,16 @@
 use std::time::Duration;
 
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{Disableable as _, Icon, Sizable as _, h_flex};
+use gpui_kit::component::{Disableable as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, Context, InteractiveElement as _, IntoElement,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, div,
     prelude::FluentBuilder as _, px,
 };
-use mugetsu_forge::PrState;
+use mugetsu_forge::{CheckState, PrState, PullRequest, ReviewDecision};
 
 use super::{Mode, RepoView};
 use crate::i18n::tr;
@@ -25,6 +26,130 @@ pub fn pr_color(state: PrState) -> gpui_kit::Hsla {
     }
 }
 
+fn check_look(checks: CheckState) -> (Lucide, gpui_kit::Hsla) {
+    match checks {
+        CheckState::Passing => (Lucide::CircleCheck, theme::lime()),
+        CheckState::Failing => (Lucide::CircleX, theme::red()),
+        CheckState::Pending => (Lucide::CircleDashed, theme::amber()),
+    }
+}
+
+/// Hover card of a PR: title, state, CI, reviews, unresolved conversations.
+fn pr_card(pr: &PullRequest) -> AnyElement {
+    let line = |icon: Lucide, color: gpui_kit::Hsla, text: String| {
+        h_flex()
+            .gap_1p5()
+            .child(Icon::new(icon).xsmall().text_color(color))
+            .child(text)
+    };
+    let state = match pr.state {
+        PrState::Open => tr("Ouverte", "Open"),
+        PrState::Draft => tr("Brouillon", "Draft"),
+        PrState::Merged => tr("Mergée", "Merged"),
+        PrState::Closed => tr("Fermée", "Closed"),
+    };
+    let mut card = v_flex()
+        .gap_1()
+        .max_w(px(360.))
+        .text_xs()
+        .child(
+            div()
+                .text_sm()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(format!("#{} {}", pr.number, pr.title)),
+        )
+        .child(line(
+            Lucide::GitPullRequest,
+            pr_color(pr.state),
+            state.into(),
+        ));
+    if let Some(s) = &pr.status {
+        card = card.child(match s.checks {
+            Some(CheckState::Failing) => {
+                let (icon, color) = check_look(CheckState::Failing);
+                line(
+                    icon,
+                    color,
+                    trf!("CI en échec : {}", "CI failing: {}", s.failing.join(", ")),
+                )
+            }
+            Some(CheckState::Pending) => {
+                let (icon, color) = check_look(CheckState::Pending);
+                line(
+                    icon,
+                    color,
+                    trf!(
+                        "CI en cours ({} en attente, {} ok)",
+                        "CI running ({} pending, {} passed)",
+                        s.pending,
+                        s.passed
+                    ),
+                )
+            }
+            Some(CheckState::Passing) => {
+                let (icon, color) = check_look(CheckState::Passing);
+                line(
+                    icon,
+                    color,
+                    trf!("CI OK ({} checks)", "CI passing ({} checks)", s.passed),
+                )
+            }
+            None => line(
+                Lucide::CircleDashed,
+                theme::muted(),
+                tr("Pas de CI", "No checks").into(),
+            ),
+        });
+        if let Some(review) = s.review {
+            let (icon, color, text) = match review {
+                ReviewDecision::Approved => (
+                    Lucide::UserCheck,
+                    theme::lime(),
+                    tr("Approuvée", "Approved"),
+                ),
+                ReviewDecision::ChangesRequested => (
+                    Lucide::CircleAlert,
+                    theme::red(),
+                    tr("Changements demandés", "Changes requested"),
+                ),
+                ReviewDecision::ReviewRequired => (
+                    Lucide::Clock,
+                    theme::muted(),
+                    tr("Review en attente", "Review required"),
+                ),
+            };
+            card = card.child(line(icon, color, text.into()));
+        }
+        card = card.child(if s.unresolved > 0 {
+            line(
+                Lucide::MessageSquare,
+                theme::amber(),
+                trf!(
+                    "{} commentaire(s) à résoudre",
+                    "{} unresolved conversation(s)",
+                    s.unresolved
+                ),
+            )
+        } else {
+            line(
+                Lucide::MessageSquare,
+                theme::muted(),
+                tr(
+                    "Aucun commentaire à résoudre",
+                    "No unresolved conversations",
+                )
+                .into(),
+            )
+        });
+    } else if matches!(pr.state, PrState::Open | PrState::Draft) {
+        card = card.child(div().text_color(theme::muted()).child(tr(
+            "Statut CI indisponible (token GitHub requis)",
+            "CI status unavailable (GitHub token needed)",
+        )));
+    }
+    card.into_any_element()
+}
+
 /// Small clickable "#123" chip opening the PR in the browser.
 pub fn pr_chip(
     id: impl Into<gpui_kit::ElementId>,
@@ -34,15 +159,12 @@ pub fn pr_chip(
         PrLookup::Found(pr) => {
             let url = pr.url.clone();
             let color = pr_color(pr.state);
-            let tip = format!(
-                "#{} {} ({})",
-                pr.number,
-                pr.title,
-                crate::pr::state_label(pr.state)
-            );
+            let status = pr.status.clone();
+            let card = pr.clone();
             Some(
                 h_flex()
                     .id(id)
+                    .test_support()
                     .flex_none()
                     .gap_1()
                     .px_1p5()
@@ -56,7 +178,26 @@ pub fn pr_chip(
                     .hover(|s| s.bg(theme::alpha(color, 0.25)))
                     .child(Icon::new(Lucide::GitPullRequest).xsmall())
                     .child(format!("#{}", pr.number))
-                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                    .when_some(status.as_ref().and_then(|s| s.checks), |s, checks| {
+                        let (icon, color) = check_look(checks);
+                        s.child(Icon::new(icon).xsmall().text_color(color))
+                    })
+                    .when_some(
+                        status.as_ref().map(|s| s.unresolved).filter(|n| *n > 0),
+                        |s, n| {
+                            s.child(
+                                h_flex()
+                                    .gap_0p5()
+                                    .text_color(theme::amber())
+                                    .child(Icon::new(Lucide::MessageSquare).xsmall())
+                                    .child(n.to_string()),
+                            )
+                        },
+                    )
+                    .tooltip(move |window, cx| {
+                        let card = card.clone();
+                        Tooltip::element(move |_, _| pr_card(&card)).build(window, cx)
+                    })
                     .on_click(move |_, _, cx| cx.open_url(&url))
                     .into_any_element(),
             )

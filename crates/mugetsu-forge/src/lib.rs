@@ -51,6 +51,116 @@ pub struct PullRequest {
     pub title: String,
     pub url: String,
     pub state: PrState,
+    /// CI and review state (open PRs, when a token allows GraphQL).
+    pub status: Option<PrStatus>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckState {
+    Passing,
+    Failing,
+    Pending,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PrStatus {
+    /// Overall CI result of the head commit; `None` without checks.
+    pub checks: Option<CheckState>,
+    pub passed: usize,
+    pub pending: usize,
+    /// Names of failing checks.
+    pub failing: Vec<String>,
+    /// Review threads not resolved yet.
+    pub unresolved: usize,
+    pub review: Option<ReviewDecision>,
+}
+
+const STATUS_QUERY: &str = r#"query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 50, states: [OPEN], orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        number
+        reviewDecision
+        reviewThreads(first: 100) { nodes { isResolved } }
+        commits(last: 1) { nodes { commit { statusCheckRollup {
+          state
+          contexts(first: 100) { nodes {
+            __typename
+            ... on CheckRun { name status conclusion }
+            ... on StatusContext { context state }
+          } }
+        } } } }
+      }
+    }
+  }
+}"#;
+
+/// PR number → status, from the GraphQL answer to [`STATUS_QUERY`].
+fn parse_statuses(json: &serde_json::Value) -> std::collections::HashMap<u64, PrStatus> {
+    let nodes = json["data"]["repository"]["pullRequests"]["nodes"].as_array();
+    let mut out = std::collections::HashMap::new();
+    for pr in nodes.into_iter().flatten() {
+        let Some(number) = pr["number"].as_u64() else {
+            continue;
+        };
+        let mut status = PrStatus {
+            unresolved: pr["reviewThreads"]["nodes"]
+                .as_array()
+                .map_or(0, |t| t.iter().filter(|t| t["isResolved"] == false).count()),
+            review: match pr["reviewDecision"].as_str() {
+                Some("APPROVED") => Some(ReviewDecision::Approved),
+                Some("CHANGES_REQUESTED") => Some(ReviewDecision::ChangesRequested),
+                Some("REVIEW_REQUIRED") => Some(ReviewDecision::ReviewRequired),
+                _ => None,
+            },
+            ..Default::default()
+        };
+        let rollup = &pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"];
+        status.checks = match rollup["state"].as_str() {
+            Some("SUCCESS") => Some(CheckState::Passing),
+            Some("FAILURE" | "ERROR") => Some(CheckState::Failing),
+            Some("PENDING" | "EXPECTED") => Some(CheckState::Pending),
+            _ => None,
+        };
+        for ctx in rollup["contexts"]["nodes"].as_array().into_iter().flatten() {
+            let (name, outcome) = match ctx["__typename"].as_str() {
+                Some("CheckRun") => (
+                    ctx["name"].as_str(),
+                    match (ctx["status"].as_str(), ctx["conclusion"].as_str()) {
+                        (Some("COMPLETED"), Some("SUCCESS" | "NEUTRAL" | "SKIPPED")) => {
+                            Some(CheckState::Passing)
+                        }
+                        (Some("COMPLETED"), _) => Some(CheckState::Failing),
+                        _ => Some(CheckState::Pending),
+                    },
+                ),
+                Some("StatusContext") => (
+                    ctx["context"].as_str(),
+                    match ctx["state"].as_str() {
+                        Some("SUCCESS") => Some(CheckState::Passing),
+                        Some("FAILURE" | "ERROR") => Some(CheckState::Failing),
+                        _ => Some(CheckState::Pending),
+                    },
+                ),
+                _ => (None, None),
+            };
+            match outcome {
+                Some(CheckState::Passing) => status.passed += 1,
+                Some(CheckState::Pending) => status.pending += 1,
+                Some(CheckState::Failing) => status.failing.push(name.unwrap_or("?").to_string()),
+                None => {}
+            }
+        }
+        out.insert(number, status);
+    }
+    out
 }
 
 #[derive(Deserialize)]
@@ -96,6 +206,7 @@ impl From<ApiPull> for PullRequest {
             title: p.title,
             url: p.html_url,
             state,
+            status: None,
         }
     }
 }
@@ -190,6 +301,28 @@ impl Github {
         Ok(by_branch(pulls, &repo.owner))
     }
 
+    /// CI / review state of the open PRs (GraphQL needs a token).
+    pub fn pr_statuses(
+        &self,
+        repo: &GithubRepo,
+    ) -> anyhow::Result<std::collections::HashMap<u64, PrStatus>> {
+        let token = self.token.as_deref().context("no GitHub token")?;
+        let body = serde_json::json!({
+            "query": STATUS_QUERY,
+            "variables": {"owner": repo.owner, "name": repo.name},
+        });
+        let json: serde_json::Value = self
+            .agent
+            .post("https://api.github.com/graphql")
+            .header("User-Agent", "mugetsu")
+            .header("Authorization", &format!("Bearer {token}"))
+            .send_json(&body)
+            .context("GitHub GraphQL request")?
+            .body_mut()
+            .read_json()?;
+        Ok(parse_statuses(&json))
+    }
+
     /// PR whose head is `branch` in `repo` (same-repo branches; forks are matched by owner).
     pub fn pull_for_branch(
         &self,
@@ -267,6 +400,7 @@ mod tests {
             title: String::new(),
             url: String::new(),
             state,
+            status: None,
         };
         let picked = pick(vec![
             pr(9, PrState::Closed),
@@ -276,6 +410,30 @@ mod tests {
         assert_eq!(picked.unwrap().number, 3);
         let picked = pick(vec![pr(2, PrState::Merged), pr(7, PrState::Closed)]);
         assert_eq!(picked.unwrap().number, 7);
+    }
+
+    #[test]
+    fn parses_ci_and_review_state() {
+        let json: serde_json::Value = serde_json::from_str(r#"{"data": {"repository": {"pullRequests": {"nodes": [
+            {"number": 7, "reviewDecision": "CHANGES_REQUESTED",
+             "reviewThreads": {"nodes": [{"isResolved": false}, {"isResolved": true}, {"isResolved": false}]},
+             "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE", "contexts": {"nodes": [
+                {"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"},
+                {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS", "conclusion": null},
+                {"__typename": "StatusContext", "context": "ci/legacy", "state": "SUCCESS"}
+             ]}}}}]}},
+            {"number": 8, "reviewDecision": null, "reviewThreads": {"nodes": []},
+             "commits": {"nodes": [{"commit": {"statusCheckRollup": null}}]}}
+        ]}}}}"#).unwrap();
+        let map = parse_statuses(&json);
+        let s = &map[&7];
+        assert_eq!(s.checks, Some(CheckState::Failing));
+        assert_eq!(s.failing, ["test"]);
+        assert_eq!((s.passed, s.pending), (2, 1));
+        assert_eq!(s.unresolved, 2);
+        assert_eq!(s.review, Some(ReviewDecision::ChangesRequested));
+        assert_eq!(map[&8], PrStatus::default());
     }
 
     #[test]
