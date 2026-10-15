@@ -13,7 +13,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, AppContext as _, Context, Hsla,
-    InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    InteractiveElement as _, IntoElement, ParentElement as _, Rgba, SharedString,
     StatefulInteractiveElement as _, Styled as _, div, linear_color_stop, linear_gradient,
     prelude::FluentBuilder as _, px, relative,
 };
@@ -96,32 +96,6 @@ pub struct StatsState {
 impl Drop for StatsState {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
-    }
-}
-
-/// Liquid fill: rises, overshoots a little, then settles with a wobble.
-fn liquid(t: f32) -> f32 {
-    if t >= 1. {
-        return 1.;
-    }
-    let wobble = 0.4 + 0.6 * (t * std::f32::consts::PI * 3.).cos();
-    1. - (1. - t).powi(3) * wobble
-}
-
-/// Accent fading to transparent, left to right (or bottom to top).
-fn fill(angle: f32, strength: f32) -> gpui_kit::Background {
-    linear_gradient(
-        angle,
-        linear_color_stop(theme::alpha(theme::accent(), strength), 0.),
-        linear_color_stop(theme::alpha(theme::accent(), 0.), 1.),
-    )
-}
-
-fn compact(n: u64) -> String {
-    match n {
-        0..1_000 => n.to_string(),
-        1_000..1_000_000 => format!("{:.1}k", n as f64 / 1e3),
-        _ => format!("{:.1}M", n as f64 / 1e6),
     }
 }
 
@@ -253,45 +227,39 @@ impl RepoView {
 
     /// The Stats view, in place of the history.
     pub(super) fn render_stats(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut body: Vec<AnyElement> = Vec::new();
         let stats = self.stats.stats.clone();
-        match (&self.stats.error, &stats) {
-            (Some(err), _) => body.push(
-                div()
-                    .p_4()
-                    .text_sm()
-                    .text_color(theme::red())
-                    .child(err.clone())
-                    .into_any_element(),
-            ),
-            (None, None) => body.push(skeleton()),
-            (None, Some(stats)) if stats.commits == 0 => body.push(
-                div()
-                    .p_4()
-                    .text_sm()
-                    .text_color(theme::muted())
-                    .child(match self.stats.period.days() {
+        let body: Vec<AnyElement> = match (&self.stats.error, &stats) {
+            (Some(err), _) => vec![empty_state(Lucide::TriangleAlert, err.clone())],
+            (None, None) => vec![skeleton()],
+            (None, Some(stats)) if stats.commits == 0 => {
+                vec![empty_state(
+                    Lucide::Inbox,
+                    match self.stats.period.days() {
                         Some(days) => trf!(
                             "Aucun commit sur {} ces {days} derniers jours.",
                             "No commits on {} in the last {days} days.",
                             stats.branch
                         ),
                         None => trf!("Aucun commit sur {}.", "No commits on {}.", stats.branch),
-                    })
-                    .into_any_element(),
-            ),
-            (None, Some(stats)) => body.extend(self.stats_dashboard(stats, cx)),
-        }
+                    },
+                )]
+            }
+            (None, Some(stats)) => self.stats_dashboard(stats, cx),
+        };
         v_flex()
             .id("stats-view")
             .size_full()
             .overflow_y_scroll()
-            .px_4()
-            .pt_3()
-            .pb_4()
-            .gap_3()
             .child(self.render_stats_header(cx))
-            .children(body)
+            .child(
+                v_flex()
+                    .w_full()
+                    .px_5()
+                    .pt_4()
+                    .pb_6()
+                    .gap_4()
+                    .children(body),
+            )
             .into_any_element()
     }
 
@@ -300,7 +268,7 @@ impl RepoView {
         let lines = stats.lines_scanned > 0;
         let people = |key: &'static str,
                       title: &'static str,
-                      icon: Lucide,
+                      hint: &'static str,
                       list: &[Person],
                       lines: bool,
                       cx: &mut Context<Self>| {
@@ -312,7 +280,7 @@ impl RepoView {
                     .enumerate()
                     .map(|(i, p)| person_row(key, i, p, max, lines, seq, cx))
                     .collect();
-                panel(key, title, icon, list.len(), rows)
+                panel(key, title, hint, list.len(), rows)
             })
         };
         let files = (!stats.files.is_empty()).then(|| {
@@ -327,7 +295,7 @@ impl RepoView {
             panel(
                 "stats-files",
                 tr("Fichiers chauds", "Hot files"),
-                Lucide::Flame,
+                tr("commits qui les touchent", "commits touching them"),
                 stats.files.len(),
                 rows,
             )
@@ -336,7 +304,10 @@ impl RepoView {
             people(
                 "stats-authors",
                 tr("Auteurs", "Authors"),
-                Lucide::Users,
+                tr(
+                    "commits, lignes ajoutées et supprimées",
+                    "commits, lines added and removed",
+                ),
                 &stats.authors,
                 lines,
                 cx,
@@ -344,7 +315,7 @@ impl RepoView {
             people(
                 "stats-committers",
                 tr("Committers", "Committers"),
-                Lucide::GitCommitHorizontal,
+                tr("qui applique les commits", "who applies the commits"),
                 &stats.committers,
                 false,
                 cx,
@@ -352,7 +323,7 @@ impl RepoView {
             people(
                 "stats-coauthors",
                 tr("Co-auteurs", "Co-authors"),
-                Lucide::HeartHandshake,
+                "Co-authored-by",
                 &stats.coauthors,
                 false,
                 cx,
@@ -362,10 +333,11 @@ impl RepoView {
         .flatten()
         .collect();
         let right: Vec<AnyElement> = [
+            files,
             people(
                 "stats-reviewers",
                 tr("Reviewers", "Reviewers"),
-                Lucide::Eye,
+                "Reviewed-by · Approved-by",
                 &stats.reviewers,
                 false,
                 cx,
@@ -373,12 +345,11 @@ impl RepoView {
             people(
                 "stats-mergers",
                 tr("Merges de PR", "PR merges"),
-                Lucide::GitMerge,
+                tr("auteurs des commits de merge", "authors of merge commits"),
                 &stats.mergers,
                 false,
                 cx,
             ),
-            files,
         ]
         .into_iter()
         .flatten()
@@ -388,56 +359,65 @@ impl RepoView {
             panel(
                 "stats-activity",
                 tr("Activité", "Activity"),
-                Lucide::ChartColumn,
-                stats.commits as usize,
+                if stats.bucket_days == 1 {
+                    tr("commits par jour", "commits per day")
+                } else if stats.bucket_days == 7 {
+                    tr("commits par semaine", "commits per week")
+                } else {
+                    tr("commits par période", "commits per period")
+                },
+                0,
                 vec![activity(stats, seq)],
             ),
             h_flex()
                 .w_full()
                 .items_start()
-                .gap_3()
-                .child(v_flex().flex_1().min_w_0().gap_3().children(left))
-                .child(v_flex().flex_1().min_w_0().gap_3().children(right))
+                .gap_4()
+                .child(v_flex().flex_1().min_w_0().gap_4().children(left))
+                .child(v_flex().flex_1().min_w_0().gap_4().children(right))
                 .into_any_element(),
             panel(
                 "stats-when",
-                tr("Quand", "When"),
-                Lucide::CalendarClock,
-                stats.commits as usize,
+                tr("Rythme", "Rhythm"),
+                tr(
+                    "jour × heure, dans le fuseau de chaque auteur",
+                    "day × hour, in each author's time zone",
+                ),
+                0,
                 vec![punchcard(stats, seq)],
             ),
         ]
     }
 
-    /// Branch, progress and the period picker.
+    /// Title, branch, the period picker and the line-count progress.
     fn render_stats_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let stats = self.stats.stats.as_ref();
         let branch = stats
             .map(|s| s.branch.clone())
-            .or_else(|| self.stats.branch.clone());
-        let chip = |period: Period| {
+            .or_else(|| self.stats.branch.clone())
+            .unwrap_or_else(|| "…".into());
+        let segment = |period: Period| {
             let active = self.stats.period == period;
             div()
                 .id(period.id())
                 .test_support()
-                .flex_1()
-                .h(px(20.))
+                .h(px(24.))
+                .px_3()
                 .flex()
                 .items_center()
-                .justify_center()
-                .rounded_full()
+                .rounded_md()
                 .text_xs()
+                .font_weight(gpui_kit::FontWeight::MEDIUM)
                 .cursor_pointer()
-                .border_1()
                 .when(active, |s| {
-                    s.bg(theme::alpha(theme::accent(), 0.25))
-                        .border_color(theme::alpha(theme::accent(), 0.7))
-                        .text_color(gpui_kit::white())
+                    s.bg(theme::alpha(gpui_kit::white(), 0.14))
+                        .border_1()
+                        .border_color(theme::glass_edge())
+                        .shadow_sm()
+                        .text_color(ink())
                 })
                 .when(!active, |s| {
-                    s.border_color(theme::hairline())
-                        .text_color(theme::muted())
-                        .hover(|s| s.text_color(gpui_kit::white()))
+                    s.text_color(muted()).hover(|s| s.text_color(ink()))
                 })
                 .child(period.label())
                 .on_click(cx.listener(move |this, _, _, cx| this.set_stats_period(period, cx)))
@@ -445,65 +425,84 @@ impl RepoView {
         let progress = stats
             .filter(|s| !s.lines_done && s.lines_total() > 0)
             .map(|s| (s.lines_scanned as f32 / s.lines_total() as f32).min(1.));
+        let subtitle = match stats {
+            Some(s) if self.stats.running => match progress {
+                Some(p) => trf!(
+                    "{} commits · lignes {}%",
+                    "{} commits · lines {}%",
+                    s.commits,
+                    (p * 100.).round() as u32
+                ),
+                None => trf!("{} commits", "{} commits", s.commits),
+            },
+            Some(s) => trf!("{} commits", "{} commits", s.commits),
+            None => tr("Calcul…", "Computing…").to_string(),
+        };
         v_flex()
-            .gap_1p5()
+            .w_full()
+            .flex_none()
             .child(
                 h_flex()
-                    .gap_2()
+                    .px_5()
+                    .pt_4()
+                    .pb_3()
+                    .gap_3()
                     .child(
-                        Icon::new(Lucide::ChartNoAxesCombined)
-                            .small()
-                            .text_color(theme::accent()),
-                    )
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(gpui_kit::FontWeight::BOLD)
-                            .text_color(gpui_kit::white())
-                            .child("Stats"),
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .text_xl()
+                                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                    .text_color(ink())
+                                    .child(tr("Statistiques", "Statistics")),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1p5()
+                                    .text_xs()
+                                    .text_color(muted())
+                                    .child(Icon::new(Lucide::GitBranch).xsmall())
+                                    .child(div().text_color(ink2()).child(branch))
+                                    .child("·")
+                                    .child(subtitle),
+                            ),
                     )
                     .child(
                         h_flex()
-                            .gap_1()
-                            .px_2()
-                            .h(px(20.))
-                            .rounded_full()
-                            .text_xs()
-                            .bg(theme::raised())
-                            .text_color(gpui_kit::white())
-                            .child(Icon::new(Lucide::GitBranch).xsmall())
-                            .child(branch.unwrap_or_else(|| "…".into())),
-                    )
-                    .when(self.stats.running, |s| {
-                        s.child(
-                            div()
-                                .text_xs()
-                                .text_color(theme::muted())
-                                .child(match progress {
-                                    Some(p) => {
-                                        trf!("lignes {}%", "lines {}%", (p * 100.).round() as u32)
-                                    }
-                                    None => tr("calcul…", "computing…").to_string(),
-                                }),
-                        )
-                    })
-                    .child(div().flex_1())
-                    .child(h_flex().w(px(320.)).gap_1().children(Period::ALL.map(chip))),
+                            .flex_none()
+                            .p(px(2.))
+                            .gap_0p5()
+                            .rounded_lg()
+                            .bg(theme::alpha(gpui_kit::white(), 0.05))
+                            .border_1()
+                            .border_color(theme::hairline())
+                            .children(Period::ALL.map(segment)),
+                    ),
             )
+            // Hairline under the header; it fills with the accent while line
+            // counts stream in.
             .child(
                 div()
                     .relative()
-                    .h(px(2.))
+                    .h(px(1.))
                     .w_full()
-                    .rounded_full()
-                    .overflow_hidden()
+                    .bg(theme::hairline())
                     .when_some(progress, |s, p| {
-                        s.bg(theme::raised()).child(
+                        s.child(
                             div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
                                 .h_full()
                                 .w(relative(p))
-                                .rounded_full()
-                                .bg(fill(270., 0.9)),
+                                .bg(linear_gradient(
+                                    90.,
+                                    linear_color_stop(theme::alpha(theme::accent(), 0.), 0.),
+                                    linear_color_stop(theme::accent(), 1.),
+                                )),
                         )
                     }),
             )
@@ -511,210 +510,437 @@ impl RepoView {
     }
 }
 
-/// A frosted card with a title row, holding one block of the dashboard.
+// ---- Look ---------------------------------------------------------------
+
+/// Text tokens: data colours never go on text.
+fn ink() -> Hsla {
+    theme::alpha(gpui_kit::white(), 0.93)
+}
+fn ink2() -> Hsla {
+    theme::alpha(gpui_kit::white(), 0.66)
+}
+fn muted() -> Hsla {
+    theme::alpha(gpui_kit::white(), 0.42)
+}
+/// Unfilled part of a meter, empty heatmap cells.
+fn track() -> Hsla {
+    theme::alpha(gpui_kit::white(), 0.055)
+}
+
+/// `a` → `b` in sRGB, `t` in 0..=1.
+fn mix(a: Hsla, b: Hsla, t: f32) -> Hsla {
+    let (a, b): (Rgba, Rgba) = (a.into(), b.into());
+    let l = |x: f32, y: f32| x + (y - x) * t;
+    Rgba {
+        r: l(a.r, b.r),
+        g: l(a.g, b.g),
+        b: l(a.b, b.b),
+        a: l(a.a, b.a),
+    }
+    .into()
+}
+
+/// Sequential ramp of the accent over the card surface, five steps
+/// (heatmap): quantised so neighbouring cells read as distinct levels.
+fn ramp(level: usize) -> Hsla {
+    let surface: Hsla = gpui_kit::rgb(0x1c1c1f).into();
+    const STEPS: [f32; 5] = [0.34, 0.5, 0.66, 0.83, 1.];
+    mix(surface, theme::accent(), STEPS[level.min(4)])
+}
+
+/// Meter fill: faint at the start, full accent at the tip, like a comet.
+fn meter_fill() -> gpui_kit::Background {
+    linear_gradient(
+        90.,
+        linear_color_stop(theme::alpha(theme::accent(), 0.18), 0.),
+        linear_color_stop(theme::accent(), 1.),
+    )
+}
+
+/// Liquid fill: rises, overshoots a little, then settles with a wobble.
+fn liquid(t: f32) -> f32 {
+    if t >= 1. {
+        return 1.;
+    }
+    let wobble = 0.4 + 0.6 * (t * std::f32::consts::PI * 3.).cos();
+    1. - (1. - t).powi(3) * wobble
+}
+
+fn compact(n: u64) -> String {
+    match n {
+        0..1_000 => n.to_string(),
+        1_000..1_000_000 => format!("{:.1}k", n as f64 / 1e3),
+        _ => format!("{:.1}M", n as f64 / 1e6),
+    }
+}
+
+/// A card holding one block of the dashboard: title, a muted hint, the rows.
 fn panel(
     key: &'static str,
     title: &'static str,
-    icon: Lucide,
+    hint: &'static str,
     count: usize,
     rows: Vec<AnyElement>,
 ) -> AnyElement {
     v_flex()
         .id(key)
         .w_full()
-        .pb_1()
+        .relative()
         .rounded_xl()
         .border_1()
         .border_color(theme::hairline())
-        .bg(theme::alpha(gpui_kit::white(), 0.025))
+        .bg(theme::alpha(gpui_kit::white(), 0.028))
+        .overflow_hidden()
+        // Light catching the top rim.
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_4()
+                .right_4()
+                .h(px(1.))
+                .bg(theme::alpha(gpui_kit::white(), 0.09)),
+        )
         .child(
             h_flex()
-                .h(px(32.))
-                .px_3()
-                .gap_1p5()
-                .text_sm()
-                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .text_color(theme::alpha(gpui_kit::white(), 0.82))
-                .child(Icon::new(icon).xsmall().text_color(theme::accent()))
-                .child(div().flex_1().child(title))
+                .px_4()
+                .pt_3()
+                .pb_2()
+                .gap_2()
+                .items_baseline()
                 .child(
                     div()
-                        .px_1p5()
-                        .rounded_md()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(ink())
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
                         .text_xs()
-                        .bg(theme::raised())
-                        .child(count.to_string()),
-                ),
+                        .text_color(muted())
+                        .child(hint),
+                )
+                .when(count > TOP, |s| {
+                    s.child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(muted())
+                            .child(trf!("{TOP} sur {count}", "{TOP} of {count}")),
+                    )
+                }),
         )
-        .children(rows)
+        .child(v_flex().px_2().pb_2().children(rows))
         .into_any_element()
 }
 
-/// Placeholder while the first numbers load.
-fn skeleton() -> AnyElement {
+fn empty_state(icon: Lucide, text: String) -> AnyElement {
     v_flex()
-        .gap_2()
-        .children((0..6usize).map(|i| {
-            div()
-                .h(px(28.))
-                .w(relative(0.9 - i as f32 * 0.1))
-                .rounded_md()
-                .bg(theme::raised())
-                .with_animation(
-                    ("stats-skeleton", i),
-                    Animation::new(Duration::from_millis(1100)).repeat(),
-                    move |el, t| {
-                        let wave = ((t + i as f32 * 0.12) * std::f32::consts::TAU).sin();
-                        el.opacity(0.55 + 0.35 * wave)
-                    },
-                )
-        }))
+        .w_full()
+        .py_16()
+        .gap_3()
+        .items_center()
+        .text_sm()
+        .text_color(muted())
+        .child(Icon::new(icon).large().text_color(muted()))
+        .child(text)
+        .into_any_element()
+}
+
+/// Placeholder while the first numbers load: the dashboard's shape, breathing.
+fn skeleton() -> AnyElement {
+    let block = |i: usize, h: f32| {
+        div()
+            .flex_1()
+            .h(px(h))
+            .rounded_xl()
+            .bg(theme::alpha(gpui_kit::white(), 0.035))
+            .with_animation(
+                ("stats-skeleton", i),
+                Animation::new(Duration::from_millis(1400)).repeat(),
+                move |el, t| {
+                    let wave = ((t + i as f32 * 0.1) * std::f32::consts::TAU).sin();
+                    el.opacity(0.6 + 0.4 * wave)
+                },
+            )
+    };
+    v_flex()
+        .gap_4()
+        .child(h_flex().gap_3().children((0..4).map(|i| block(i, 92.))))
+        .child(h_flex().child(block(4, 200.)))
+        .child(h_flex().gap_4().child(block(5, 280.)).child(block(6, 280.)))
         .into_any_element()
 }
 
 /// Commits, people, lines added / removed, counting up.
 fn tiles(stats: &RepoStats, seq: usize) -> AnyElement {
-    let people = stats.authors.len() as u64;
     let lines_known = stats.lines_scanned > 0;
-    let tile =
-        |id: usize, label: &'static str, value: Option<u64>, prefix: &'static str, color: Hsla| {
-            v_flex()
+    let spark: Vec<u32> = stats
+        .activity
+        .iter()
+        .rev()
+        .take(16)
+        .rev()
+        .copied()
+        .collect();
+    let tile = |id: usize,
+                label: &'static str,
+                dot: Option<Hsla>,
+                value: Option<u64>,
+                prefix: &'static str,
+                extra: Option<AnyElement>| {
+        v_flex()
+            .flex_1()
+            .min_w_0()
+            .relative()
+            .px_4()
+            .pt_3()
+            .pb_3()
+            .gap_1()
+            .rounded_xl()
+            .border_1()
+            .border_color(theme::hairline())
+            .bg(theme::alpha(gpui_kit::white(), 0.028))
+            .overflow_hidden()
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_4()
+                    .right_4()
+                    .h(px(1.))
+                    .bg(theme::alpha(gpui_kit::white(), 0.09)),
+            )
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .text_xs()
+                    .text_color(ink2())
+                    .children(dot.map(|c| div().size(px(6.)).rounded_full().bg(c)))
+                    .child(label),
+            )
+            .child(
+                h_flex()
+                    .items_end()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(28.))
+                            .line_height(px(34.))
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .text_color(ink())
+                            .with_animation(
+                                ("stats-tile", seq * 8 + id),
+                                Animation::new(Duration::from_millis(900))
+                                    .with_easing(gpui_kit::ease_out_quint()),
+                                move |el, t| {
+                                    el.child(match value {
+                                        Some(v) => format!(
+                                            "{prefix}{}",
+                                            compact((v as f64 * t as f64).round() as u64)
+                                        ),
+                                        None => "—".into(),
+                                    })
+                                },
+                            ),
+                    )
+                    .children(extra),
+            )
+    };
+    let max = spark.iter().copied().max().unwrap_or(0).max(1);
+    let n = spark.len();
+    let sparkline = h_flex()
+        .flex_none()
+        .h(px(28.))
+        .w(px(72.))
+        .items_end()
+        .gap(px(2.))
+        .children(spark.into_iter().enumerate().map(|(i, v)| {
+            let last = i + 1 == n;
+            div()
                 .flex_1()
-                .min_w_0()
-                .px_3()
-                .py_2()
-                .rounded_xl()
-                .border_1()
-                .border_color(theme::hairline())
-                .bg(fill(180., 0.14))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme::muted())
-                        .truncate()
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .text_2xl()
-                        .font_weight(gpui_kit::FontWeight::BOLD)
-                        .text_color(color)
-                        .truncate()
-                        .with_animation(
-                            ("stats-tile", seq * 8 + id),
-                            Animation::new(Duration::from_millis(900))
-                                .with_easing(gpui_kit::ease_out_quint()),
-                            move |el, t| {
-                                el.child(match value {
-                                    Some(v) => {
-                                        format!("{prefix}{}", compact((v as f64 * t as f64) as u64))
-                                    }
-                                    None => "…".into(),
-                                })
-                            },
-                        ),
-                )
-        };
+                .h(relative((v as f32 / max as f32).max(0.06)))
+                .rounded_t(px(1.5))
+                .bg(if last {
+                    theme::accent()
+                } else {
+                    theme::alpha(gpui_kit::white(), 0.18)
+                })
+        }))
+        .into_any_element();
     h_flex()
         .gap_3()
         .child(tile(
             0,
             tr("Commits", "Commits"),
+            None,
             Some(stats.commits as u64),
             "",
-            gpui_kit::white(),
+            Some(sparkline),
         ))
         .child(tile(
             1,
-            tr("Auteurs", "Authors"),
-            Some(people),
+            tr("Contributeurs", "Contributors"),
+            None,
+            Some(stats.authors.len() as u64),
             "",
-            gpui_kit::white(),
+            None,
         ))
         .child(tile(
             2,
-            tr("Ajouts", "Added"),
+            tr("Lignes ajoutées", "Lines added"),
+            Some(theme::lime()),
             lines_known.then_some(stats.additions),
             "+",
-            theme::lime(),
+            None,
         ))
         .child(tile(
             3,
-            tr("Suppressions", "Removed"),
+            tr("Lignes supprimées", "Lines removed"),
+            Some(theme::red()),
             lines_known.then_some(stats.deletions),
             "−",
-            theme::red(),
+            None,
         ))
         .into_any_element()
 }
 
-/// Commits over the period: bars rising one after the other.
+/// Commits over the period: one hue, recessive grid, columns rising in turn.
 fn activity(stats: &RepoStats, seq: usize) -> AnyElement {
     let max = stats.activity.iter().copied().max().unwrap_or(0).max(1);
+    // A clean top for the scale: the next multiple of a round step (29 → 30).
+    let top = {
+        let step = match max {
+            0..=4 => 2,
+            5..=10 => 5,
+            _ => {
+                let p = 10u32.pow(max.ilog10());
+                if max <= 2 * p { p / 2 } else { p }
+            }
+        };
+        max.div_ceil(step) * step
+    };
     let n = stats.activity.len().max(1);
-    let unit = if stats.bucket_days == 1 {
-        tr("jour", "day").to_string()
-    } else {
-        trf!("{} jours", "{} days", stats.bucket_days)
+    let bucket = stats.bucket_days;
+    let today = chrono::Local::now().date_naive();
+    let date = |ago: u32| {
+        let d = today - chrono::Duration::days(ago as i64);
+        d.format("%d/%m").to_string()
     };
     let bars = stats.activity.iter().enumerate().map(|(i, &v)| {
-        let h = v as f32 / max as f32;
-        let ago = (n - 1 - i) as u32 * stats.bucket_days;
-        let tip = match ago {
-            0 => trf!("{v} commit(s) — aujourd'hui", "{v} commit(s) — today"),
-            _ => trf!(
-                "{v} commit(s) — il y a {ago} j",
-                "{v} commit(s) — {ago}d ago"
-            ),
+        let h = v as f32 / top as f32;
+        let ago = (n - 1 - i) as u32 * bucket;
+        let when = match (ago, bucket) {
+            (0, 1) => tr("aujourd'hui", "today").to_string(),
+            (_, 1) => date(ago),
+            _ => trf!("semaine du {}", "week of {}", date(ago + bucket - 1)),
         };
+        let tip = trf!("{v} commit(s) — {when}", "{v} commit(s) — {when}");
         div()
             .id(("stats-activity", i))
             .flex_1()
+            .max_w(px(28.))
             .h_full()
             .flex()
             .items_end()
+            .rounded_t(px(4.))
+            .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.04)))
             .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
-            .child(
+            .child(if v == 0 {
                 div()
                     .w_full()
-                    .rounded_t_sm()
-                    .bg(fill(0., 0.95))
-                    .when(v > 0, |s| s.min_h(px(2.)))
+                    .h(px(2.))
+                    .rounded_t(px(1.))
+                    .bg(track())
+                    .into_any_element()
+            } else {
+                div()
+                    .w_full()
+                    .min_h(px(3.))
+                    .rounded_t(px(4.))
+                    .bg(linear_gradient(
+                        180.,
+                        linear_color_stop(theme::accent(), 0.),
+                        linear_color_stop(theme::alpha(theme::accent(), 0.55), 1.),
+                    ))
                     .with_animation(
                         ("stats-activity-bar", seq * 1024 + i),
-                        Animation::new(Duration::from_millis(1000)),
+                        Animation::new(Duration::from_millis(1100)),
                         move |el, t| {
                             // Staggered left to right, then a liquid settle.
-                            let start = i as f32 / n as f32 * 0.4;
-                            let t = ((t - start) / 0.6).clamp(0., 1.);
+                            let start = i as f32 / n as f32 * 0.45;
+                            let t = ((t - start) / 0.55).clamp(0., 1.);
                             el.h(relative(h * liquid(t)))
                         },
-                    ),
-            )
+                    )
+                    .into_any_element()
+            })
     });
+    let gridline = |frac: f32, label: String| {
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .top(relative(1. - frac))
+            .h(px(1.))
+            .bg(theme::alpha(
+                gpui_kit::white(),
+                if frac == 0. { 0.12 } else { 0.05 },
+            ))
+            .child(
+                div()
+                    .absolute()
+                    .right(relative(1.))
+                    .top(px(-7.))
+                    .pr_2()
+                    .text_xs()
+                    .text_color(muted())
+                    .child(label),
+            )
+    };
+    let first = (n as u32 - 1) * bucket;
     v_flex()
         .px_2()
-        .pb_2()
-        .gap_1()
+        .pt_2()
+        .pb_1()
+        .gap_1p5()
         .child(
             div()
-                .text_xs()
-                .text_color(theme::muted())
-                .child(trf!("max {max} / {unit}", "max {max} / {unit}")),
+                .relative()
+                .ml(px(28.))
+                .mr_2()
+                .h(px(150.))
+                .child(gridline(1., top.to_string()))
+                .child(gridline(0.5, (top / 2).to_string()))
+                .child(gridline(0., "0".into()))
+                .child(
+                    h_flex()
+                        .absolute()
+                        .inset_0()
+                        .items_end()
+                        .justify_between()
+                        .gap(px(3.))
+                        .children(bars),
+                ),
         )
         .child(
             h_flex()
-                .h(px(120.))
-                .items_end()
-                .gap(px(2.))
-                .border_b_1()
-                .border_color(theme::hairline())
-                .children(bars),
+                .ml(px(28.))
+                .mr_2()
+                .text_xs()
+                .text_color(muted())
+                .child(div().flex_1().child(date(first)))
+                .child(tr("aujourd'hui", "today")),
         )
         .into_any_element()
 }
 
-/// A leaderboard row: the bar fills behind the name like a liquid.
+/// A leaderboard row: rank, avatar, name over a thin meter, count.
 fn person_row(
     key: &'static str,
     i: usize,
@@ -724,39 +950,36 @@ fn person_row(
     seq: usize,
     cx: &mut Context<RepoView>,
 ) -> AnyElement {
-    let frac = p.commits as f32 / max as f32;
     let tip = format!("{} <{}>", p.name, p.email);
     let extra = (lines && (p.additions > 0 || p.deletions > 0)).then(|| {
+        let dot = |c: Hsla| div().size(px(5.)).rounded_full().bg(c);
         h_flex()
             .flex_none()
+            .w(px(104.))
+            .justify_end()
             .gap_1()
             .text_xs()
-            .child(
-                div()
-                    .text_color(theme::lime())
-                    .child(format!("+{}", compact(p.additions))),
-            )
-            .child(
-                div()
-                    .text_color(theme::red())
-                    .child(format!("−{}", compact(p.deletions))),
-            )
+            .text_color(muted())
+            .child(dot(theme::lime()))
+            .child(compact(p.additions))
+            .child(div().w(px(2.)))
+            .child(dot(theme::red()))
+            .child(compact(p.deletions))
             .into_any_element()
     });
-    bar_row(
+    leaderboard_row(
         SharedString::from(format!("{key}-{i}")),
-        frac,
         i,
+        p.commits as f32 / max as f32,
         seq,
-        crate::avatars::avatar(&p.email, &p.name, 16., cx),
+        crate::avatars::avatar(&p.email, &p.name, 22., cx),
         div()
-            .flex_1()
-            .min_w_0()
             .truncate()
+            .text_color(ink())
             .when(i == 0, |s| s.font_weight(gpui_kit::FontWeight::SEMIBOLD))
             .child(p.name.clone())
             .into_any_element(),
-        p.commits.to_string(),
+        p.commits,
         extra,
         tip,
     )
@@ -764,7 +987,7 @@ fn person_row(
 
 fn file_row(i: usize, f: &FileHeat, max: u32, seq: usize) -> AnyElement {
     let (dir, name) = match f.path.rsplit_once('/') {
-        Some((d, n)) => (Some(d.to_string()), n.to_string()),
+        Some((d, n)) => (Some(format!("{d}/")), n.to_string()),
         None => (None, f.path.clone()),
     };
     let tip = trf!(
@@ -775,105 +998,110 @@ fn file_row(i: usize, f: &FileHeat, max: u32, seq: usize) -> AnyElement {
         f.additions,
         f.deletions
     );
-    bar_row(
+    leaderboard_row(
         SharedString::from(format!("stats-file-{i}")),
-        f.commits as f32 / max as f32,
         i,
+        f.commits as f32 / max as f32,
         seq,
-        Icon::new(Lucide::File)
-            .xsmall()
-            .text_color(theme::muted())
+        div()
+            .size(px(22.))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_md()
+            .bg(theme::alpha(gpui_kit::white(), 0.05))
+            .child(Icon::new(Lucide::FileCode).xsmall().text_color(ink2()))
             .into_any_element(),
         h_flex()
-            .flex_1()
             .min_w_0()
-            .gap_1()
-            .child(
-                div()
-                    .flex_none()
-                    .max_w(relative(0.7))
-                    .truncate()
-                    .child(name),
-            )
-            .children(dir.map(|d| {
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_xs()
-                    .text_color(theme::muted())
-                    .child(d)
-            }))
+            .child(div().min_w_0().truncate().text_color(muted()).children(dir))
+            .child(div().flex_none().text_color(ink()).child(name))
             .into_any_element(),
-        f.commits.to_string(),
+        f.commits,
         None,
         tip,
     )
 }
 
-/// Shared leaderboard row: gradient fill (accent → transparent) behind the
-/// content, rising with a liquid wobble, then one light sweep.
+/// Shared leaderboard row. The meter fills like a liquid: a quick rise with a
+/// small overshoot and wobble, rows following one another.
 #[allow(clippy::too_many_arguments)]
-fn bar_row(
+fn leaderboard_row(
     id: SharedString,
-    frac: f32,
     rank: usize,
+    frac: f32,
     seq: usize,
     leading: AnyElement,
     label: AnyElement,
-    count: String,
+    count: u32,
     extra: Option<AnyElement>,
     tip: String,
 ) -> AnyElement {
-    let delay = (rank as f32 * 0.07).min(0.4);
+    let delay = (rank as f32 * 0.08).min(0.5);
     h_flex()
         .id(id.clone())
         .test_support()
-        .relative()
-        .h(px(24.))
-        .mx_1()
+        .h(px(42.))
         .px_2()
-        .gap_2()
+        .gap_3()
         .min_w_0()
-        .rounded_md()
-        .overflow_hidden()
+        .rounded_lg()
         .text_sm()
-        .hover(|s| s.bg(theme::raised()))
-        .child(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .h_full()
-                .rounded_md()
-                .overflow_hidden()
-                .bg(fill(90., if rank == 0 { 0.6 } else { 0.42 }))
-                .with_animation(
-                    SharedString::from(format!("{id}-fill-{seq}")),
-                    Animation::new(Duration::from_millis(1100)),
-                    move |el, t| {
-                        let t = ((t - delay) / (1. - delay)).clamp(0., 1.);
-                        el.w(relative(frac * liquid(t)))
-                    },
-                )
-                .child(super::shimmer::sweep(seq * 64 + rank)),
-        )
-        .child(leading)
-        .child(label)
+        .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.04)))
         .child(
             div()
                 .flex_none()
+                .w(px(14.))
                 .text_xs()
-                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .text_color(gpui_kit::white())
-                .child(count),
+                .text_color(muted())
+                .child((rank + 1).to_string()),
+        )
+        .child(leading)
+        .child(
+            v_flex().flex_1().min_w_0().gap(px(5.)).child(label).child(
+                div()
+                    .relative()
+                    .h(px(4.))
+                    .w_full()
+                    .rounded_full()
+                    .bg(track())
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .h_full()
+                            .rounded_full()
+                            .bg(meter_fill())
+                            .with_animation(
+                                SharedString::from(format!("{id}-fill-{seq}")),
+                                Animation::new(Duration::from_millis(1200)),
+                                move |el, t| {
+                                    let t = ((t - delay) / (1. - delay)).clamp(0., 1.);
+                                    el.w(relative((frac * liquid(t)).max(0.015)))
+                                },
+                            ),
+                    ),
+            ),
         )
         .children(extra)
+        .child(
+            div()
+                .flex_none()
+                .min_w(px(32.))
+                .flex()
+                .justify_end()
+                .text_sm()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(ink())
+                .child(count.to_string()),
+        )
         .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         .into_any_element()
 }
 
-/// Weekday × hour heatmap in the authors' own time zones.
+/// Weekday × hour heatmap in the authors' own time zones, five accent levels.
 fn punchcard(stats: &RepoStats, seq: usize) -> AnyElement {
     let max = stats
         .punchcard
@@ -883,34 +1111,40 @@ fn punchcard(stats: &RepoStats, seq: usize) -> AnyElement {
         .max()
         .unwrap_or(0)
         .max(1);
+    let level = |v: u32| ((v as f32 / max as f32 * 5.).ceil() as usize).clamp(1, 5) - 1;
     let days = if crate::i18n::is_fr() {
-        ["L", "M", "M", "J", "V", "S", "D"]
+        ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
     } else {
-        ["M", "T", "W", "T", "F", "S", "S"]
+        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     };
+    const LABEL: f32 = 34.;
     let rows = stats.punchcard.iter().enumerate().map(|(d, hours)| {
         h_flex()
             .gap(px(3.))
             .child(
                 div()
-                    .w(px(14.))
+                    .w(px(LABEL))
                     .flex_none()
                     .text_xs()
-                    .text_color(theme::muted())
+                    .text_color(muted())
                     .child(days[d]),
             )
             .children(hours.iter().enumerate().map(move |(h, &v)| {
-                let k = v as f32 / max as f32;
-                let tip = trf!("{v} commit(s) — {}h", "{v} commit(s) — {}:00", h);
+                let tip = trf!(
+                    "{} {}h — {v} commit(s)",
+                    "{} {}:00 — {v} commit(s)",
+                    days[d],
+                    h
+                );
                 div()
                     .id(("stats-punch", d * 24 + h))
                     .flex_1()
                     .h(px(18.))
-                    .rounded_sm()
-                    .bg(if v == 0 {
-                        theme::alpha(gpui_kit::white(), 0.04)
-                    } else {
-                        theme::alpha(theme::accent(), 0.18 + 0.82 * k)
+                    .rounded(px(3.))
+                    .bg(if v == 0 { track() } else { ramp(level(v)) })
+                    .hover(|s| {
+                        s.border_1()
+                            .border_color(theme::alpha(gpui_kit::white(), 0.5))
                     })
                     .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
                     .with_animation(
@@ -919,26 +1153,35 @@ fn punchcard(stats: &RepoStats, seq: usize) -> AnyElement {
                         move |el, t| {
                             // A wave sweeping across the hours.
                             let start = (h as f32 / 24. * 0.5) + d as f32 * 0.03;
-                            let t = ((t - start) / 0.4).clamp(0., 1.);
-                            el.opacity(t)
+                            el.opacity(((t - start) / 0.4).clamp(0., 1.))
                         },
                     )
             }))
     });
+    let hours = h_flex()
+        .gap(px(3.))
+        .text_xs()
+        .text_color(muted())
+        .child(div().w(px(LABEL)).flex_none())
+        .children((0..24).map(|h| {
+            div()
+                .flex_1()
+                .when(h % 6 == 0, |s| s.child(format!("{h}h")))
+        }));
+    let legend = h_flex()
+        .gap_1()
+        .text_xs()
+        .text_color(muted())
+        .child(tr("Moins", "Less"))
+        .child(div().size(px(11.)).rounded(px(2.)).bg(track()))
+        .children((0..5).map(|l| div().size(px(11.)).rounded(px(2.)).bg(ramp(l))))
+        .child(tr("Plus", "More"));
     v_flex()
         .px_2()
         .pb_2()
         .gap(px(3.))
         .children(rows)
-        .child(
-            h_flex()
-                .pl(px(17.))
-                .text_xs()
-                .text_color(theme::muted())
-                .child(div().flex_1().child("0h"))
-                .child(div().flex_1().child("6h"))
-                .child(div().flex_1().child("12h"))
-                .child(div().flex_1().child("18h")),
-        )
+        .child(div().pt_1().child(hours))
+        .child(h_flex().pt_2().child(div().flex_1()).child(legend))
         .into_any_element()
 }
