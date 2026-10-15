@@ -89,7 +89,17 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-shift-b", NewBranch, Some("Repo")),
         KeyBinding::new("secondary-shift-g", NewTag, Some("Repo")),
         KeyBinding::new("secondary-shift-h", Stash, Some("Repo")),
-        KeyBinding::new("secondary-r", Refresh, Some("Repo")),
+        // ⌃R fetches the whole window; elsewhere than macOS, where ⌘ is ⌃,
+        // refreshing moves to F5.
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-r"
+            } else {
+                "f5"
+            },
+            Refresh,
+            Some("Repo"),
+        ),
         KeyBinding::new("secondary-1", ShowChanges, Some("Repo")),
         KeyBinding::new("secondary-2", ShowHistory, Some("Repo")),
         KeyBinding::new("secondary-3", ShowStats, Some("Repo")),

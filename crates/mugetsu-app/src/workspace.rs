@@ -27,7 +27,17 @@ use crate::repo_view::{RepoEvent, RepoView};
 use crate::session::{RepoSet, Session};
 use crate::theme;
 
-gpui_kit::actions!(workspace, [OpenRepository, CloseTab, NextTab, PreviousTab]);
+gpui_kit::actions!(
+    workspace,
+    [
+        OpenRepository,
+        CloseTab,
+        NextTab,
+        PreviousTab,
+        FetchAll,
+        ReloadApp
+    ]
+);
 
 pub fn init(cx: &mut gpui_kit::App) {
     use gpui_kit::KeyBinding;
@@ -39,6 +49,8 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("ctrl-shift-tab", PreviousTab, Some("Workspace")),
         KeyBinding::new("secondary-shift-]", NextTab, Some("Workspace")),
         KeyBinding::new("secondary-shift-[", PreviousTab, Some("Workspace")),
+        KeyBinding::new("ctrl-r", FetchAll, Some("Workspace")),
+        KeyBinding::new("ctrl-shift-r", ReloadApp, Some("Workspace")),
     ]);
 }
 
@@ -56,8 +68,11 @@ pub struct Workspace {
     current: usize,
     window_active: bool,
     persist: bool,
-    /// The first-launch eclipse is playing over the window.
-    intro: bool,
+    /// The opening eclipse playing over the window, keyed so a reload
+    /// replays it from the start.
+    intro: Option<u64>,
+    intro_seq: u64,
+    _intro: Task<()>,
     _scheduler: Task<()>,
     _activation: Subscription,
     /// Focus the active tab on the next frame (after a switch, the focused
@@ -99,7 +114,9 @@ impl Workspace {
             current: session.current,
             window_active: true,
             persist,
-            intro: persist && !cfg!(test) && !crate::settings::get().intro_seen,
+            intro: None,
+            intro_seq: 0,
+            _intro: Task::ready(()),
             _scheduler: scheduler,
             _activation: activation,
             refocus: true,
@@ -107,18 +124,9 @@ impl Workspace {
             palette: None,
             palette_return: None,
         };
-        if this.intro {
+        if persist && !cfg!(test) && !crate::settings::get().intro_seen {
             crate::settings::remember(|s| s.intro_seen = true);
-            cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(crate::welcome::ECLIPSE)
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    this.intro = false;
-                    cx.notify();
-                });
-            })
-            .detach();
+            this.play_intro(cx);
         }
         this.open_set(window, cx);
         this
@@ -771,6 +779,8 @@ impl Render for Workspace {
                 cx.listener(|this, _: &OpenRepository, window, cx| this.prompt_open(window, cx)),
             )
             .on_action(cx.listener(|this, _: &CloseTab, _, cx| this.close(this.active, cx)))
+            .on_action(cx.listener(|this, _: &FetchAll, _, cx| this.fetch_all(cx)))
+            .on_action(cx.listener(|this, _: &ReloadApp, _, cx| this.reload_app(cx)))
             .on_action(
                 cx.listener(|this, _: &TogglePalette, window, cx| this.toggle_palette(window, cx)),
             )
@@ -821,12 +831,51 @@ impl Render for Workspace {
             )
             .child(div().flex_1().min_h_0().child(body))
             .children(switcher)
-            .when(self.intro, |s| s.child(crate::welcome::eclipse()))
+            .children(self.intro.map(crate::welcome::eclipse))
             .children(self.palette.as_ref().map(|(p, _)| p.clone()))
     }
 }
 
 impl Workspace {
+    /// Plays the opening eclipse over the window, from the start.
+    pub fn play_intro(&mut self, cx: &mut Context<Self>) {
+        self.intro_seq += 1;
+        let seq = self.intro_seq;
+        self.intro = Some(seq);
+        self._intro = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(crate::welcome::ECLIPSE)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.intro == Some(seq) {
+                    this.intro = None;
+                    cx.notify();
+                }
+            });
+        });
+        cx.notify();
+    }
+
+    /// ⌃R: fetches every repository open in the window, each button
+    /// showing its own outcome.
+    pub fn fetch_all(&mut self, cx: &mut Context<Self>) {
+        for tab in &self.tabs {
+            tab.view.update(cx, |view, cx| view.fetch_now(cx));
+        }
+    }
+
+    /// ⌃⇧R: reloads every repository and replays the opening.
+    pub fn reload_app(&mut self, cx: &mut Context<Self>) {
+        for tab in &self.tabs {
+            tab.view.update(cx, |view, cx| view.reload(cx));
+        }
+        self.play_intro(cx);
+    }
+
+    pub fn intro(&self) -> Option<u64> {
+        self.intro
+    }
+
     /// ⌃Tab / ⌃⇧Tab: opens the switcher or moves its highlight.
     fn step_switcher(&mut self, forward: bool, window: &Window, cx: &mut Context<Self>) {
         let n = self.tabs.len();

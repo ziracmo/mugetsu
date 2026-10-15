@@ -12,17 +12,20 @@ use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, App, BoxShadow, Hsla, InteractiveElement as _,
     IntoElement, ParentElement as _, StatefulInteractiveElement as _, Styled as _, Window, div,
-    img, point, prelude::FluentBuilder as _, px, relative, rgb,
+    img, linear_color_stop, linear_gradient, point, prelude::FluentBuilder as _, px, relative, rgb,
 };
 
 use crate::i18n::tr;
 use crate::theme;
 
-/// Whole first-launch eclipse, from first light to the app showing through.
-pub const ECLIPSE: Duration = Duration::from_millis(2600);
+/// Whole opening eclipse, from first light to the app showing through.
+pub const ECLIPSE: Duration = Duration::from_millis(3400);
 /// Totality, as a fraction of [`ECLIPSE`].
-const TOTAL: f32 = 0.62;
+const TOTAL: f32 = 0.56;
 const SUN: f32 = 150.;
+const STARS: usize = 70;
+const SPARKS: usize = 48;
+const BEADS: usize = 7;
 
 fn ease_in_out(t: f32) -> f32 {
     if t < 0.5 {
@@ -30,6 +33,15 @@ fn ease_in_out(t: f32) -> f32 {
     } else {
         1. - (-2. * t + 2.).powi(3) / 2.
     }
+}
+
+fn ease_out(t: f32) -> f32 {
+    1. - (1. - t).powi(3)
+}
+
+/// Progress of `t` through the `[a, b]` window, clamped to `0..=1`.
+fn span(t: f32, a: f32, b: f32) -> f32 {
+    ((t - a) / (b - a)).clamp(0., 1.)
 }
 
 fn glow(color: Hsla, blur: f32, spread: f32) -> BoxShadow {
@@ -42,43 +54,60 @@ fn glow(color: Hsla, blur: f32, spread: f32) -> BoxShadow {
     }
 }
 
-/// Full-window overlay: the moon slides over a warm sun, the corona flares
-/// at totality, a diamond ring flashes, then everything fades into the app.
-pub fn eclipse() -> AnyElement {
+/// Full-window overlay: dusk turns to night, the moon slides over a warm
+/// sun, Baily's beads and a diamond ring flash, the corona flares with
+/// shockwaves and sparks, the name writes itself, then a bloom of light
+/// opens onto the app. `seq` keys the animations so it can be replayed.
+pub fn eclipse(seq: u64) -> AnyElement {
     let sky: Hsla = rgb(0x050507).into();
     let warm: Hsla = rgb(0xffd9a0).into();
-    let stars = (0..40usize).map(|i| {
+    let white = gpui_kit::white();
+    let c = SUN / 2.;
+    let anim = || Animation::new(ECLIPSE);
+
+    // Dusk fades out as the moon takes the light.
+    let dusk = div()
+        .absolute()
+        .inset_0()
+        .bg(linear_gradient(
+            180.,
+            linear_color_stop(rgb(0x0b1030), 0.),
+            linear_color_stop(rgb(0x3b2342), 1.),
+        ))
+        .with_animation("eclipse-dusk", anim(), |el, t| {
+            el.opacity(1. - span(t, 0., TOTAL))
+        });
+    let stars = (0..STARS).map(|i| {
         // Deterministic scatter; each twinkles at its own pace.
-        let x = ((i * 37 + 11) % 100) as f32 / 100.;
-        let y = ((i * 53 + 7) % 100) as f32 / 100.;
-        let size = 1. + (i % 3) as f32 * 0.6;
+        let x = ((i * 37 + 11) % 101) as f32 / 101.;
+        let y = ((i * 53 + 7) % 97) as f32 / 97.;
+        let size = 1. + (i % 3) as f32 * 0.7;
         let phase = (i % 7) as f32 / 7.;
+        let speed = 4. + (i % 5) as f32;
         div()
             .absolute()
             .left(relative(x))
             .top(relative(y))
             .size(px(size))
             .rounded_full()
-            .bg(gpui_kit::white())
-            .with_animation(
-                ("eclipse-star", i),
-                Animation::new(ECLIPSE),
-                move |el, t| {
-                    // Stars come out as the light goes.
-                    let dark = (t / TOTAL).clamp(0., 1.);
-                    let twinkle = 0.5 + 0.5 * ((t * 6. + phase) * TAU).sin();
-                    el.opacity(dark * twinkle * 0.8)
-                },
-            )
+            .bg(white)
+            .with_animation(("eclipse-star", i), anim(), move |el, t| {
+                // Stars come out as the light goes, one after the other.
+                let dark = span(t, 0.15 + phase * 0.3, TOTAL);
+                let twinkle = 0.45 + 0.55 * ((t * speed + phase) * TAU).sin().abs();
+                el.opacity(dark * twinkle * 0.9)
+            })
     });
     let sun = div()
         .absolute()
         .size(px(SUN))
         .rounded_full()
         .bg(warm)
-        .with_animation("eclipse-sun", Animation::new(ECLIPSE), move |el, t| {
-            let k = (t / TOTAL).clamp(0., 1.);
-            // The disc dims, the corona grows into an accent halo.
+        .with_animation("eclipse-sun", anim(), move |el, t| {
+            let k = span(t, 0., TOTAL);
+            let flare = span(t, TOTAL, TOTAL + 0.08) * (1. - span(t, TOTAL + 0.1, 0.9));
+            // The corona breathes once the disc is covered.
+            let breathe = 0.5 + 0.5 * (t * 14.).sin();
             let corona = theme::alpha(theme::accent(), 0.35 + 0.6 * k);
             el.shadow(vec![
                 glow(
@@ -86,7 +115,16 @@ pub fn eclipse() -> AnyElement {
                     30. + 30. * k,
                     4. + 14. * k,
                 ),
-                glow(corona, 90. + 120. * k, 10. + 40. * k),
+                glow(
+                    corona,
+                    90. + 120. * k + 60. * flare,
+                    10. + 40. * k + 20. * breathe * k,
+                ),
+                glow(
+                    theme::alpha(white, 0.35 * flare),
+                    160. + 80. * flare,
+                    20. * flare,
+                ),
             ])
         });
     let moon = div()
@@ -95,37 +133,180 @@ pub fn eclipse() -> AnyElement {
         .size(px(SUN - 5.))
         .rounded_full()
         .bg(sky)
-        .with_animation("eclipse-moon", Animation::new(ECLIPSE), |el, t| {
-            let k = ease_in_out((t / TOTAL).clamp(0., 1.));
+        .with_animation("eclipse-moon", anim(), |el, t| {
+            let k = ease_in_out(span(t, 0., TOTAL));
             el.left(px(2.5 - (1. - k) * SUN * 1.25))
                 .top(px(2.5 - (1. - k) * SUN * 0.18))
         });
+    // Baily's beads: the last light through lunar valleys, on the trailing rim.
+    let beads = (0..BEADS).map(|i| {
+        let a = (-55. + 110. * i as f32 / (BEADS - 1) as f32).to_radians();
+        let size = 3. + (i % 3) as f32 * 1.5;
+        let phase = i as f32 * 1.7;
+        div()
+            .absolute()
+            .left(px(c + (c - 1.) * a.cos() - size / 2.))
+            .top(px(c + (c - 1.) * a.sin() - size / 2.))
+            .size(px(size))
+            .rounded_full()
+            .bg(white)
+            .with_animation(("eclipse-bead", i), anim(), move |el, t| {
+                let on = span(t, TOTAL - 0.09, TOTAL - 0.05) * (1. - span(t, TOTAL - 0.02, TOTAL));
+                let flicker = 0.6 + 0.4 * (t * 90. + phase).sin();
+                el.opacity(on * flicker).shadow(vec![glow(
+                    theme::alpha(warm, 0.9),
+                    8. + 6. * on,
+                    1.,
+                )])
+            })
+    });
     // Diamond ring: a white bead on the rim, just before totality.
     let diamond = div()
         .absolute()
         .size(px(10.))
         .rounded_full()
-        .bg(gpui_kit::white())
+        .bg(white)
         .left(px(SUN * 0.86))
         .top(px(SUN * 0.18))
-        .with_animation("eclipse-diamond", Animation::new(ECLIPSE), |el, t| {
-            let d = 1. - ((t - (TOTAL - 0.04)) / 0.07).abs().min(1.);
-            el.opacity(d)
-                .shadow(vec![glow(gpui_kit::white(), 18. + 30. * d, 4. + 10. * d)])
+        .with_animation("eclipse-diamond", anim(), move |el, t| {
+            let d = 1. - ((t - (TOTAL - 0.03)) / 0.06).abs().min(1.);
+            el.opacity(d).shadow(vec![
+                glow(white, 18. + 40. * d, 4. + 14. * d),
+                glow(theme::alpha(theme::accent(), 0.6 * d), 80. * d, 10. * d),
+            ])
         });
-    let title = div()
+    // Shockwaves rolling out of totality.
+    let rings = (0..3usize).map(|i| {
+        let start = TOTAL + 0.02 + i as f32 * 0.07;
+        div().absolute().rounded_full().border_2().with_animation(
+            ("eclipse-ring", i),
+            anim(),
+            move |el, t| {
+                let p = ease_out(span(t, start, start + 0.32));
+                let size = SUN + p * SUN * (5. + i as f32);
+                let fade = if p > 0. { 1. - p } else { 0. };
+                el.size(px(size))
+                    .left(px(c - size / 2.))
+                    .top(px(c - size / 2.))
+                    .border_color(theme::alpha(theme::accent(), 0.7 * fade))
+                    .shadow(vec![glow(
+                        theme::alpha(theme::accent(), 0.4 * fade),
+                        24.,
+                        0.,
+                    )])
+            },
+        )
+    });
+    // Sparks thrown off the corona.
+    let sparks = (0..SPARKS).map(|i| {
+        let a = i as f32 / SPARKS as f32 * TAU + (i % 5) as f32 * 0.09;
+        let reach = 90. + ((i * 29) % 11) as f32 * 22.;
+        let size = 2. + (i % 3) as f32;
+        let delay = (i % 4) as f32 * 0.015;
+        div()
+            .absolute()
+            .size(px(size))
+            .rounded_full()
+            .bg(if i % 3 == 0 { warm } else { white })
+            .with_animation(("eclipse-spark", i), anim(), move |el, t| {
+                let p = ease_out(span(t, TOTAL + delay, TOTAL + delay + 0.3));
+                let r = c + 4. + p * reach;
+                let on = if p > 0. { 1. - p } else { 0. };
+                el.left(px(c + r * a.cos() - size / 2.))
+                    .top(px(c + r * a.sin() - size / 2.))
+                    .opacity(on)
+                    .shadow(vec![glow(theme::alpha(theme::accent(), on), 6., 1.)])
+            })
+    });
+    // The name writes itself, letter by letter, under the ring.
+    let letters = "Mugetsu".chars().enumerate().map(|(i, ch)| {
+        let start = TOTAL + 0.06 + i as f32 * 0.022;
+        div()
+            .child(ch.to_string())
+            .with_animation(("eclipse-letter", i), anim(), move |el, t| {
+                let k = ease_out(span(t, start, start + 0.09));
+                el.opacity(k).mt(px(12. * (1. - k)))
+            })
+    });
+    let title = v_flex()
         .absolute()
-        .top(px(SUN + 48.))
-        .w(px(SUN))
-        .flex()
-        .justify_center()
-        .text_2xl()
-        .font_weight(gpui_kit::FontWeight::BOLD)
-        .text_color(gpui_kit::white())
-        .whitespace_nowrap()
-        .child("月 Mugetsu")
-        .with_animation("eclipse-title", Animation::new(ECLIPSE), |el, t| {
-            el.opacity(((t - TOTAL) / 0.12).clamp(0., 1.))
+        .top(px(SUN + 34.))
+        .left(px(c - 180.))
+        .w(px(360.))
+        .items_center()
+        .gap_1()
+        .child(
+            div()
+                .text_xl()
+                .text_color(theme::accent())
+                .child("月")
+                .with_animation("eclipse-kanji", anim(), |el, t| {
+                    let k = span(t, TOTAL + 0.02, TOTAL + 0.1);
+                    el.opacity(k)
+                }),
+        )
+        .child(
+            h_flex()
+                .h(px(40.))
+                .gap(px(3.))
+                .text_3xl()
+                .font_weight(gpui_kit::FontWeight::BOLD)
+                .text_color(white)
+                .children(letters),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(theme::muted())
+                .whitespace_nowrap()
+                .child(tr("Git, sans attendre.", "Git, without the wait."))
+                .with_animation("eclipse-tagline", anim(), |el, t| {
+                    el.opacity(span(t, TOTAL + 0.2, TOTAL + 0.28))
+                }),
+        );
+    // Bloom: a burst of light opening onto the app.
+    let bloom =
+        div()
+            .absolute()
+            .rounded_full()
+            .with_animation("eclipse-bloom", anim(), move |el, t| {
+                let p = ease_out(span(t, 0.84, 1.));
+                let size = SUN + p * 2600.;
+                let on = if p > 0. { 1. - p * 0.6 } else { 0. };
+                el.size(px(size))
+                    .left(px(c - size / 2.))
+                    .top(px(c - size / 2.))
+                    .bg(theme::alpha(theme::accent(), 0.25 * on))
+                    .shadow(vec![glow(theme::alpha(white, 0.45 * on), 120., 30.)])
+            });
+    let scene = div()
+        .id(("eclipse-run", seq as usize))
+        .absolute()
+        .inset_0()
+        .bg(sky)
+        .overflow_hidden()
+        .child(dusk)
+        .children(stars)
+        .child(
+            div()
+                .absolute()
+                .top(relative(0.5))
+                .left(relative(0.5))
+                .mt(px(-c - 40.))
+                .ml(px(-c))
+                .size(px(SUN))
+                .children(rings)
+                .child(sun)
+                .child(moon)
+                .children(beads)
+                .child(diamond)
+                .children(sparks)
+                .child(title)
+                .child(bloom),
+        )
+        .with_animation("eclipse-out", anim(), |el, t| {
+            // Holds totality a beat, then lets the app through.
+            el.opacity(1. - span(t, 0.86, 1.))
         });
     div()
         .id("eclipse")
@@ -133,26 +314,7 @@ pub fn eclipse() -> AnyElement {
         .absolute()
         .inset_0()
         .occlude()
-        .bg(sky)
-        .overflow_hidden()
-        .children(stars)
-        .child(
-            div()
-                .absolute()
-                .top(relative(0.5))
-                .left(relative(0.5))
-                .mt(px(-SUN / 2. - 30.))
-                .ml(px(-SUN / 2.))
-                .size(px(SUN))
-                .child(sun)
-                .child(moon)
-                .child(diamond)
-                .child(title),
-        )
-        .with_animation("eclipse-out", Animation::new(ECLIPSE), |el, t| {
-            // Holds totality a beat, then lets the app through.
-            el.opacity(1. - ((t - 0.8) / 0.2).clamp(0., 1.))
-        })
+        .child(scene)
         .into_any_element()
 }
 
