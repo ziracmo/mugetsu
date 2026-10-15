@@ -12,6 +12,7 @@ mod particles;
 mod pr_panel;
 mod pr_tip;
 mod pr_view;
+mod restack;
 mod search;
 mod shimmer;
 mod sidebar;
@@ -233,6 +234,8 @@ pub struct RepoView {
     stack_focus: Option<String>,
     /// Restarts the stack view's entrance animation.
     stack_seq: usize,
+    /// Restack running or just finished (stack view card).
+    restack: Option<restack::RestackRun>,
     /// GitHub login of the user.
     pr_me: Option<String>,
     sidebar_tab: SidebarTab,
@@ -382,6 +385,7 @@ impl RepoView {
             compact_cache: None,
             stack_focus: None,
             stack_seq: 0,
+            restack: None,
             pr_me: None,
             sidebar_tab: if crate::settings::get().shared_layout
                 && crate::settings::get().sidebar_prs

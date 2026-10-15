@@ -62,6 +62,8 @@ pub struct BranchMenu {
     pub is_head: bool,
     pub gone: bool,
     pub pr: Option<PullRequest>,
+    /// The branch heads a PR of a stack: it can be restacked.
+    pub in_stack: bool,
 }
 
 pub fn found_pr(lookup: Option<&PrLookup>) -> Option<PullRequest> {
@@ -231,6 +233,17 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             this.confirm_reset(name, upstream, is_head, window, cx);
         }))
     };
+    let restack = {
+        let head = b.pr.as_ref().map(|p| p.head.clone()).unwrap_or_default();
+        item(
+            tr("Restacker la stack…", "Restack the stack…"),
+            Lucide::RefreshCw,
+        )
+        .disabled(!b.in_stack)
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            this.confirm_restack(head.clone(), window, cx)
+        }))
+    };
     let rename = {
         let name = name.clone();
         item(tr("Renommer…", "Rename…"), Lucide::Pencil).on_click(act(
@@ -278,7 +291,8 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             }))
     };
 
-    menu.item(checkout)
+    let menu = menu
+        .item(checkout)
         .item(worktree)
         .separator()
         .item(fast_forward)
@@ -289,18 +303,15 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
             remote.as_deref().unwrap_or("origin"),
             &forge_branch,
             b.pr.as_ref(),
-        ))
-        .separator()
-        .item(rename)
-        .item(delete)
-        .separator()
-        .item(
-            item(
-                tr("Copier le nom de la branche", "Copy branch name"),
-                Lucide::Copy,
-            )
-            .on_click(copy(name)),
+        ));
+    let menu = if b.in_stack { menu.item(restack) } else { menu };
+    menu.separator().item(rename).item(delete).separator().item(
+        item(
+            tr("Copier le nom de la branche", "Copy branch name"),
+            Lucide::Copy,
         )
+        .on_click(copy(name)),
+    )
 }
 
 /// `remote_branch` is `origin/feat/x`.
