@@ -225,36 +225,7 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         .disabled(b.upstream.is_none() || b.gone)
         .on_click(act(&ctx.view, move |this, window, cx| {
             let (name, upstream) = (name.clone(), upstream.clone().unwrap_or_default());
-            this.confirm(
-                trf!(
-                    "Reset '{name}' sur '{upstream}' ?",
-                    "Reset '{name}' to '{upstream}'?"
-                ),
-                if is_head {
-                    tr(
-                        "La branche revient exactement au remote. Les commits locaux non poussés et les modifications non commitées seront perdus.",
-                        "The branch is set exactly to the remote. Unpushed local commits and uncommitted changes will be lost.",
-                    )
-                } else {
-                    tr(
-                        "La branche revient exactement au remote. Les commits locaux non poussés seront perdus.",
-                        "The branch is set exactly to the remote. Unpushed local commits will be lost.",
-                    )
-                }
-                .into(),
-                tr("Reset", "Reset"),
-                move |this, window, cx| {
-                    let (name, upstream) = (name.clone(), upstream.clone());
-                    this.run_op(
-                        "Reset",
-                        move |r| r.reset_branch(&name, &upstream, is_head),
-                        window,
-                        cx,
-                    );
-                },
-                window,
-                cx,
-            );
+            this.confirm_reset(name, upstream, is_head, window, cx);
         }))
     };
     let rename = {

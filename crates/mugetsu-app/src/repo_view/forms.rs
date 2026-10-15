@@ -388,36 +388,7 @@ impl RepoView {
             if head.ahead == 0 && head.behind == 0 && !dirty {
                 return;
             }
-            let description = if dirty {
-                tr(
-                    "La branche revient exactement au remote. Les commits locaux non poussés et les modifications non commitées seront perdus.",
-                    "The branch is set exactly to the remote. Unpushed local commits and uncommitted changes will be lost.",
-                )
-            } else {
-                tr(
-                    "La branche revient exactement au remote. Les commits locaux non poussés seront perdus.",
-                    "The branch is set exactly to the remote. Unpushed local commits will be lost.",
-                )
-            };
-            self.confirm(
-                trf!(
-                    "Aligner '{name}' sur '{upstream}' ?",
-                    "Reset '{name}' to '{upstream}'?"
-                ),
-                description.into(),
-                tr("Reset", "Reset"),
-                move |this, window, cx| {
-                    let (name, upstream) = (name.clone(), upstream.clone());
-                    this.run_op(
-                        "Reset",
-                        move |r| r.reset_branch(&name, &upstream, true),
-                        window,
-                        cx,
-                    );
-                },
-                window,
-                cx,
-            );
+            self.confirm_reset(name, upstream, true, window, cx);
             return;
         }
         if self.data.refs.head_branch.as_deref() == Some(local.as_str()) && exists {
@@ -550,6 +521,197 @@ impl RepoView {
                             "Push",
                             move |r| r.push_to(&remote, &local, &remote_branch, options),
                             move |this, _, cx| this.celebrate_push(pushed, cx),
+                            window,
+                            cx,
+                        )
+                    });
+                    true
+                })
+        });
+    }
+}
+
+/// A ref drawn as a chip in the reset sheet.
+fn ref_pill(name: &str, icon: Lucide, color: gpui_kit::Hsla) -> impl IntoElement {
+    h_flex()
+        .flex_none()
+        .max_w(px(190.))
+        .gap_1()
+        .px_2()
+        .h(px(24.))
+        .rounded_md()
+        .border_1()
+        .border_color(theme::alpha(color, 0.5))
+        .bg(theme::alpha(color, 0.14))
+        .text_sm()
+        .text_color(color)
+        .child(Icon::new(icon).xsmall())
+        .child(div().truncate().child(name.to_string()))
+}
+
+/// Loss / gain line of the reset sheet.
+fn stat(icon: Lucide, color: gpui_kit::Hsla, text: String) -> impl IntoElement {
+    h_flex()
+        .gap_2()
+        .text_sm()
+        .child(Icon::new(icon).xsmall().text_color(color))
+        .child(text)
+}
+
+impl RepoView {
+    /// Centred sheet before resetting `branch` onto its upstream: what is lost,
+    /// what comes in, then a danger button.
+    pub fn confirm_reset(
+        &mut self,
+        branch: String,
+        upstream: String,
+        is_head: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (ahead, behind) = self
+            .data
+            .refs
+            .branches
+            .iter()
+            .find(|b| b.name == branch)
+            .map_or((0, 0), |b| (b.ahead, b.behind));
+        let dirty = if is_head { self.data.uncommitted() } else { 0 };
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, window, _| {
+            // Centred vertically (the sheet is about 330px tall).
+            let top = ((window.viewport_size().height - px(330.)) / 2.).max(px(40.));
+            let (name, target, view) = (branch.clone(), upstream.clone(), view.clone());
+            let mut stats = v_flex().gap_1p5();
+            if ahead > 0 {
+                stats = stats.child(stat(
+                    Lucide::CircleX,
+                    theme::red(),
+                    trf!(
+                        "{ahead} commit(s) local(aux) non poussé(s) perdu(s)",
+                        "{ahead} unpushed local commit(s) lost"
+                    ),
+                ));
+            }
+            if behind > 0 {
+                stats = stats.child(stat(
+                    Lucide::CircleCheck,
+                    theme::lime(),
+                    trf!(
+                        "{behind} commit(s) du remote récupéré(s)",
+                        "{behind} remote commit(s) brought in"
+                    ),
+                ));
+            }
+            if dirty > 0 {
+                stats = stats.child(stat(
+                    Lucide::CircleAlert,
+                    theme::amber(),
+                    trf!(
+                        "{dirty} fichier(s) modifié(s) non commité(s) perdu(s)",
+                        "{dirty} uncommitted changed file(s) lost"
+                    ),
+                ));
+            }
+            if ahead == 0 && behind == 0 && dirty == 0 {
+                stats = stats.child(stat(
+                    Lucide::Check,
+                    theme::muted(),
+                    tr(
+                        "Déjà aligné, rien ne change",
+                        "Already aligned, nothing changes",
+                    )
+                    .into(),
+                ));
+            }
+            dialog
+                .bg(theme::sheet())
+                .w(px(500.))
+                .margin_top(top)
+                .child(
+                    v_flex()
+                        .gap_4()
+                        .child(
+                            h_flex()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .size(px(44.))
+                                        .rounded_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .bg(theme::alpha(theme::red(), 0.16))
+                                        .border_1()
+                                        .border_color(theme::alpha(theme::red(), 0.45))
+                                        .child(
+                                            Icon::new(Lucide::RotateCcw)
+                                                .size(px(20.))
+                                                .text_color(theme::red()),
+                                        ),
+                                )
+                                .child(
+                                    v_flex()
+                                        .gap_0p5()
+                                        .child(
+                                            div()
+                                                .text_lg()
+                                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                                .child(tr(
+                                                    "Aligner sur le remote",
+                                                    "Reset to remote",
+                                                )),
+                                        )
+                                        .child(div().text_sm().text_color(theme::muted()).child(
+                                            tr(
+                                                "La branche prend exactement l'état du remote.",
+                                                "The branch takes exactly the remote's state.",
+                                            ),
+                                        )),
+                                ),
+                        )
+                        // local ──→ remote
+                        .child(
+                            h_flex()
+                                .justify_center()
+                                .gap_3()
+                                .p_3()
+                                .rounded_lg()
+                                .bg(theme::alpha(gpui_kit::white(), 0.04))
+                                .border_1()
+                                .border_color(theme::hairline())
+                                .child(ref_pill(&name, Lucide::GitBranch, theme::accent()))
+                                .child(
+                                    Icon::new(Lucide::ArrowLeft)
+                                        .small()
+                                        .text_color(theme::muted()),
+                                )
+                                .child(ref_pill(&target, Lucide::Cloud, theme::violet())),
+                        )
+                        .child(stats),
+                )
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new()
+                                .trigger(|b| b.ghost().label(tr("Annuler", "Cancel"))),
+                        )
+                        .child(
+                            DialogAction::new().child(
+                                Button::new("reset-ok")
+                                    .danger()
+                                    .icon(Icon::new(Lucide::RotateCcw))
+                                    .label(tr("Reset", "Reset")),
+                            ),
+                        ),
+                )
+                .on_ok(move |_, window, cx| {
+                    let (name, target) = (name.clone(), target.clone());
+                    let _ = view.update(cx, |this, cx| {
+                        this.run_op(
+                            "Reset",
+                            move |r| r.reset_branch(&name, &target, is_head),
                             window,
                             cx,
                         )
