@@ -287,7 +287,9 @@ impl RepoView {
                     .label("Push")
                     .tooltip("Push (⇧⌘P)")
                     .disabled(busy)
-                    .on_click(cx.listener(|this, _, window, cx| this.push_head(window, cx))),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_push_dialog(None, window, cx)),
+                    ),
             )
             .child(
                 Button::new("stash")

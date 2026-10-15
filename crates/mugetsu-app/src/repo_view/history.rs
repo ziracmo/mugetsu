@@ -24,8 +24,6 @@ use crate::i18n::tr;
 use crate::theme;
 
 pub const ROW_HEIGHT: f32 = 26.;
-/// Commit body lines shown before "Afficher plus".
-const BODY_PREVIEW_LINES: usize = 3;
 
 /// What the history needs to draw ref chips, captured once per frame.
 struct ChipContext {
@@ -33,6 +31,30 @@ struct ChipContext {
     upstreams: HashMap<String, String>,
     github: bool,
     burst: Option<(String, usize)>,
+    view: gpui_kit::WeakEntity<RepoView>,
+}
+
+/// Double-click on a branch chip checks it out (Fork-like dialog when needed).
+fn checkout_on_double_click(
+    el: gpui_kit::Div,
+    name: &str,
+    is_remote: bool,
+    ctx: &ChipContext,
+) -> AnyElement {
+    let (view, branch) = (ctx.view.clone(), name.to_string());
+    el.id(SharedString::from(format!("chip-{name}")))
+        .test_support()
+        .cursor_pointer()
+        .on_click(move |ev, window, cx| {
+            if ev.click_count() >= 2 {
+                cx.stop_propagation();
+                let branch = branch.clone();
+                let _ = view.update(cx, |this, cx| {
+                    this.request_checkout(branch, is_remote, window, cx)
+                });
+            }
+        })
+        .into_any_element()
 }
 
 fn chip(
@@ -40,6 +62,7 @@ fn chip(
     color: gpui_kit::Hsla,
     icon: Lucide,
     strong: bool,
+    head: bool,
     pushed: Option<Lucide>,
 ) -> gpui_kit::Div {
     let base = h_flex()
@@ -50,7 +73,14 @@ fn chip(
         .overflow_hidden()
         .border_1()
         .text_xs();
-    let base = if strong {
+    let base = if head {
+        // The checked-out branch: solid accent, white, glowing edge.
+        base.border_color(theme::alpha(gpui_kit::white(), 0.55))
+            .bg(theme::accent())
+            .text_color(gpui_kit::white())
+            .font_weight(gpui_kit::FontWeight::BOLD)
+            .shadow_md()
+    } else if strong {
         // main / develop / …: filled, bold, unmistakable.
         base.border_color(color)
             .bg(theme::alpha(color, 0.85))
@@ -70,7 +100,11 @@ fn chip(
                 .flex()
                 .items_center()
                 .bg(gpui_kit::rgba(0x000000b3))
-                .child(Icon::new(remote_icon).xsmall().text_color(color)),
+                .child(Icon::new(remote_icon).xsmall().text_color(if head {
+                    gpui_kit::white()
+                } else {
+                    color
+                })),
         ),
         None => s.child(div().pl_1p5().child(Icon::new(icon).xsmall())),
     })
@@ -107,14 +141,23 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 } else {
                     Lucide::Cloud
                 };
-                let el = chip(
-                    name.clone(),
-                    color,
-                    Lucide::GitBranch,
-                    theme::is_main_branch(name),
-                    synced.map(|_| remote_icon),
-                )
-                .when(*head, |s| s.shadow_sm());
+                let el = checkout_on_double_click(
+                    chip(
+                        name.clone(),
+                        color,
+                        if *head {
+                            Lucide::Check
+                        } else {
+                            Lucide::GitBranch
+                        },
+                        theme::is_main_branch(name),
+                        *head,
+                        synced.map(|_| remote_icon),
+                    ),
+                    name,
+                    false,
+                    ctx,
+                );
                 match &ctx.burst {
                     Some((b, seq)) if b == name => div()
                         .relative()
@@ -126,13 +169,20 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 }
             }
             RefLabel::Remote(_) => continue,
-            RefLabel::Tag(name) => {
-                chip(name.clone(), theme::amber(), Lucide::Tag, false, None).into_any_element()
-            }
+            RefLabel::Tag(name) => chip(
+                name.clone(),
+                theme::amber(),
+                Lucide::Tag,
+                false,
+                false,
+                None,
+            )
+            .into_any_element(),
             RefLabel::DetachedHead => chip(
                 "HEAD".into(),
                 theme::magenta(),
                 Lucide::CircleDot,
+                false,
                 false,
                 None,
             )
@@ -146,7 +196,20 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
             && !merged.contains(name)
         {
             out.push(
-                chip(name.clone(), theme::violet(), Lucide::Cloud, false, None).into_any_element(),
+                checkout_on_double_click(
+                    chip(
+                        name.clone(),
+                        theme::violet(),
+                        Lucide::Cloud,
+                        false,
+                        false,
+                        None,
+                    ),
+                    name,
+                    true,
+                    ctx,
+                )
+                .into_any_element(),
             );
         }
     }
@@ -239,6 +302,7 @@ impl RepoView {
                 .collect(),
             github: data.github.is_some(),
             burst: self.celebrate.clone(),
+            view: cx.entity().downgrade(),
         });
         let hits = Rc::new(self.search_hits.clone());
         let list = if data.history.is_empty() {
@@ -457,47 +521,47 @@ impl RepoView {
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .child(subject),
                     )
+                    // The description stays hidden until asked for.
                     .when(!body.is_empty(), |s| {
-                        let lines: Vec<&str> = body.lines().collect();
-                        let long = lines.len() > BODY_PREVIEW_LINES;
+                        let lines = body.lines().count();
                         let expanded = self.body_expanded;
-                        let shown = if long && !expanded {
-                            lines[..BODY_PREVIEW_LINES].join("\n")
-                        } else {
-                            body.clone()
-                        };
                         s.child(
-                            div()
-                                .id("commit-body")
+                            h_flex()
+                                .id("commit-body-toggle")
                                 .test_support()
-                                .max_h(px(180.))
-                                .overflow_y_scroll()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(shown),
+                                .gap_1()
+                                .text_xs()
+                                .cursor_pointer()
+                                .text_color(theme::muted())
+                                .hover(|s| s.text_color(cx.theme().foreground))
+                                .child(
+                                    Icon::new(if expanded {
+                                        Lucide::ChevronDown
+                                    } else {
+                                        Lucide::ChevronRight
+                                    })
+                                    .xsmall(),
+                                )
+                                .child(if expanded {
+                                    tr("Masquer la description", "Hide description").to_string()
+                                } else {
+                                    trf!("Description ({} lignes)", "Description ({} lines)", lines)
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.body_expanded = !this.body_expanded;
+                                    cx.notify();
+                                })),
                         )
-                        .when(long, |s| {
+                        .when(expanded, |s| {
                             s.child(
                                 div()
-                                    .id("commit-body-toggle")
+                                    .id("commit-body")
                                     .test_support()
-                                    .text_xs()
-                                    .cursor_pointer()
-                                    .text_color(theme::accent())
-                                    .hover(|s| s.text_color(cx.theme().foreground))
-                                    .child(if expanded {
-                                        tr("Réduire", "Show less").to_string()
-                                    } else {
-                                        trf!(
-                                            "Afficher plus ({} lignes)",
-                                            "Show more ({} lines)",
-                                            lines.len() - BODY_PREVIEW_LINES
-                                        )
-                                    })
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.body_expanded = !this.body_expanded;
-                                        cx.notify();
-                                    })),
+                                    .max_h(px(220.))
+                                    .overflow_y_scroll()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(body.clone()),
                             )
                         })
                     })

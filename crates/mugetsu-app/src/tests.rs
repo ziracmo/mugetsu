@@ -384,7 +384,7 @@ fn branches_are_foldered_and_searchable(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn long_commit_bodies_start_collapsed(cx: &mut TestAppContext) {
+fn commit_descriptions_start_hidden(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
@@ -399,13 +399,18 @@ fn long_commit_bodies_start_collapsed(cx: &mut TestAppContext) {
     assert!(!cx.read(|cx| view.read(cx).body_expanded()));
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        assert!(window.try_find("commit-body").is_some());
+        assert!(
+            window.try_find("commit-body").is_none(),
+            "hidden by default"
+        );
         window.click("commit-body-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("commit-body").is_some());
     })
     .unwrap();
     assert!(cx.read(|cx| view.read(cx).body_expanded()));
 
-    // A short body has nothing to expand.
+    // No description, nothing to show.
     let first = cx.read(|cx| {
         let d = view.read(cx).data().clone();
         d.history
@@ -441,9 +446,9 @@ fn branch_context_menu_renames(cx: &mut TestAppContext) {
     };
     step(cx, &|window, cx| window.right_click("branch:topic", cx));
     step(cx, &|window, cx| {
-        let rename = window.within("popup-menu").find(7usize);
+        let rename = window.within("popup-menu").find(8usize);
         assert_eq!(rename.label(), Some("Renommer…"));
-        window.within("popup-menu").click(7usize, cx);
+        window.within("popup-menu").click(8usize, cx);
     });
     step(cx, &|window, cx| {
         window.press("secondary-a", cx);
@@ -609,4 +614,123 @@ fn workspaces_switch_their_tabs(cx: &mut TestAppContext) {
         Some(canon(a.path())),
         "tabs come back"
     );
+}
+
+fn ui_step(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    f: &dyn Fn(&mut gpui_kit::Window, &mut gpui_kit::App),
+) {
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        f(window, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn double_clicking_a_graph_chip_checks_it_out(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        window.double_click("chip-topic", cx)
+    });
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["branch", "--show-current"]).trim(),
+        "topic"
+    );
+}
+
+#[gpui_kit::test]
+fn checkout_with_local_changes_offers_to_stash(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::write(dir.path().join("a.txt"), "one\ntwo\nwip\n").unwrap();
+    let (handle, view) = open_repo_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        window.double_click("branch:topic", cx)
+    });
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("dialog").is_some(), "asks first");
+    });
+    assert_eq!(
+        git(dir.path(), &["branch", "--show-current"]).trim(),
+        "main"
+    );
+    ui_step(cx, handle, &|window, cx| window.click("checkout-ok", cx));
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["branch", "--show-current"]).trim(),
+        "topic"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "one\ntwo\nwip\n",
+        "changes were stashed and reapplied"
+    );
+    assert!(git(dir.path(), &["stash", "list"]).trim().is_empty());
+}
+
+#[gpui_kit::test]
+fn push_dialog_can_force_with_lease(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(remote.path(), &["init", "-q", "--bare"]);
+    git(
+        dir.path(),
+        &["remote", "add", "origin", remote.path().to_str().unwrap()],
+    );
+    git(dir.path(), &["push", "-q", "-u", "origin", "main"]);
+    git(dir.path(), &["commit", "-q", "--amend", "-m", "rewritten"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+
+    let push = |cx: &mut TestAppContext, force: bool| {
+        ui_step(cx, handle, &|window, cx| {
+            view.update(cx, |v, cx| v.open_push_dialog(None, window, cx))
+        });
+        if force {
+            ui_step(cx, handle, &|window, cx| window.click("push-force", cx));
+        }
+        ui_step(cx, handle, &|window, cx| window.click("push-ok", cx));
+        settle(cx, &view);
+    };
+    let remote_head = || git(remote.path(), &["log", "-1", "--format=%s", "main"]);
+    push(cx, true);
+    assert_eq!(remote_head().trim(), "rewritten");
+}
+
+#[gpui_kit::test]
+fn changes_shortcuts_stage_all_and_stash(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::write(dir.path().join("a.txt"), "changed\n").unwrap();
+    std::fs::write(dir.path().join("new.txt"), "new\n").unwrap();
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_focused(true, cx);
+            v.set_mode(crate::repo_view::Mode::Changes, cx);
+        })
+    });
+    ui_step(cx, handle, &|_, _| {});
+    ui_step(cx, handle, &|window, cx| window.press("secondary-a", cx));
+    settle(cx, &view);
+    let staged = git(dir.path(), &["diff", "--cached", "--name-only"]);
+    assert_eq!(staged.trim(), "a.txt\nnew.txt");
+    ui_step(cx, handle, &|window, cx| window.press("secondary-s", cx));
+    settle(cx, &view);
+    assert!(
+        git(dir.path(), &["status", "--porcelain"])
+            .trim()
+            .is_empty()
+    );
+    assert_eq!(git(dir.path(), &["stash", "list"]).lines().count(), 1);
 }

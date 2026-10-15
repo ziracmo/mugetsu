@@ -57,13 +57,26 @@ fn render_row(row: Row) -> AnyElement {
         .rounded_md()
         .text_sm()
         .cursor_pointer()
+        .relative()
         .hover(|s| s.bg(theme::raised()))
-        .when(row.selected, |s| {
+        .when(row.selected && !row.bold, |s| {
             s.bg(theme::alpha(theme::accent(), 0.14))
                 .border_1()
                 .border_color(theme::alpha(theme::accent(), 0.25))
         })
-        .child(Icon::new(row.icon).xsmall().text_color(row.icon_color))
+        // Where we are (checked-out branch / worktree): filled accent pill.
+        .when(row.bold, |s| {
+            s.bg(theme::alpha(theme::accent(), 0.3))
+                .border_1()
+                .border_color(theme::alpha(theme::accent(), 0.7))
+                .shadow_sm()
+                .text_color(gpui_kit::white())
+        })
+        .child(Icon::new(row.icon).xsmall().text_color(if row.bold {
+            gpui_kit::white()
+        } else {
+            row.icon_color
+        }))
         .child(
             div()
                 .relative()
@@ -76,7 +89,7 @@ fn render_row(row: Row) -> AnyElement {
                             s.text_color(gpui_kit::white())
                                 .font_weight(gpui_kit::FontWeight::BOLD)
                         })
-                        .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::SEMIBOLD))
+                        .when(row.bold, |s| s.font_weight(gpui_kit::FontWeight::BOLD))
                         .child(row.label),
                 )
                 .children(row.burst.map(super::particles::burst)),
@@ -384,7 +397,7 @@ impl RepoView {
                         this.select_commit(target, true, cx);
                         this.lookup_pr(&name, upstream.as_deref(), false, cx);
                         if double {
-                            this.checkout_with_burst(name.clone(), false, window, cx);
+                            this.request_checkout(name.clone(), false, window, cx);
                         }
                     });
                 }),
@@ -498,7 +511,7 @@ impl RepoView {
                             this.select_commit(target, true, cx);
                             this.lookup_pr(&name, None, true, cx);
                             if double {
-                                this.checkout_with_burst(name.clone(), true, window, cx);
+                                this.request_checkout(name.clone(), true, window, cx);
                             }
                         });
                     }),

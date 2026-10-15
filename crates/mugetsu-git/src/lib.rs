@@ -18,7 +18,7 @@ pub use cli::Git;
 pub use diff::{DiffFile, DiffLine, FileDiff, Hunk, LineKind};
 pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout};
 pub use log::{Commit, History};
-pub use ops::ResetMode;
+pub use ops::{LocalChanges, PushOptions, ResetMode};
 pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};
 pub use status::{Change, FileStatus, Status};
 

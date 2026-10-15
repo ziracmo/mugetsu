@@ -2,6 +2,24 @@
 
 use crate::{DiffFile, Repo};
 
+/// What to do with uncommitted changes when switching branches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalChanges {
+    /// Let git carry them over (fails if they conflict).
+    Keep,
+    /// Stash before, reapply after.
+    Stash,
+    /// Throw tracked changes away (untracked files stay).
+    Discard,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PushOptions {
+    pub set_upstream: bool,
+    pub force_with_lease: bool,
+    pub tags: bool,
+}
+
 impl Repo {
     pub fn stage(&self, paths: &[&str]) -> anyhow::Result<()> {
         let mut args = vec!["add", "--all", "--"];
@@ -59,14 +77,101 @@ impl Repo {
         self.git().run(["switch", branch]).map(drop)
     }
 
-    /// Checks out a remote branch as a new local tracking branch.
+    /// Checks out a remote branch: its local counterpart when one exists,
+    /// otherwise a new local branch tracking it.
     pub fn checkout_remote(&self, remote_branch: &str) -> anyhow::Result<()> {
         let local = remote_branch
             .split_once('/')
             .map_or(remote_branch, |(_, b)| b);
+        self.switch_to(local, Some(remote_branch), LocalChanges::Keep)
+    }
+
+    pub fn has_local_branch(&self, name: &str) -> bool {
         self.git()
-            .run(["switch", "--track", "-c", local, remote_branch])
-            .map(drop)
+            .run([
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{name}"),
+            ])
+            .is_ok()
+    }
+
+    /// Uncommitted changes, untracked files included.
+    pub fn is_dirty(&self) -> anyhow::Result<bool> {
+        Ok(!self.git().run(["status", "--porcelain"])?.trim().is_empty())
+    }
+
+    /// Switches to `branch` (created from `track` and tracking it when it
+    /// doesn't exist yet), handling uncommitted changes like Fork does.
+    pub fn switch_to(
+        &self,
+        branch: &str,
+        track: Option<&str>,
+        changes: LocalChanges,
+    ) -> anyhow::Result<()> {
+        let stashed = changes == LocalChanges::Stash && self.is_dirty()?;
+        if stashed {
+            self.stash_push(Some(&format!("Mugetsu: checkout {branch}")))?;
+        }
+        if changes == LocalChanges::Discard {
+            self.git().run(["reset", "--hard", "--quiet"])?;
+        }
+        let switched = match track {
+            Some(upstream) if !self.has_local_branch(branch) => self
+                .git()
+                .run(["switch", "--track", "-c", branch, upstream]),
+            _ => self.git().run(["switch", branch]),
+        };
+        if let Err(e) = switched {
+            if stashed {
+                let _ = self.git().run(["stash", "pop"]);
+            }
+            return Err(e);
+        }
+        if stashed {
+            self.git().run(["stash", "pop"]).map_err(|e| {
+                e.context(
+                    "checked out, but the stashed changes conflict: they are kept in the stash",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Moves `branch` onto `target` (e.g. its upstream). For the checked-out
+    /// branch this is a hard reset: uncommitted changes are lost.
+    pub fn reset_branch(&self, branch: &str, target: &str, is_head: bool) -> anyhow::Result<()> {
+        if is_head {
+            self.git().run(["reset", "--hard", "--quiet", target])
+        } else {
+            self.git().run(["branch", "--force", branch, target])
+        }
+        .map(drop)
+    }
+
+    /// `git push` with the push dialog's options; `remote_branch` may differ
+    /// from the local name.
+    pub fn push_to(
+        &self,
+        remote: &str,
+        local: &str,
+        remote_branch: &str,
+        options: PushOptions,
+    ) -> anyhow::Result<()> {
+        let mut args = vec!["push".to_string(), "--quiet".to_string()];
+        if options.set_upstream {
+            args.push("-u".into());
+        }
+        if options.force_with_lease {
+            args.push("--force-with-lease".into());
+        }
+        if options.tags {
+            args.push("--tags".into());
+        }
+        args.push(remote.into());
+        args.push(format!("refs/heads/{local}:refs/heads/{remote_branch}"));
+        self.git().run(args).map(drop)
     }
 
     pub fn create_branch(

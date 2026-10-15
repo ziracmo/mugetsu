@@ -140,8 +140,7 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         item("Checkout", Lucide::Check)
             .disabled(b.is_head)
             .on_click(act(&ctx.view, move |this, window, cx| {
-                let name = name.clone();
-                this.run_op("Checkout", move |r| r.checkout(&name), window, cx);
+                this.request_checkout(name.clone(), false, window, cx);
             }))
     };
     let worktree = {
@@ -198,25 +197,61 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         }))
     };
     let push = {
-        let (name, remote, has_upstream) = (
-            name.clone(),
-            remote.clone(),
-            b.upstream.is_some() && !b.gone,
-        );
+        let (name, remote) = (name.clone(), remote.clone());
         item(
             trf!(
-                "Push vers '{}'",
-                "Push to '{}'",
+                "Push vers '{}'…",
+                "Push to '{}'…",
                 remote.as_deref().unwrap_or("remote")
             ),
             Lucide::ArrowUpFromLine,
         )
         .disabled(remote.is_none())
         .on_click(act(&ctx.view, move |this, window, cx| {
-            let (name, remote) = (name.clone(), remote.clone().unwrap_or_default());
-            this.run_op(
-                "Push",
-                move |r| r.push_branch(&remote, &name, !has_upstream),
+            this.open_push_dialog(Some(name.clone()), window, cx)
+        }))
+    };
+    let reset_to_upstream = {
+        let (name, upstream, is_head) = (name.clone(), b.upstream.clone(), b.is_head);
+        item(
+            trf!(
+                "Reset '{}' sur '{}'…",
+                "Reset '{}' to '{}'…",
+                b.name,
+                b.upstream.as_deref().unwrap_or("upstream")
+            ),
+            Lucide::RotateCcw,
+        )
+        .disabled(b.upstream.is_none() || b.gone)
+        .on_click(act(&ctx.view, move |this, window, cx| {
+            let (name, upstream) = (name.clone(), upstream.clone().unwrap_or_default());
+            this.confirm(
+                trf!(
+                    "Reset '{name}' sur '{upstream}' ?",
+                    "Reset '{name}' to '{upstream}'?"
+                ),
+                if is_head {
+                    tr(
+                        "La branche revient exactement au remote. Les commits locaux non poussés et les modifications non commitées seront perdus.",
+                        "The branch is set exactly to the remote. Unpushed local commits and uncommitted changes will be lost.",
+                    )
+                } else {
+                    tr(
+                        "La branche revient exactement au remote. Les commits locaux non poussés seront perdus.",
+                        "The branch is set exactly to the remote. Unpushed local commits will be lost.",
+                    )
+                }
+                .into(),
+                tr("Reset", "Reset"),
+                move |this, window, cx| {
+                    let (name, upstream) = (name.clone(), upstream.clone());
+                    this.run_op(
+                        "Reset",
+                        move |r| r.reset_branch(&name, &upstream, is_head),
+                        window,
+                        cx,
+                    );
+                },
                 window,
                 cx,
             );
@@ -282,6 +317,7 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         .separator()
         .item(fast_forward)
         .item(push)
+        .item(reset_to_upstream)
         .item(pr_item(
             ctx,
             remote.as_deref().unwrap_or("origin"),
@@ -316,8 +352,7 @@ pub fn remote_branch_menu(
     let checkout = {
         let full = full.clone();
         item("Checkout", Lucide::Check).on_click(act(&ctx.view, move |this, window, cx| {
-            let full = full.clone();
-            this.run_op("Checkout", move |r| r.checkout_remote(&full), window, cx);
+            this.request_checkout(full.clone(), true, window, cx);
         }))
     };
     let delete = {

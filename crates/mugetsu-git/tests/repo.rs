@@ -208,3 +208,96 @@ fn branch_menu_operations() {
     assert!(clone.refs().unwrap().head_branch.is_none());
     let _ = repo;
 }
+
+#[test]
+fn checkout_with_local_changes_reset_to_remote_and_push() {
+    use mugetsu_git::{LocalChanges, PushOptions};
+    let (dir, _repo) = fixture();
+    let clone_dir = tempfile::tempdir().unwrap();
+    git(
+        clone_dir.path(),
+        &["clone", "-q", dir.path().to_str().unwrap(), "c"],
+    );
+    let path = clone_dir.path().join("c");
+    git(&path, &["config", "user.name", "Test"]);
+    git(&path, &["config", "user.email", "test@example.com"]);
+    let clone = Repo::open(&path).unwrap();
+    let head = |r: &Repo| r.refs().unwrap().head_branch.unwrap();
+
+    // Remote checkout of a branch that already exists locally just switches.
+    clone.checkout_remote("origin/main").unwrap();
+    assert_eq!(head(&clone), "main");
+
+    // Stash and reapply across a checkout.
+    std::fs::write(path.join("wip.txt"), "wip\n").unwrap();
+    clone
+        .switch_to("feature", Some("origin/feature"), LocalChanges::Stash)
+        .unwrap();
+    assert_eq!(head(&clone), "feature");
+    assert_eq!(
+        std::fs::read_to_string(path.join("wip.txt")).unwrap(),
+        "wip\n"
+    );
+    assert!(clone.refs().unwrap().stashes.is_empty(), "stash was popped");
+
+    // Discard drops tracked changes.
+    git(&path, &["add", "wip.txt"]);
+    clone
+        .switch_to("main", None, LocalChanges::Discard)
+        .unwrap();
+    assert_eq!(head(&clone), "main");
+    assert!(!path.join("wip.txt").exists());
+    assert!(!clone.is_dirty().unwrap());
+
+    // Local commit diverging from origin, then reset back onto it.
+    commit_file(&path, "local.txt", "x\n", "local only");
+    let remote_tip = out(&path, &["rev-parse", "origin/main"]);
+    clone.reset_branch("main", "origin/main", true).unwrap();
+    assert_eq!(out(&path, &["rev-parse", "HEAD"]), remote_tip);
+    commit_file(&path, "other.txt", "y\n", "on feature");
+    clone
+        .switch_to("feature", None, LocalChanges::Keep)
+        .unwrap();
+    clone.reset_branch("main", "origin/feature", false).unwrap();
+    assert_eq!(
+        out(&path, &["rev-parse", "main"]),
+        out(&path, &["rev-parse", "origin/feature"])
+    );
+
+    // Rewritten history needs --force-with-lease.
+    commit_file(&path, "f.txt", "1\n", "f1");
+    clone
+        .push_to("origin", "feature", "feature", PushOptions::default())
+        .unwrap();
+    git(&path, &["commit", "-q", "--amend", "-m", "f1 amended"]);
+    assert!(
+        clone
+            .push_to("origin", "feature", "feature", PushOptions::default())
+            .is_err()
+    );
+    clone
+        .push_to(
+            "origin",
+            "feature",
+            "feature",
+            PushOptions {
+                force_with_lease: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        out(dir.path(), &["log", "-1", "--format=%s", "feature"]),
+        "f1 amended"
+    );
+}
+
+fn out(dir: &Path, args: &[&str]) -> String {
+    let o = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "git {args:?}");
+    String::from_utf8(o.stdout).unwrap().trim().to_string()
+}

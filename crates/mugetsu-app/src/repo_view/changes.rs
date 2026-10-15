@@ -14,7 +14,7 @@ use gpui_kit::{
 };
 use mugetsu_git::{Change, FileStatus};
 
-use super::{RepoView, SelectedChange};
+use super::{RepoView, SelectedChange, StageAll, StashChanges};
 use crate::i18n::tr;
 use crate::theme;
 
@@ -448,7 +448,20 @@ impl RepoView {
                     }),
             );
 
-        h_flex().size_full().min_h_0().child(left).child(right)
+        h_flex()
+            .id("changes")
+            .key_context("Changes")
+            .track_focus(&self.changes_focus)
+            .size_full()
+            .min_h_0()
+            .on_action(cx.listener(|this, _: &StageAll, window, cx| {
+                if this.data.status.unstaged().next().is_some() {
+                    this.run_op("Stage all", |r| r.stage_all(), window, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &StashChanges, window, cx| this.stash(window, cx)))
+            .child(left)
+            .child(right)
     }
 
     /// Commits the staged changes; `push` also pushes HEAD afterwards (⇧⌘↩).

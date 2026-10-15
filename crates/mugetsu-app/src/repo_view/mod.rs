@@ -2,6 +2,7 @@
 //! history graph with commit details, and the working-copy "Changes" view.
 
 mod changes;
+mod forms;
 mod history;
 mod menus;
 mod particles;
@@ -52,7 +53,9 @@ gpui_kit::actions!(
         CheckoutBranch,
         ToggleSidebar,
         Commit,
-        CommitAndPush
+        CommitAndPush,
+        StageAll,
+        StashChanges
     ]
 );
 
@@ -81,6 +84,10 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-enter", Commit, Some("Repo")),
         KeyBinding::new("secondary-shift-enter", CommitAndPush, Some("Repo")),
         KeyBinding::new("escape", CloseSearch, Some("CommitSearch")),
+        KeyBinding::new("secondary-a", StageAll, Some("Changes")),
+        KeyBinding::new("ctrl-a", StageAll, Some("Changes")),
+        KeyBinding::new("secondary-s", StashChanges, Some("Changes")),
+        KeyBinding::new("ctrl-s", StashChanges, Some("Changes")),
     ]);
 }
 
@@ -118,6 +125,7 @@ pub struct RepoView {
     selected_ref: Option<SharedString>,
     history_scroll: UniformListScrollHandle,
     history_focus: FocusHandle,
+    changes_focus: FocusHandle,
     commit_diff: Entity<DiffState>,
     commit_message: SharedString,
     commit_files: usize,
@@ -214,6 +222,7 @@ impl RepoView {
             selected_ref: None,
             history_scroll: UniformListScrollHandle::new(),
             history_focus: cx.focus_handle().tab_stop(true),
+            changes_focus: cx.focus_handle(),
             commit_diff,
             commit_message: SharedString::default(),
             commit_files: 0,
@@ -752,7 +761,7 @@ impl RepoView {
             "Checkout",
             move |this, name, window, cx| {
                 if names.contains(&name) {
-                    this.checkout_with_burst(name, false, window, cx);
+                    this.request_checkout(name, false, window, cx);
                 } else {
                     window.push_notification(
                         gpui_kit::component::notification::Notification::error(trf!(
@@ -769,28 +778,20 @@ impl RepoView {
     }
 
     /// Checks out a branch, then bursts particles around its label.
-    pub fn checkout_with_burst(
+    /// Switches branch (see [`Repo::switch_to`]) and celebrates with a particle
+    /// burst on the branch.
+    pub fn checkout_branch(
         &mut self,
-        name: String,
-        is_remote: bool,
+        local: String,
+        track: Option<String>,
+        changes: mugetsu_git::LocalChanges,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let local = if is_remote {
-            name.split_once('/')
-                .map_or(name.clone(), |(_, b)| b.to_string())
-        } else {
-            name.clone()
-        };
+        let branch = local.clone();
         self.run_op_then(
             "Checkout",
-            move |r| {
-                if is_remote {
-                    r.checkout_remote(&name)
-                } else {
-                    r.checkout(&name)
-                }
-            },
+            move |r| r.switch_to(&branch, track.as_deref(), changes),
             move |this, _, cx| {
                 this.celebrate_seq += 1;
                 let seq = this.celebrate_seq;
@@ -825,6 +826,13 @@ impl RepoView {
 impl Render for RepoView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rem = window.rem_size();
+        // Keep keyboard shortcuts working in the Changes view (⌘A, ⌘S…).
+        if self.focused
+            && self.mode == Mode::Changes
+            && (window.focused(cx).is_none() || self.history_focus.is_focused(window))
+        {
+            self.changes_focus.focus(window, cx);
+        }
         let body = if let Some(err) = &self.load_error {
             v_flex()
                 .size_full()
@@ -914,7 +922,9 @@ impl Render for RepoView {
             .min_h_0()
             .on_action(cx.listener(|this, _: &Fetch, _, cx| this.fetch(cx)))
             .on_action(cx.listener(|this, _: &Pull, window, cx| this.pull(window, cx)))
-            .on_action(cx.listener(|this, _: &Push, window, cx| this.push_head(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &Push, window, cx| this.open_push_dialog(None, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &Stash, window, cx| this.stash(window, cx)))
             .on_action(
                 cx.listener(|this, _: &NewBranch, window, cx| this.new_branch_at_head(window, cx)),
