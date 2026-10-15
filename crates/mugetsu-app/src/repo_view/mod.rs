@@ -13,6 +13,7 @@ mod particles;
 mod pr_panel;
 mod pr_tip;
 mod pr_view;
+mod rebase;
 mod restack;
 mod search;
 mod shimmer;

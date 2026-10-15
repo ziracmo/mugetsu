@@ -69,6 +69,34 @@ impl Git {
         Ok(out.stdout)
     }
 
+    /// Like [`Self::run`], with extra environment variables (e.g. the editors
+    /// of a scripted `rebase -i`).
+    pub fn run_with_env<I, S>(&self, args: I, envs: &[(&str, &OsStr)]) -> anyhow::Result<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut cmd = self.command(args);
+        cmd.envs(envs.iter().copied());
+        let out = cmd
+            .output()
+            .with_context(|| format!("failed to spawn {cmd:?}"))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            bail!(
+                "{}",
+                if stderr.trim().is_empty() {
+                    stdout
+                } else {
+                    stderr
+                }
+                .trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
     /// Runs git and returns stdout whatever the exit code (e.g. `diff --no-index`).
     pub fn run_lenient<I, S>(&self, args: I) -> anyhow::Result<String>
     where

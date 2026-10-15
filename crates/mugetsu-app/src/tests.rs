@@ -1394,3 +1394,105 @@ fn command_k_palette_runs_actions_and_switches_repositories(cx: &mut TestAppCont
     assert!(palette(cx).is_none());
     assert_eq!(cx.read(|cx| ws.read(cx).active_index()), 1);
 }
+
+/// main: base - one - two - three, each on its own file.
+fn linear_fixture(dir: &Path) -> String {
+    git(dir, &["init", "-q", "-b", "main"]);
+    git(dir, &["config", "user.name", "Test"]);
+    git(dir, &["config", "user.email", "test@example.com"]);
+    commit_file(dir, "base.txt", "base\n", "base");
+    let base = git(dir, &["rev-parse", "HEAD"]).trim().to_string();
+    commit_file(dir, "one.txt", "1\n", "one");
+    commit_file(dir, "two.txt", "2\n", "two");
+    commit_file(dir, "three.txt", "3\n", "three");
+    base
+}
+
+fn messages(dir: &Path) -> Vec<String> {
+    git(dir, &["log", "--reverse", "--format=%B%x1e"])
+        .split('\x1e')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[gpui_kit::test]
+fn interactive_rebase_by_drag_and_drop(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let base = linear_fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let base_id = gix::ObjectId::from_hex(base.as_bytes()).unwrap();
+    ui_step(cx, handle, &|window, cx| {
+        view.update(cx, |v, cx| v.open_rebase(base_id, window, cx))
+    });
+    settle(cx, &view);
+    // Let the sheet and its rows finish easing in.
+    std::thread::sleep(Duration::from_millis(700));
+    // Newest first: three, two, one. Move "one" to the top…
+    ui_step(cx, handle, &|window, cx| {
+        window.drag_to("rebase-row-2", "rebase-row-0", cx)
+    });
+    // …then squash "three" (now second) into "two" below it.
+    ui_step(cx, handle, &|window, cx| {
+        window.click("rebase-squash-1", cx)
+    });
+    ui_step(cx, handle, &|window, cx| window.click("rebase-ok", cx));
+    settle(cx, &view);
+    assert_eq!(messages(dir.path()), ["base", "two\n\nthree", "one"]);
+    for file in ["one.txt", "two.txt", "three.txt"] {
+        assert!(dir.path().join(file).exists(), "{file} kept");
+    }
+}
+
+#[gpui_kit::test]
+fn stopped_interactive_rebase_opens_the_resolver(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    git(p, &["init", "-q", "-b", "main"]);
+    git(p, &["config", "user.name", "Test"]);
+    git(p, &["config", "user.email", "test@example.com"]);
+    commit_file(p, "a.txt", "base\n", "base");
+    commit_file(p, "a.txt", "one\n", "one");
+    commit_file(p, "a.txt", "two\n", "two");
+    let head = git(p, &["rev-parse", "HEAD"]);
+    let base = git(p, &["rev-parse", "HEAD~2"]).trim().to_string();
+    let (handle, view) = open_repo_view(cx, p);
+    let plan = view.read_with(cx, |v, _| v.repo().rebase_plan(&base).unwrap());
+    // Swapping two edits of the same line conflicts.
+    let swapped: Vec<_> = plan
+        .iter()
+        .rev()
+        .map(|c| mugetsu_git::RebaseStep {
+            id: c.id.clone(),
+            action: mugetsu_git::RebaseAction::Pick,
+            message: None,
+        })
+        .collect();
+    ui_step(cx, handle, &|window, cx| {
+        let (base, steps) = (base.clone(), swapped.clone());
+        view.update(cx, |v, cx| v.run_rebase(base, steps, window, cx))
+    });
+    settle(cx, &view);
+    cx.read(|cx| {
+        let v = view.read(cx);
+        assert_eq!(
+            v.data().operation.as_ref().map(|o| o.op),
+            Some(mugetsu_git::Operation::Rebase),
+            "stopped on the conflict"
+        );
+        assert_eq!(v.mode(), Mode::Changes, "the resolver takes over");
+    });
+    ui_step(cx, handle, &|window, _| {
+        assert!(
+            window.try_find("op-abort").is_some(),
+            "Continue / Skip / Abort"
+        );
+    });
+    git(p, &["rebase", "--abort"]);
+    view.update(cx, |v, cx| v.reload(cx));
+    settle(cx, &view);
+    assert_eq!(git(p, &["rev-parse", "HEAD"]), head);
+    cx.read(|cx| assert!(view.read(cx).data().operation.is_none()));
+}
