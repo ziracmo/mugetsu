@@ -78,6 +78,7 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
 - **Auto-fetch** every 10 s for the focused repository, every 5 min for the others; a pulsing dot shows when
   a remote moved.
 - **Open repository** (⌘O) from recents or your project folders.
+- **New window** (⇧⌘N) for another set of repositories.
 
 ### GitHub pull requests
 
@@ -85,6 +86,8 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
   Hover for a card that appears at once: author avatar, failing checks, review decision.
 - **PRs tab**: open PRs (reviews you owe first), drafts, stacks with their `n/total` position, and recently
   merged PRs. Filters: all / mine / to review.
+- **PR view**: click a PR to see it in the main pane: CI, review and conversations, description, commits and
+  diff against its base. Double-click jumps to its branch.
 - **Stack view**: click a stack to see its progress, which PRs are ready, and the next step to unblock it.
 - **AI review**: right-click a PR to run Claude Code (`/code-review`), Codex or your own command on it, in a
   Terminal inside the repository (Settings › AI).
@@ -120,6 +123,7 @@ On Windows, use Ctrl instead of ⌘.
 | Compact history | ⇧⌘K |
 | Previous / next commit | ↑ ↓ (or k j) |
 | Open repository / New tab / Close tab | ⌘O / ⌘T / ⌘W |
+| New window | ⇧⌘N |
 | Switch tab | ⌃Tab / ⌃⇧Tab |
 | Toggle sidebar | ⌃⌘S |
 | Refresh | ⌘R |
