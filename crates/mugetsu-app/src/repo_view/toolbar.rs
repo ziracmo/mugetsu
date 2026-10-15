@@ -466,7 +466,10 @@ impl RepoView {
                     .child(
                         tab("mode-stats", "Stats".into(), "⌘3", mode == Mode::Stats)
                             .on_click(cx.listener(|this, _, _, cx| this.set_mode(Mode::Stats, cx))),
-                    ),
+                    )
+                    .when(mode == Mode::Stack, |s| {
+                        s.child(tab("mode-stack", "Stack".into(), "", true))
+                    }),
             )
             .child(div().flex_1())
             .child(self.fetch_button(cx))

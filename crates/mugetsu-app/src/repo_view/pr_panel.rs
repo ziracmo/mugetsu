@@ -457,9 +457,20 @@ impl RepoView {
             }
             stack_count += 1;
             let base = stack.first().map(|p| p.base.clone()).unwrap_or_default();
-            stack_rows.push(
+            stack_rows.push({
+                let head = stack.first().map(|p| p.head.clone()).unwrap_or_default();
+                let active = self.mode == super::Mode::Stack
+                    && stack
+                        .iter()
+                        .any(|p| Some(&p.head) == self.stack_focus.as_ref());
                 h_flex()
                     .id(("stack", i))
+                    .test_support()
+                    .cursor_pointer()
+                    .rounded_md()
+                    .when(active, |s| s.bg(theme::alpha(theme::violet(), 0.16)))
+                    .when(!active, |s| s.hover(|s| s.bg(theme::raised())))
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_stack(head.clone(), cx)))
                     .h(px(22.))
                     .pl(px(14.))
                     .gap_1p5()
@@ -471,8 +482,15 @@ impl RepoView {
                             .text_color(theme::violet()),
                     )
                     .child(format!("{base} ← {}", stack.len()))
-                    .into_any_element(),
-            );
+                    .child(div().flex_1())
+                    .child(
+                        Icon::new(Lucide::ChevronRight)
+                            .xsmall()
+                            .mr_1()
+                            .text_color(theme::muted()),
+                    )
+                    .into_any_element()
+            });
             // Top of the stack first, like GitHub's stack view.
             for (pos, pr) in stack.iter().enumerate().rev() {
                 stack_rows.push(self.pr_row(pr, Some((pos + 1, stack.len())), 1, cx));

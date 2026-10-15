@@ -11,6 +11,7 @@ mod pr_panel;
 mod search;
 mod shimmer;
 mod sidebar;
+mod stack_panel;
 mod stats_panel;
 mod toolbar;
 
@@ -105,6 +106,8 @@ pub enum Mode {
     Changes,
     /// Who works on the default branch, and when (commits only).
     Stats,
+    /// A PR stack's progress (see `stack_focus`).
+    Stack,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,6 +196,10 @@ pub struct RepoView {
     _settings: Subscription,
     /// Recent PRs of the repository (sidebar PR tab, stacks).
     pr_list: Arc<Vec<mugetsu_forge::PullRequest>>,
+    /// Head of a PR in the stack shown by `Mode::Stack`.
+    stack_focus: Option<String>,
+    /// Restarts the stack view's entrance animation.
+    stack_seq: usize,
     /// GitHub login of the user.
     pr_me: Option<String>,
     sidebar_tab: SidebarTab,
@@ -309,6 +316,8 @@ impl RepoView {
             _commit_search,
             commit_order: crate::settings::get().commit_order,
             pr_list: Arc::default(),
+            stack_focus: None,
+            stack_seq: 0,
             pr_me: None,
             sidebar_tab: if crate::settings::get().shared_layout
                 && crate::settings::get().sidebar_prs
@@ -377,11 +386,6 @@ impl RepoView {
 
     pub fn is_fetching(&self) -> bool {
         self.fetching
-    }
-
-    #[cfg(test)]
-    pub fn mode(&self) -> Mode {
-        self.mode
     }
 
     #[cfg(test)]
@@ -1080,6 +1084,17 @@ impl RepoView {
             .collect()
     }
 
+    #[cfg(test)]
+    pub fn set_pr_list(&mut self, prs: Vec<mugetsu_forge::PullRequest>, cx: &mut Context<Self>) {
+        self.pr_list = Arc::new(prs);
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
     pub fn history_focus_handle(&self) -> FocusHandle {
         self.history_focus.clone()
     }
@@ -1148,6 +1163,7 @@ impl Render for RepoView {
                     .into_any_element(),
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
                 Mode::Stats => self.render_stats(cx),
+                Mode::Stack => self.render_stack(cx),
             };
             // The content floats as a frosted card over the window glass.
             let card = div()

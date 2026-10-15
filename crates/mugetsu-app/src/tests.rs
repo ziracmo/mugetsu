@@ -1036,3 +1036,41 @@ fn settings_sections_and_ai_tool_presets(cx: &mut TestAppContext) {
     assert_eq!(s.ai_tool, AiTool::Codex);
     assert_eq!(Some(s.ai_command.as_str()), AiTool::Codex.preset());
 }
+
+#[gpui_kit::test]
+fn clicking_a_stack_shows_its_progress(cx: &mut TestAppContext) {
+    use mugetsu_forge::{PrState, PullRequest};
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let pr = |n: u64, head: &str, base: &str| PullRequest {
+        number: n,
+        title: format!("PR {n}"),
+        url: String::new(),
+        state: PrState::Open,
+        status: None,
+        head: head.into(),
+        base: base.into(),
+        same_repo: true,
+        author: "me".into(),
+        requested_reviewers: vec![],
+        updated_at: String::new(),
+        merged_at: None,
+    };
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_pr_list(vec![pr(1, "a", "master"), pr(2, "b", "a")], cx);
+            v.open_stack("b".into(), cx);
+        })
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("stack-view").is_some());
+        assert!(window.try_find("stack-pr-1").is_some());
+        assert!(window.try_find("stack-pr-2").is_some());
+        assert!(window.try_find("stack-next").is_some());
+    })
+    .unwrap();
+    cx.read(|cx| assert_eq!(view.read(cx).mode(), crate::repo_view::Mode::Stack));
+}

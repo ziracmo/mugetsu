@@ -142,6 +142,16 @@ pub fn avatar(email: &str, name: &str, size: f32, cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
+/// A GitHub user's picture by login (via the noreply address), or initials.
+pub fn github(login: &str, size: f32, cx: &mut App) -> AnyElement {
+    avatar(
+        &format!("{login}@users.noreply.github.com"),
+        login,
+        size,
+        cx,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
