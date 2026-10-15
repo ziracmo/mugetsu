@@ -635,7 +635,18 @@ impl RepoView {
         upstream: Option<&str>,
         is_remote: bool,
     ) -> Option<&PrLookup> {
-        self.prs.get(&pr::forge_branch(branch, upstream, is_remote))
+        let lookup = self
+            .prs
+            .get(&pr::forge_branch(branch, upstream, is_remote))?;
+        // Repository tab setting: only my PRs / those I review get a chip.
+        let filter = crate::settings::get().pr_chips;
+        match lookup {
+            _ if filter == crate::settings::PrFilter::All => Some(lookup),
+            PrLookup::Found(pr) if pr_panel::keep(pr, filter, self.pr_me.as_deref()) => {
+                Some(lookup)
+            }
+            _ => None,
+        }
     }
 
     // ---- Fetch -------------------------------------------------------------

@@ -144,6 +144,36 @@ impl gpui_kit::Render for SectionDrag {
     }
 }
 
+/// Repository tab: which PRs show a chip on branches (all / mine / to review).
+fn pr_chips_button() -> AnyElement {
+    use crate::settings::PrFilter;
+    use gpui_kit::base::Selectable as _;
+    use gpui_kit::component::button::{Button, ButtonVariants as _};
+    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+    let current = crate::settings::get().pr_chips;
+    Button::new("pr-chips-config")
+        .ghost()
+        .small()
+        .icon(Icon::new(Lucide::GitPullRequest))
+        .when(current != PrFilter::All, |b| b.selected(true))
+        .tooltip(tr("Infos de PR affichées", "PR info shown"))
+        .dropdown_menu(move |menu, _, _| {
+            let item = |label: &'static str, filter: PrFilter| {
+                PopupMenuItem::new(label)
+                    .checked(current == filter)
+                    .on_click(move |_, _, cx| crate::settings::update(cx, |s| s.pr_chips = filter))
+            };
+            menu.label(tr("Chips de PR sur les branches", "PR chips on branches"))
+                .item(item(tr("Toutes les PRs", "Every PR"), PrFilter::All))
+                .item(item(tr("Mes PRs", "My PRs"), PrFilter::Mine))
+                .item(item(
+                    tr("Celles à reviewer", "PRs I review"),
+                    PrFilter::Review,
+                ))
+        })
+        .into_any_element()
+}
+
 /// `origin` when present, else the first remote.
 pub(super) fn default_remote(refs: &RefsSnapshot) -> Option<String> {
     refs.remotes
@@ -849,17 +879,26 @@ impl RepoView {
             // Pure window glass: the blur shows through the sidebar.
             .child(self.render_sidebar_tabs(cx))
             .child(
-                div().flex_none().p_2().child(
-                    Input::new(&self.sidebar_search)
-                        .id("sidebar-search")
-                        .small()
-                        .cleanable(true)
-                        .prefix(
-                            Icon::new(Lucide::Search)
-                                .xsmall()
-                                .text_color(theme::muted()),
+                h_flex()
+                    .flex_none()
+                    .p_2()
+                    .gap_1()
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(&self.sidebar_search)
+                                .id("sidebar-search")
+                                .small()
+                                .cleanable(true)
+                                .prefix(
+                                    Icon::new(Lucide::Search)
+                                        .xsmall()
+                                        .text_color(theme::muted()),
+                                ),
                         ),
-                ),
+                    )
+                    .when(self.sidebar_tab == super::SidebarTab::Repo, |s| {
+                        s.child(pr_chips_button())
+                    }),
             )
             .child(
                 v_flex()

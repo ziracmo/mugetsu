@@ -75,6 +75,8 @@ pub struct Settings {
     pub collapsed_sections: Vec<String>,
     /// Last PRs tab filter.
     pub pr_filter: PrFilter,
+    /// Which PRs get a chip on branches (repository tab).
+    pub pr_chips: PrFilter,
 }
 
 /// PRs tab quick filter, shared by every repository.
@@ -108,6 +110,7 @@ impl Default for Settings {
             sidebar_prs: false,
             collapsed_sections: vec!["tags".into()],
             pr_filter: PrFilter::All,
+            pr_chips: PrFilter::All,
         }
     }
 }
