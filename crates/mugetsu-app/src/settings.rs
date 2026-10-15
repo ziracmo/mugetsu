@@ -77,6 +77,8 @@ pub struct Settings {
     pub pr_filter: PrFilter,
     /// Which PRs get a chip on branches (repository tab).
     pub pr_chips: PrFilter,
+    /// The first-launch eclipse has played.
+    pub intro_seen: bool,
     /// History shows one row per branch instead of every commit.
     pub history_compact: bool,
     /// AI tool launched by a PR's "Review with AI".
@@ -148,6 +150,7 @@ impl Default for Settings {
             collapsed_sections: vec!["tags".into()],
             pr_filter: PrFilter::All,
             pr_chips: PrFilter::All,
+            intro_seen: false,
             history_compact: false,
             ai_tool: AiTool::Claude,
             ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),

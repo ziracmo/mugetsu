@@ -55,6 +55,8 @@ pub struct Workspace {
     current: usize,
     window_active: bool,
     persist: bool,
+    /// The first-launch eclipse is playing over the window.
+    intro: bool,
     _scheduler: Task<()>,
     _activation: Subscription,
     /// Focus the active tab on the next frame (after a switch, the focused
@@ -93,11 +95,25 @@ impl Workspace {
             current: session.current,
             window_active: true,
             persist,
+            intro: persist && !cfg!(test) && !crate::settings::get().intro_seen,
             _scheduler: scheduler,
             _activation: activation,
             refocus: true,
             switcher: None,
         };
+        if this.intro {
+            crate::settings::remember(|s| s.intro_seen = true);
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(crate::welcome::ECLIPSE)
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.intro = false;
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
         this.open_set(window, cx);
         this
     }
@@ -639,30 +655,19 @@ impl Render for Workspace {
             .collect();
         let body = match self.active() {
             Some(view) => view.clone().into_any_element(),
-            None => v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .gap_4()
-                .child(
-                    div()
-                        .text_3xl()
-                        .font_weight(gpui_kit::FontWeight::BOLD)
-                        .text_color(theme::accent())
-                        .child("月 Mugetsu"),
+            None => {
+                let open = cx.entity().downgrade();
+                let recent = cx.entity().downgrade();
+                crate::welcome::empty_state(
+                    &crate::settings::get().recent,
+                    std::rc::Rc::new(move |window, cx| {
+                        let _ = open.update(cx, |this, cx| this.prompt_open(window, cx));
+                    }),
+                    std::rc::Rc::new(move |path, window, cx| {
+                        let _ = recent.update(cx, |this, cx| this.open_or_report(path, window, cx));
+                    }),
                 )
-                .child(div().text_color(cx.theme().muted_foreground).child(tr(
-                    "Ouvre un dépôt Git pour commencer",
-                    "Open a Git repository to start",
-                )))
-                .child(
-                    Button::new("open-first")
-                        .primary()
-                        .icon(Icon::new(Lucide::FolderOpen))
-                        .label(tr("Ouvrir un dépôt…", "Open repository…"))
-                        .on_click(cx.listener(|this, _, window, cx| this.prompt_open(window, cx))),
-                )
-                .into_any_element(),
+            }
         };
         if std::mem::take(&mut self.refocus)
             && let Some(view) = self.active()
@@ -728,6 +733,7 @@ impl Render for Workspace {
             )
             .child(div().flex_1().min_h_0().child(body))
             .children(switcher)
+            .when(self.intro, |s| s.child(crate::welcome::eclipse()))
     }
 }
 

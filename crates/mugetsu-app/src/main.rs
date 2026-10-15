@@ -22,6 +22,7 @@ mod session;
 mod settings;
 mod settings_view;
 mod theme;
+mod welcome;
 mod workspace;
 
 use std::path::PathBuf;
