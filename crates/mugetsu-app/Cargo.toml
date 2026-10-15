@@ -3,6 +3,11 @@ name = "mugetsu-app"
 version = "0.1.0"
 edition = "2024"
 
+# Capitalised: macOS shows the executable name in the Dock and menu bar.
+[[bin]]
+name = "Mugetsu"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 chrono = "0.4.45"

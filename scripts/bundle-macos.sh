@@ -13,7 +13,7 @@ cargo build --release -p mugetsu-app
 APP=target/release/Mugetsu.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/mugetsu-app "$APP/Contents/MacOS/Mugetsu"
+cp target/release/Mugetsu "$APP/Contents/MacOS/Mugetsu"
 
 # App icon: every size macOS wants, from the 1024 px master.
 ICONSET=target/release/Mugetsu.iconset

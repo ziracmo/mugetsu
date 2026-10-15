@@ -122,9 +122,10 @@ impl gpui_kit::Render for SectionDrag {
             .rounded_md()
             .text_sm()
             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-            .bg(gpui_kit::rgba(0x2a2a2dee))
+            .bg(theme::popover())
+            .text_color(gpui_kit::white())
             .border_1()
-            .border_color(theme::glass_edge())
+            .border_color(theme::alpha(theme::accent(), 0.6))
             .shadow_lg()
             .child(self.title)
     }
@@ -180,6 +181,7 @@ impl RepoView {
         count: usize,
         rows: Vec<AnyElement>,
         searching: bool,
+        extra: Option<AnyElement>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if searching && rows.is_empty() {
@@ -210,6 +212,7 @@ impl RepoView {
                         )
                         .child(Icon::new(icon).xsmall())
                         .child(div().flex_1().child(title))
+                        .children(extra)
                         .child(
                             div()
                                 .px_1p5()
@@ -710,6 +713,40 @@ impl RepoView {
             .collect()
     }
 
+    /// Trash button in the Stashes header: drops every stash after asking.
+    fn clear_stashes_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("clear-stashes")
+            .test_support()
+            .flex_none()
+            .p_0p5()
+            .rounded_sm()
+            .text_color(theme::muted())
+            .hover(|s| s.bg(theme::raised()).text_color(theme::red()))
+            .child(Icon::new(Lucide::Trash).xsmall())
+            .tooltip(|window, cx| {
+                Tooltip::new(tr("Supprimer tous les stashes…", "Clear all stashes…"))
+                    .build(window, cx)
+            })
+            .on_click(cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                let n = this.data.refs.stashes.len();
+                this.confirm(
+                    trf!("Supprimer les {n} stashes ?", "Clear all {n} stashes?"),
+                    tr(
+                        "Tous les stashes sont supprimés définitivement.",
+                        "Every stash is deleted for good.",
+                    )
+                    .into(),
+                    tr("Tout supprimer", "Clear all"),
+                    |this, window, cx| this.run_op("Stash clear", |r| r.stash_clear(), window, cx),
+                    window,
+                    cx,
+                );
+            }))
+            .into_any_element()
+    }
+
     pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let query = self.sidebar_query(cx);
         let searching = !query.is_empty();
@@ -734,6 +771,7 @@ impl RepoView {
                 nb,
                 branches,
                 searching,
+                None,
                 cx,
             ),
             self.section(
@@ -743,6 +781,7 @@ impl RepoView {
                 nr,
                 remotes,
                 searching,
+                None,
                 cx,
             ),
             self.section(
@@ -752,9 +791,10 @@ impl RepoView {
                 nw,
                 worktrees,
                 searching,
+                None,
                 cx,
             ),
-            self.section("tags", "Tags", Lucide::Tags, nt, tags, searching, cx),
+            self.section("tags", "Tags", Lucide::Tags, nt, tags, searching, None, cx),
             self.section(
                 "stashes",
                 "Stashes",
@@ -762,6 +802,7 @@ impl RepoView {
                 ns,
                 stashes,
                 searching,
+                (ns > 0).then(|| self.clear_stashes_button(cx)),
                 cx,
             ),
         ];

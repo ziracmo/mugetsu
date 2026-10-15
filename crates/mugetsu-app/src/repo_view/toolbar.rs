@@ -34,72 +34,115 @@ fn check_look(checks: CheckState) -> (Lucide, gpui_kit::Hsla) {
     }
 }
 
-/// Hover card of a PR: title, state, CI, reviews, unresolved conversations.
-fn pr_card(pr: &PullRequest) -> AnyElement {
+/// Hover card of a PR: state, title, branches, CI, reviews, conversations.
+/// Fixed width so long names wrap instead of being cut.
+pub fn pr_card(pr: &PullRequest) -> AnyElement {
     let line = |icon: Lucide, color: gpui_kit::Hsla, text: String| {
         h_flex()
-            .gap_1p5()
-            .child(Icon::new(icon).xsmall().text_color(color))
-            .child(text)
+            .w_full()
+            .items_start()
+            .gap_2()
+            .child(
+                div()
+                    .flex_none()
+                    .pt(px(2.))
+                    .child(Icon::new(icon).xsmall().text_color(color)),
+            )
+            .child(div().flex_1().min_w_0().child(text))
     };
-    let state = match pr.state {
-        PrState::Open => tr("Ouverte", "Open"),
-        PrState::Draft => tr("Brouillon", "Draft"),
-        PrState::Merged => tr("Mergée", "Merged"),
-        PrState::Closed => tr("Fermée", "Closed"),
+    let (state, state_icon) = match pr.state {
+        PrState::Open => (tr("Ouverte", "Open"), Lucide::GitPullRequest),
+        PrState::Draft => (tr("Brouillon", "Draft"), Lucide::GitPullRequestDraft),
+        PrState::Merged => (tr("Mergée", "Merged"), Lucide::GitMerge),
+        PrState::Closed => (tr("Fermée", "Closed"), Lucide::GitPullRequestClosed),
     };
-    let mut card = v_flex()
-        .gap_1()
-        .max_w(px(360.))
-        .text_xs()
+    let color = pr_color(pr.state);
+    let header = h_flex()
+        .w_full()
+        .gap_2()
+        .child(
+            h_flex()
+                .gap_1()
+                .px_1p5()
+                .py(px(1.))
+                .rounded_md()
+                .bg(theme::alpha(color, 0.18))
+                .text_color(color)
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(Icon::new(state_icon).xsmall())
+                .child(state),
+        )
         .child(
             div()
+                .text_color(theme::muted())
+                .child(format!("#{}", pr.number)),
+        )
+        .child(div().flex_1())
+        .when(!pr.author.is_empty(), |s| {
+            s.child(div().text_color(theme::muted()).child(pr.author.clone()))
+        });
+    let mut card = v_flex()
+        .w(px(380.))
+        .py_1()
+        .gap_2()
+        .text_xs()
+        .text_color(gpui_kit::white())
+        .child(header)
+        .child(
+            div()
+                .w_full()
                 .text_sm()
                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .child(format!("#{} {}", pr.number, pr.title)),
+                .child(pr.title.clone()),
         )
-        .child(line(
-            Lucide::GitPullRequest,
-            pr_color(pr.state),
-            state.into(),
-        ));
+        .when(!pr.head.is_empty(), |s| {
+            s.child(line(
+                Lucide::GitBranch,
+                theme::muted(),
+                format!("{} → {}", pr.head, pr.base),
+            ))
+        });
+    let mut details = v_flex()
+        .w_full()
+        .gap_1p5()
+        .pt_2()
+        .border_t_1()
+        .border_color(theme::hairline());
     if let Some(s) = &pr.status {
-        card = card.child(match s.checks {
-            Some(CheckState::Failing) => {
-                let (icon, color) = check_look(CheckState::Failing);
-                line(
-                    icon,
-                    color,
-                    trf!("CI en échec : {}", "CI failing: {}", s.failing.join(", ")),
-                )
-            }
-            Some(CheckState::Pending) => {
-                let (icon, color) = check_look(CheckState::Pending);
-                line(
-                    icon,
-                    color,
-                    trf!(
-                        "CI en cours ({} en attente, {} ok)",
-                        "CI running ({} pending, {} passed)",
+        details = match s.checks {
+            Some(checks) => {
+                let (icon, color) = check_look(checks);
+                let summary = match checks {
+                    CheckState::Failing => trf!(
+                        "CI en échec · {} échec(s), {} ok",
+                        "CI failing · {} failed, {} passed",
+                        s.failing.len(),
+                        s.passed
+                    ),
+                    CheckState::Pending => trf!(
+                        "CI en cours · {} en attente, {} ok",
+                        "CI running · {} pending, {} passed",
                         s.pending,
                         s.passed
                     ),
-                )
+                    CheckState::Passing => {
+                        trf!("CI OK · {} checks", "CI passing · {} checks", s.passed)
+                    }
+                };
+                details
+                    .child(line(icon, color, summary))
+                    .children(s.failing.iter().map(|name| {
+                        div()
+                            .pl_5()
+                            .child(line(Lucide::X, theme::red(), name.clone()))
+                    }))
             }
-            Some(CheckState::Passing) => {
-                let (icon, color) = check_look(CheckState::Passing);
-                line(
-                    icon,
-                    color,
-                    trf!("CI OK ({} checks)", "CI passing ({} checks)", s.passed),
-                )
-            }
-            None => line(
+            None => details.child(line(
                 Lucide::CircleDashed,
                 theme::muted(),
                 tr("Pas de CI", "No checks").into(),
-            ),
-        });
+            )),
+        };
         if let Some(review) = s.review {
             let (icon, color, text) = match review {
                 ReviewDecision::Approved => (
@@ -114,18 +157,29 @@ fn pr_card(pr: &PullRequest) -> AnyElement {
                 ),
                 ReviewDecision::ReviewRequired => (
                     Lucide::Clock,
-                    theme::muted(),
+                    theme::amber(),
                     tr("Review en attente", "Review required"),
                 ),
             };
-            card = card.child(line(icon, color, text.into()));
+            details = details.child(line(icon, color, text.into()));
         }
-        card = card.child(if s.unresolved > 0 {
+        if !pr.requested_reviewers.is_empty() {
+            details = details.child(line(
+                Lucide::Eye,
+                theme::muted(),
+                trf!(
+                    "Reviewers attendus : {}",
+                    "Awaiting: {}",
+                    pr.requested_reviewers.join(", ")
+                ),
+            ));
+        }
+        details = details.child(if s.unresolved > 0 {
             line(
                 Lucide::MessageSquare,
                 theme::amber(),
                 trf!(
-                    "{} commentaire(s) à résoudre",
+                    "{} conversation(s) à résoudre",
                     "{} unresolved conversation(s)",
                     s.unresolved
                 ),
@@ -134,18 +188,22 @@ fn pr_card(pr: &PullRequest) -> AnyElement {
             line(
                 Lucide::MessageSquare,
                 theme::muted(),
-                tr(
-                    "Aucun commentaire à résoudre",
-                    "No unresolved conversations",
-                )
-                .into(),
+                tr("Aucune conversation ouverte", "No unresolved conversations").into(),
             )
         });
+        card = card.child(details);
     } else if matches!(pr.state, PrState::Open | PrState::Draft) {
-        card = card.child(div().text_color(theme::muted()).child(tr(
-            "Statut CI indisponible (token GitHub requis)",
-            "CI status unavailable (GitHub token needed)",
-        )));
+        card = card.child(
+            details.child(line(
+                Lucide::CircleDashed,
+                theme::muted(),
+                tr(
+                    "Statut CI indisponible (token GitHub requis)",
+                    "CI status unavailable (GitHub token needed)",
+                )
+                .into(),
+            )),
+        );
     }
     card.into_any_element()
 }

@@ -35,6 +35,14 @@ pub fn panel() -> Hsla {
 pub fn card() -> Hsla {
     alpha(rgb(0x141416).into(), 0.9)
 }
+/// Opaque surface of dialogs and sheets (readable over any wallpaper).
+pub fn sheet() -> Hsla {
+    rgb(0x1f1f22).into()
+}
+/// Opaque surface of popovers, menus and tooltips.
+pub fn popover() -> Hsla {
+    rgb(0x262629).into()
+}
 /// Bright top edge of glass surfaces (light catching the rim).
 pub fn glass_edge() -> Hsla {
     alpha(rgb(0xffffff).into(), 0.13)

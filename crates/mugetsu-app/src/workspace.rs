@@ -655,6 +655,7 @@ fn icon_picker(root: PathBuf, window: &mut Window, cx: &mut gpui_kit::App) {
         });
         let none_root = root.clone();
         dialog
+            .bg(crate::theme::sheet())
             .title(trf!("Icône de « {name} »", "Icon for “{name}”"))
             .w(px(420.))
             .child(h_flex().flex_wrap().gap_1().children(cells))

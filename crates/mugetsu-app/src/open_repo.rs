@@ -255,6 +255,7 @@ pub fn open(
         }
         let browse = browse.clone();
         dialog
+            .bg(crate::theme::sheet())
             .title(tr("Ouvrir un dépôt", "Open Repository"))
             .w(px(620.))
             .child(form.clone())

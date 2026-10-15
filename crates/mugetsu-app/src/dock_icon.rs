@@ -1,4 +1,4 @@
-//! Dock icon when running outside the `.app` bundle (e.g. `cargo run`), where
+//! Dock icon and name when running outside the `.app` bundle (e.g. `cargo run`), where
 //! macOS would otherwise show the terminal's icon.
 
 #[cfg(target_os = "macos")]
@@ -19,6 +19,11 @@ pub fn set() {
         if image.is_null() {
             return;
         }
+        // Name shown in the Dock and the menu bar when run unbundled.
+        let name: *mut Object =
+            msg_send![class!(NSString), stringWithUTF8String: c"Mugetsu".as_ptr()];
+        let info: *mut Object = msg_send![class!(NSProcessInfo), processInfo];
+        let _: () = msg_send![info, setProcessName: name];
         let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
         let _: () = msg_send![app, setApplicationIconImage: image];
     }

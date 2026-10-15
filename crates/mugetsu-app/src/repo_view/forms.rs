@@ -369,6 +369,52 @@ impl RepoView {
             (name, None)
         };
         let exists = self.data.refs.branches.iter().any(|b| b.name == local);
+        // Double-click on the upstream of the checked-out branch: offer to
+        // align the branch on it instead.
+        if let Some(upstream) = remote.as_deref()
+            && let Some(head) = self
+                .data
+                .refs
+                .branches
+                .iter()
+                .find(|b| b.is_head && b.upstream.as_deref() == Some(upstream))
+        {
+            let (name, upstream) = (head.name.clone(), upstream.to_string());
+            if head.ahead == 0 && head.behind == 0 && !dirty {
+                return;
+            }
+            let description = if dirty {
+                tr(
+                    "La branche revient exactement au remote. Les commits locaux non poussés et les modifications non commitées seront perdus.",
+                    "The branch is set exactly to the remote. Unpushed local commits and uncommitted changes will be lost.",
+                )
+            } else {
+                tr(
+                    "La branche revient exactement au remote. Les commits locaux non poussés seront perdus.",
+                    "The branch is set exactly to the remote. Unpushed local commits will be lost.",
+                )
+            };
+            self.confirm(
+                trf!(
+                    "Aligner '{name}' sur '{upstream}' ?",
+                    "Reset '{name}' to '{upstream}'?"
+                ),
+                description.into(),
+                tr("Reset", "Reset"),
+                move |this, window, cx| {
+                    let (name, upstream) = (name.clone(), upstream.clone());
+                    this.run_op(
+                        "Reset",
+                        move |r| r.reset_branch(&name, &upstream, true),
+                        window,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+            return;
+        }
         if self.data.refs.head_branch.as_deref() == Some(local.as_str()) && exists {
             return;
         }
@@ -402,6 +448,7 @@ impl RepoView {
             }
             let (form, view) = (form.clone(), view.clone());
             dialog
+                .bg(crate::theme::sheet())
                 .w(px(520.))
                 .child(form.clone())
                 .footer(footer(
@@ -479,6 +526,7 @@ impl RepoView {
         window.open_dialog(cx, move |dialog, _, _| {
             let (form, view) = (form.clone(), view.clone());
             dialog
+                .bg(crate::theme::sheet())
                 .w(px(560.))
                 .child(form.clone())
                 .footer(footer("push-ok", tr("Push", "Push")))

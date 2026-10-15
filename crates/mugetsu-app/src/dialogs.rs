@@ -7,7 +7,9 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::{AppContext as _, Context, Focusable as _, ParentElement as _, Window, px};
+use gpui_kit::{
+    AppContext as _, Context, Focusable as _, ParentElement as _, Styled as _, Window, px,
+};
 
 use crate::i18n::tr;
 
@@ -35,6 +37,7 @@ pub fn prompt<T: 'static>(
         }
         let (input_ok, view, action) = (input.clone(), view.clone(), action.clone());
         dialog
+            .bg(crate::theme::sheet())
             .title(title.clone())
             .w(px(460.))
             .child(Input::new(&input))
@@ -68,6 +71,7 @@ pub fn confirm<T: 'static>(
     window.open_alert_dialog(cx, move |alert, _, _| {
         let (view, action) = (view.clone(), action.clone());
         alert
+            .bg(crate::theme::sheet())
             .title(title.clone())
             .description(description.clone())
             .confirm()

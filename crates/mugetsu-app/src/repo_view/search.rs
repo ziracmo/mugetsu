@@ -127,7 +127,7 @@ impl RepoView {
                 .rounded_xl()
                 .border_1()
                 .border_color(theme::glass_edge())
-                .bg(gpui_kit::rgba(0x2a2a2dee))
+                .bg(theme::popover())
                 .shadow_lg()
                 .child(
                     div().flex_1().child(

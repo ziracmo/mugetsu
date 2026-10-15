@@ -242,6 +242,11 @@ impl Repo {
         .map(drop)
     }
 
+    /// Drops every stash.
+    pub fn stash_clear(&self) -> anyhow::Result<()> {
+        self.git().run(["stash", "clear"]).map(drop)
+    }
+
     pub fn stash_pop(&self, index: usize) -> anyhow::Result<()> {
         self.git()
             .run(["stash", "pop", &format!("stash@{{{index}}}")])
