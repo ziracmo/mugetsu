@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use gix::ObjectId;
 use mugetsu_forge::{ForgeRepo, GithubRepo};
-use mugetsu_git::{Graph, History, RefLabel, RefsSnapshot, Repo, Status};
+use mugetsu_git::{Change, Graph, History, OperationState, RefLabel, RefsSnapshot, Repo, Status};
 
 #[derive(Clone, Default)]
 pub struct RepoData {
@@ -19,6 +19,8 @@ pub struct RepoData {
     pub forge: Option<ForgeRepo>,
     /// Set when that forge is GitHub, for GitHub-only features.
     pub github: Option<GithubRepo>,
+    /// Merge, rebase, cherry-pick or revert in progress.
+    pub operation: Option<OperationState>,
 }
 
 impl RepoData {
@@ -28,6 +30,7 @@ impl RepoData {
         let graph = mugetsu_git::layout(&history.commits);
         let decorations = refs.decorations();
         let status = repo.status()?;
+        let operation = repo.operation().unwrap_or_default();
         let gitlab_hosts = crate::settings::get().gitlab_hosts;
         let forge = refs
             .remotes
@@ -44,6 +47,7 @@ impl RepoData {
             status,
             forge,
             github,
+            operation,
         }))
     }
 
@@ -106,6 +110,15 @@ impl RepoData {
             ),
         }
         Some(next)
+    }
+
+    /// Paths with unresolved conflicts, in status order.
+    pub fn conflicted(&self) -> impl Iterator<Item = &str> {
+        self.status
+            .files
+            .iter()
+            .filter(|f| f.index == Change::Conflicted)
+            .map(|f| f.path.as_str())
     }
 
     pub fn uncommitted(&self) -> usize {

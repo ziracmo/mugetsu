@@ -452,9 +452,9 @@ fn branch_context_menu_renames(cx: &mut TestAppContext) {
     };
     step(cx, &|window, cx| window.right_click("branch:topic", cx));
     step(cx, &|window, cx| {
-        let rename = window.within("popup-menu").find(8usize);
+        let rename = window.within("popup-menu").find(11usize);
         assert_eq!(rename.label(), Some("Renommer…"));
-        window.within("popup-menu").click(8usize, cx);
+        window.within("popup-menu").click(11usize, cx);
     });
     step(cx, &|window, cx| {
         window.press("secondary-a", cx);
@@ -1149,6 +1149,74 @@ fn compact_view_lists_branches_and_goes_back(cx: &mut TestAppContext) {
     })
     .unwrap();
     settle(cx, &view);
+}
+
+#[gpui_kit::test]
+fn merge_conflicts_resolve_in_three_panes(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    git(p, &["init", "-q", "-b", "main"]);
+    git(p, &["config", "user.name", "Test"]);
+    git(p, &["config", "user.email", "test@example.com"]);
+    commit_file(p, "a.txt", "one\ntwo\nthree\n", "base");
+    commit_file(p, "gone.txt", "x\n", "gone");
+    git(p, &["switch", "-q", "-c", "topic"]);
+    commit_file(p, "a.txt", "one\nTWO-topic\nthree\n", "topic a");
+    git(p, &["rm", "-q", "gone.txt"]);
+    git(p, &["commit", "-q", "-m", "topic rm"]);
+    git(p, &["switch", "-q", "main"]);
+    commit_file(p, "a.txt", "one\nTWO-main\nthree\n", "main a");
+    commit_file(p, "gone.txt", "y\n", "main gone");
+    let repo = mugetsu_git::Repo::open(p).unwrap();
+    assert!(!repo.merge("topic").unwrap());
+
+    // Conflicts open the resolver on the first file.
+    let (handle, view) = open_repo_view(cx, p);
+    settle(cx, &view);
+    cx.read(|cx| {
+        let v = view.read(cx);
+        assert_eq!(v.mode(), Mode::Changes);
+        assert_eq!(v.conflict_loaded(), Some("a.txt"));
+        assert_eq!(
+            v.data().operation.as_ref().map(|o| o.op),
+            Some(mugetsu_git::Operation::Merge)
+        );
+    });
+
+    // Take theirs, mark resolved: the next conflicted file opens.
+    ui_step(cx, handle, &|window, cx| window.click("theirs:0", cx));
+    ui_step(cx, handle, &|window, cx| {
+        window.click("conflict-resolve", cx)
+    });
+    settle(cx, &view);
+    assert_eq!(
+        std::fs::read_to_string(p.join("a.txt")).unwrap(),
+        "one\nTWO-topic\nthree\n"
+    );
+    assert_eq!(
+        cx.read(|cx| view.read(cx).conflict_loaded().map(str::to_string)),
+        Some("gone.txt".into())
+    );
+
+    // Deleted on their side: keep ours, then continue the merge.
+    ui_step(cx, handle, &|window, cx| window.click("keep-ours", cx));
+    settle(cx, &view);
+    ui_step(cx, handle, &|window, cx| window.click("op-continue", cx));
+    settle(cx, &view);
+    cx.read(|cx| {
+        let v = view.read(cx);
+        assert!(v.data().operation.is_none());
+        assert_eq!(v.data().conflicted().count(), 0);
+    });
+    assert_eq!(
+        git(p, &["log", "-1", "--format=%p"])
+            .split_whitespace()
+            .count(),
+        2,
+        "merge commit"
+    );
+    assert_eq!(std::fs::read_to_string(p.join("gone.txt")).unwrap(), "y\n");
 }
 
 #[gpui_kit::test]
