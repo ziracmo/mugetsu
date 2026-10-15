@@ -696,6 +696,8 @@ fn push_dialog_can_force_with_lease(cx: &mut TestAppContext) {
             view.update(cx, |v, cx| v.open_push_dialog(None, window, cx))
         });
         if force {
+            // Let the sheet finish sliding in before aiming at a small target.
+            std::thread::sleep(Duration::from_millis(500));
             ui_step(cx, handle, &|window, cx| window.click("push-force", cx));
         }
         ui_step(cx, handle, &|window, cx| window.click("push-ok", cx));
