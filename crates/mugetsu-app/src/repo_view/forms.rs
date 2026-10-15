@@ -23,7 +23,7 @@ use super::sidebar::default_remote;
 use crate::i18n::tr;
 use crate::theme;
 
-static APP_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
+pub(crate) static APP_ICON: LazyLock<Arc<Image>> = LazyLock::new(|| {
     Arc::new(Image::from_bytes(
         ImageFormat::Png,
         include_bytes!("../../assets/icon/mugetsu.png").to_vec(),

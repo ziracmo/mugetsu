@@ -3,7 +3,7 @@
 
 mod changes;
 mod commit_files;
-mod forms;
+pub(crate) mod forms;
 mod history;
 mod menus;
 mod particles;
