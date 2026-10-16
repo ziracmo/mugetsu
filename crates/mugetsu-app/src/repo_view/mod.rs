@@ -282,7 +282,12 @@ pub struct RepoView {
     compact_seq: usize,
     /// Commit details beside the history instead of below it.
     details_side: bool,
-    compact_cache: Option<(Arc<RepoData>, Arc<Vec<compact::BranchSummary>>)>,
+    compact_cache: Option<(Arc<RepoData>, Arc<compact::Summary>)>,
+    pub(crate) compact_sort: crate::settings::CompactSort,
+    /// Compact view shows only the branches with commits by this email.
+    compact_author: Option<String>,
+    /// Who commits here (email, name), read once the compact view needs it.
+    compact_me: Option<Option<(String, String)>>,
     /// Head of a PR in the stack shown by `Mode::Stack`.
     stack_focus: Option<String>,
     /// Restarts the stack view's entrance animation.
@@ -451,6 +456,9 @@ impl RepoView {
             compact_seq: 0,
             details_side: crate::settings::get().details_side,
             compact_cache: None,
+            compact_sort: crate::settings::get().compact_sort,
+            compact_author: None,
+            compact_me: None,
             stack_focus: None,
             stack_seq: 0,
             restack: None,

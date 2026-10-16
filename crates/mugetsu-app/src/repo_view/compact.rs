@@ -1,6 +1,7 @@
 //! Compact history: one row per local branch with how many commits it has
 //! on top of the trunk; hovering a row lists those commits. Toggled from the
-//! toolbar, with a staggered slide between the two views.
+//! toolbar, with a staggered slide between the two views. The header filters
+//! the rows by author and orders them by date or size.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ use mugetsu_git::{History, RefsSnapshot};
 
 use super::RepoView;
 use crate::i18n::tr;
+use crate::settings::CompactSort;
 use crate::{fmt, theme};
 
 /// Commits listed in a row's hover card.
@@ -30,6 +32,8 @@ const CAP: usize = 999;
 const AUTHORS: usize = 3;
 /// The trunk's authors are taken from its most recent commits only.
 const TRUNK_AUTHORS_WINDOW: usize = 50;
+/// Most active authors offered as filters, besides the user.
+const TOP_AUTHORS: usize = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchSummary {
@@ -52,13 +56,24 @@ pub struct BranchSummary {
     /// at most `AUTHORS`; `more_authors` counts the others.
     pub authors: Vec<(String, String)>,
     pub more_authors: usize,
+    /// Every author of those commits, by lowercase email.
+    pub emails: Vec<String>,
 }
 
-/// Distinct authors of `rows` (by email), most commits first, ties by the
-/// most recent one.
-fn authors(history: &History, rows: &[usize]) -> (Vec<(String, String)>, usize) {
+/// The compact view's data: one summary per branch, and who writes them.
+#[derive(Clone, Debug, Default)]
+pub struct Summary {
+    pub rows: Vec<BranchSummary>,
+    /// Authors of the branches' own commits (email, name, commits), most
+    /// commits first; the trunk is left out.
+    pub authors: Vec<(String, String, usize)>,
+}
+
+/// Distinct authors of `rows` (lowercase email, name, commits), most commits
+/// first, ties by the first one met.
+fn tally(history: &History, rows: impl IntoIterator<Item = usize>) -> Vec<(String, String, usize)> {
     let mut seen: Vec<(String, String, usize)> = Vec::new();
-    for &r in rows {
+    for r in rows {
         let c = &history.commits[r];
         let key = c.email.trim().to_lowercase();
         match seen.iter_mut().find(|(e, _, _)| *e == key) {
@@ -68,13 +83,59 @@ fn authors(history: &History, rows: &[usize]) -> (Vec<(String, String)>, usize) 
     }
     // Stable: equal counts keep their first (newest) appearance order.
     seen.sort_by_key(|a| std::cmp::Reverse(a.2));
+    seen
+}
+
+/// Distinct authors of `rows` (by email), most commits first, ties by the
+/// most recent one: the first `AUTHORS`, how many others, and every email.
+fn authors(history: &History, rows: &[usize]) -> (Vec<(String, String)>, usize, Vec<String>) {
+    let seen = tally(history, rows.iter().copied());
     let more = seen.len().saturating_sub(AUTHORS);
+    let emails = seen.iter().map(|(e, _, _)| e.clone()).collect();
     let top = seen
         .into_iter()
         .take(AUTHORS)
         .map(|(e, n, _)| (e, n))
         .collect();
-    (top, more)
+    (top, more, emails)
+}
+
+/// Branches and the authors of their own commits.
+pub fn summary(history: &History, refs: &RefsSnapshot) -> Summary {
+    let rows = summarize(history, refs);
+    let mut own: Vec<usize> = rows
+        .iter()
+        .filter(|r| !r.is_trunk)
+        .flat_map(|r| r.commits.iter().copied())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    own.sort_unstable();
+    let authors = tally(history, own);
+    Summary { rows, authors }
+}
+
+/// Rows to show: the trunk always, the others only when `author` wrote some
+/// of their own commits; by date as summarized, or most commits first.
+pub fn arrange<'a>(
+    rows: &'a [BranchSummary],
+    author: Option<&str>,
+    sort: CompactSort,
+) -> Vec<&'a BranchSummary> {
+    let mut out: Vec<&BranchSummary> = rows
+        .iter()
+        .filter(|r| r.is_trunk || author.is_none_or(|a| r.emails.iter().any(|e| e == a)))
+        .collect();
+    if sort == CompactSort::Size {
+        out.sort_by_key(|r| {
+            (
+                !r.is_trunk,
+                std::cmp::Reverse(r.count),
+                std::cmp::Reverse(r.time),
+            )
+        });
+    }
+    out
 }
 
 /// The trunk tip: the remote's main / master, else a local one, else HEAD.
@@ -166,7 +227,8 @@ pub fn summarize(history: &History, refs: &RefsSnapshot) -> Vec<BranchSummary> {
                 walk(history, b.target, &trunk_rows, CAP)
             };
             let window = if is_trunk { TRUNK_AUTHORS_WINDOW } else { CAP };
-            let (authors, more_authors) = authors(history, &commits[..commits.len().min(window)]);
+            let (authors, more_authors, emails) =
+                authors(history, &commits[..commits.len().min(window)]);
             BranchSummary {
                 name: b.name.clone(),
                 tip: b.target,
@@ -188,6 +250,7 @@ pub fn summarize(history: &History, refs: &RefsSnapshot) -> Vec<BranchSummary> {
                     .unwrap_or_default(),
                 authors,
                 more_authors,
+                emails,
             }
         })
         // A remote branch with nothing of its own is noise.
@@ -206,6 +269,11 @@ impl RepoView {
         if !cfg!(test) {
             crate::settings::remember(|s| s.history_compact = compact);
         }
+        self.replay_compact(cx);
+    }
+
+    /// Rows slide in again.
+    fn replay_compact(&mut self, cx: &mut Context<Self>) {
         self.celebrate_seq += 1;
         self.compact_seq = self.celebrate_seq;
         cx.notify();
@@ -222,20 +290,176 @@ impl RepoView {
         cx.notify();
     }
 
+    /// Shows only `email`'s branches, or every branch when it already was.
+    pub fn filter_compact_author(&mut self, email: String, cx: &mut Context<Self>) {
+        self.compact_author = if self.compact_author.as_ref() == Some(&email) {
+            None
+        } else {
+            Some(email)
+        };
+        self.replay_compact(cx);
+    }
+
+    pub fn set_compact_sort(&mut self, sort: CompactSort, cx: &mut Context<Self>) {
+        if self.compact_sort == sort {
+            return;
+        }
+        self.compact_sort = sort;
+        if !cfg!(test) {
+            crate::settings::remember(|s| s.compact_sort = sort);
+        }
+        self.replay_compact(cx);
+    }
+
+    /// Who commits in this repository (lowercase email, name), read once.
+    fn compact_me(&mut self) -> Option<(String, String)> {
+        self.compact_me
+            .get_or_insert_with(|| {
+                let id = self.repo.identity();
+                let email = id.email.trim().to_lowercase();
+                (!email.is_empty()).then_some((email, id.name))
+            })
+            .clone()
+    }
+
     /// Branch summaries for the loaded data, recomputed when it changes.
-    fn compact_rows(&mut self) -> Arc<Vec<BranchSummary>> {
+    fn compact_rows(&mut self) -> Arc<Summary> {
         if let Some((data, rows)) = &self.compact_cache
             && Arc::ptr_eq(data, &self.data)
         {
             return rows.clone();
         }
-        let rows = Arc::new(summarize(&self.data.history, &self.data.refs));
+        let rows = Arc::new(summary(&self.data.history, &self.data.refs));
         self.compact_cache = Some((self.data.clone(), rows.clone()));
         rows
     }
 
+    /// Filters on the right of the header: the user, the most active
+    /// authors, then the order.
+    fn compact_filters(&mut self, summary: &Summary, cx: &mut Context<Self>) -> AnyElement {
+        let me = self.compact_me();
+        let commits_of = |email: &str| {
+            summary
+                .authors
+                .iter()
+                .find(|a| a.0 == email)
+                .map_or(0, |a| a.2)
+        };
+        let mut people: Vec<(String, String, usize, bool)> = Vec::new();
+        if let Some((email, name)) = &me {
+            people.push((email.clone(), name.clone(), commits_of(email), true));
+        }
+        people.extend(
+            summary
+                .authors
+                .iter()
+                .filter(|a| me.as_ref().is_none_or(|m| m.0 != a.0))
+                .take(TOP_AUTHORS)
+                .map(|(e, n, c)| (e.clone(), n.clone(), *c, false)),
+        );
+        let others = people.iter().any(|p| !p.3);
+        let filter = self.compact_author.clone();
+        let sort = self.compact_sort;
+        let mut chips = Vec::new();
+        for (email, name, count, is_me) in people {
+            let on = filter.as_deref() == Some(email.as_str());
+            let dim = filter.is_some() && !on;
+            let tip = match (is_me, on) {
+                (_, true) => tr("Toutes les branches", "All branches").to_string(),
+                (true, false) => trf!(
+                    "Mes branches · {count} commits",
+                    "My branches · {count} commits"
+                ),
+                (false, false) => trf!(
+                    "Branches de {name} · {count} commits",
+                    "{name}'s branches · {count} commits"
+                ),
+            };
+            let face = crate::avatars::avatar(&email, &name, 20., cx);
+            chips.push(
+                div()
+                    .id(SharedString::from(format!("compact-author-{email}")))
+                    .test_support()
+                    .flex_none()
+                    .rounded_full()
+                    .border_2()
+                    .cursor_pointer()
+                    .border_color(if on {
+                        theme::accent()
+                    } else {
+                        gpui_kit::transparent_black()
+                    })
+                    .when(dim, |s| s.opacity(0.35).hover(|s| s.opacity(1.)))
+                    .child(face)
+                    .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.filter_compact_author(email.clone(), cx)
+                    }))
+                    .into_any_element(),
+            );
+            if is_me && others {
+                chips.push(
+                    div()
+                        .flex_none()
+                        .w(px(1.))
+                        .h(px(14.))
+                        .mx_1()
+                        .bg(theme::hairline())
+                        .into_any_element(),
+                );
+            }
+        }
+        let button = |id: &'static str, label: &'static str, value: CompactSort| {
+            let on = sort == value;
+            h_flex()
+                .id(id)
+                .test_support()
+                .h(px(22.))
+                .px_2()
+                .rounded_md()
+                .cursor_pointer()
+                .when(on, |s| {
+                    s.bg(theme::alpha(theme::accent(), 0.18))
+                        .text_color(theme::accent())
+                })
+                .when(!on, |s| s.hover(|s| s.bg(theme::raised())))
+                .child(label)
+                .on_click(cx.listener(move |this, _, _, cx| this.set_compact_sort(value, cx)))
+        };
+        h_flex()
+            .flex_none()
+            .gap_1()
+            .children(chips)
+            .child(div().w(px(10.)))
+            .child(
+                h_flex()
+                    .p(px(2.))
+                    .gap_0p5()
+                    .rounded_lg()
+                    .bg(theme::alpha(gpui_kit::white(), 0.04))
+                    .child(button(
+                        "compact-sort-date",
+                        tr("Date", "Date"),
+                        CompactSort::Date,
+                    ))
+                    .child(button(
+                        "compact-sort-size",
+                        tr("Taille", "Size"),
+                        CompactSort::Size,
+                    )),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_compact(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let rows = self.compact_rows();
+        let summary = self.compact_rows();
+        let filters = self.compact_filters(&summary, cx);
+        let rows = arrange(
+            &summary.rows,
+            self.compact_author.as_deref(),
+            self.compact_sort,
+        );
+        let nobody = self.compact_author.is_some() && rows.iter().all(|r| r.is_trunk);
         let data = self.data.clone();
         let seq = self.compact_seq;
         let now = fmt::now();
@@ -439,13 +663,27 @@ impl RepoView {
                     .gap_2()
                     .text_xs()
                     .text_color(theme::muted())
-                    .child(Icon::new(Lucide::Rows3).xsmall())
-                    .child(tr(
+                    .child(Icon::new(Lucide::Rows3).xsmall().flex_none())
+                    .child(div().flex_1().min_w_0().truncate().child(tr(
                         "Vue compacte · survol pour les commits, double-clic pour l'historique",
                         "Compact view · hover for commits, double-click for the history",
-                    )),
+                    )))
+                    .child(filters),
             )
             .children(items)
+            .when(nobody, |s| {
+                s.child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_xs()
+                        .text_color(theme::muted())
+                        .child(tr(
+                            "Aucune branche de cet auteur.",
+                            "No branches by this author.",
+                        )),
+                )
+            })
             .into_any_element()
     }
 }
@@ -585,6 +823,45 @@ mod tests {
     }
 
     #[test]
+    fn filters_by_author_and_sorts_by_size() {
+        let row =
+            |name: &str, count: usize, time: i64, trunk: bool, emails: &[&str]| BranchSummary {
+                name: name.into(),
+                tip: id(1),
+                is_head: false,
+                is_trunk: trunk,
+                remote: false,
+                count,
+                ahead: 0,
+                behind: 0,
+                commits: Vec::new(),
+                time,
+                authors: Vec::new(),
+                more_authors: 0,
+                emails: emails.iter().map(|e| e.to_string()).collect(),
+            };
+        let rows = vec![
+            row("main", 50, 9, true, &["bob@x.dev"]),
+            row("new", 1, 8, false, &["ann@x.dev"]),
+            row("big", 7, 5, false, &["ann@x.dev", "bob@x.dev"]),
+            row("mid", 3, 2, false, &["bob@x.dev"]),
+        ];
+        let names = |v: Vec<&BranchSummary>| v.iter().map(|r| r.name.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            names(arrange(&rows, None, CompactSort::Date)),
+            ["main", "new", "big", "mid"]
+        );
+        assert_eq!(
+            names(arrange(&rows, None, CompactSort::Size)),
+            ["main", "big", "mid", "new"]
+        );
+        assert_eq!(
+            names(arrange(&rows, Some("ann@x.dev"), CompactSort::Size)),
+            ["main", "big", "new"]
+        );
+    }
+
+    #[test]
     fn lists_at_most_three_authors_most_commits_first() {
         let by = |n: u8, who: &str| Commit {
             author: who.to_uppercase(),
@@ -601,10 +878,11 @@ mod tests {
         ];
         let index = commits.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
         let history = History { commits, index };
-        let (top, more) = authors(&history, &[0, 1, 2, 3, 4, 5]);
+        let (top, more, all) = authors(&history, &[0, 1, 2, 3, 4, 5]);
         let emails: Vec<&str> = top.iter().map(|(e, _)| e.as_str()).collect();
         assert_eq!(emails, ["bob@x.dev", "cid@x.dev", "ann@x.dev"]);
         assert_eq!(top[0].1, "BOB");
         assert_eq!(more, 1);
+        assert_eq!(all.len(), 4);
     }
 }
