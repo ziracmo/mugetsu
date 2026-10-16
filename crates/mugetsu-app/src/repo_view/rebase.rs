@@ -809,7 +809,7 @@ impl RepoView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.run_op(
+        self.run_op_then(
             "Rebase",
             move |r| {
                 if r.rebase_interactive(&base, &steps)? {
@@ -818,6 +818,7 @@ impl RepoView {
                     anyhow::bail!("stopped on conflicts")
                 }
             },
+            |this, _, _| this.rebased(),
             window,
             cx,
         );

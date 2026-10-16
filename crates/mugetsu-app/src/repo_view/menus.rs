@@ -244,12 +244,13 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         .disabled(b.is_head || ctx.head_branch.is_none())
         .on_click(act(&ctx.view, move |this, window, cx| {
             let name = name.clone();
-            this.run_op(
+            this.run_op_then(
                 "Rebase",
                 move |r| {
                     r.rebase(&name)
                         .and_then(super::conflicts::stopped_on_conflicts)
                 },
+                |this, _, _| this.rebased(),
                 window,
                 cx,
             );
@@ -675,6 +676,27 @@ pub fn commit_menu(
     }
 
     if let Some(head) = ctx.head_branch.clone() {
+        let sha = sha.clone();
+        menu = menu.item(
+            item(
+                trf!("Rebaser '{head}' ici", "Rebase '{head}' here"),
+                Lucide::GitBranch,
+            )
+            .disabled(ctx.rebasing || ctx.head == Some(id))
+            .on_click(act(&ctx.view, move |this, window, cx| {
+                let sha = sha.clone();
+                this.run_op_then(
+                    "Rebase",
+                    move |r| {
+                        r.rebase(&sha)
+                            .and_then(super::conflicts::stopped_on_conflicts)
+                    },
+                    |this, _, _| this.rebased(),
+                    window,
+                    cx,
+                );
+            })),
+        );
         menu = menu.item(
             item(
                 trf!(
