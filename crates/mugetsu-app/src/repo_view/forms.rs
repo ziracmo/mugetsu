@@ -392,8 +392,35 @@ impl RepoView {
             if head.ahead == 0 && head.behind == 0 && !dirty {
                 return;
             }
-            self.confirm_reset(name, upstream, true, window, cx);
+            self.confirm_reset(name, upstream, true, None, window, cx);
             return;
+        }
+        // Double-click on a remote branch whose local counterpart exists and
+        // points elsewhere: offer to reset the local branch on it.
+        if let Some(upstream) = remote.as_deref()
+            && let Some(b) = self.data.refs.branches.iter().find(|b| b.name == local)
+            && !self.other_worktrees().contains_key(&local)
+        {
+            let target = (self.data.refs.remote_branches.iter())
+                .find(|r| r.name == upstream)
+                .map(|r| r.target);
+            let aligned = target == Some(b.target);
+            let upstream = upstream.to_string();
+            if b.is_head {
+                if !(aligned && !dirty) {
+                    self.confirm_reset(local, upstream, true, None, window, cx);
+                }
+                return;
+            }
+            if !aligned {
+                let changes = if dirty {
+                    LocalChanges::Stash
+                } else {
+                    LocalChanges::Keep
+                };
+                self.confirm_reset(local, upstream, false, Some(changes), window, cx);
+                return;
+            }
         }
         if self.data.refs.head_branch.as_deref() == Some(local.as_str()) && exists {
             return;
@@ -570,16 +597,20 @@ impl RepoView {
         branch: String,
         upstream: String,
         is_head: bool,
+        checkout: Option<LocalChanges>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (ahead, behind) = self
+        // Counts are only known against the branch's own upstream.
+        let counts = self
             .data
             .refs
             .branches
             .iter()
             .find(|b| b.name == branch)
-            .map_or((0, 0), |b| (b.ahead, b.behind));
+            .filter(|b| b.upstream.as_deref() == Some(upstream.as_str()))
+            .map(|b| (b.ahead, b.behind));
+        let (ahead, behind) = counts.unwrap_or((0, 0));
         let dirty = if is_head { self.data.uncommitted() } else { 0 };
         let view = cx.entity().downgrade();
         // Set once "Reset" is pressed: the sheet plays its send-off, then closes.
@@ -621,7 +652,7 @@ impl RepoView {
                     ),
                 ));
             }
-            if ahead == 0 && behind == 0 && dirty == 0 {
+            if counts.is_some() && ahead == 0 && behind == 0 && dirty == 0 {
                 stats = stats.child(stat(
                     Lucide::Check,
                     theme::muted(),
@@ -689,10 +720,17 @@ impl RepoView {
                                                 )),
                                         )
                                         .child(div().text_sm().text_color(theme::muted()).child(
-                                            tr(
-                                                "La branche prend exactement l'état du remote.",
-                                                "The branch takes exactly the remote's state.",
-                                            ),
+                                            if checkout.is_some() {
+                                                tr(
+                                                    "La branche prend exactement l'état du remote, puis est checkoutée.",
+                                                    "The branch takes exactly the remote's state, then is checked out.",
+                                                )
+                                            } else {
+                                                tr(
+                                                    "La branche prend exactement l'état du remote.",
+                                                    "The branch takes exactly the remote's state.",
+                                                )
+                                            },
                                         )),
                                 ),
                         )
@@ -740,6 +778,22 @@ impl RepoView {
                             DialogClose::new()
                                 .trigger(|b| b.ghost().label(tr("Annuler", "Cancel"))),
                         )
+                        .when_some(checkout, |footer, changes| {
+                            // Switch to the local branch as it is, without the reset.
+                            let (name, view) = (name.clone(), view.clone());
+                            footer.child(
+                                Button::new("reset-checkout-only")
+                                    .ghost()
+                                    .label(tr("Checkout seul", "Just check out"))
+                                    .on_click(move |_, window, cx| {
+                                        window.close_dialog(cx);
+                                        let name = name.clone();
+                                        let _ = view.update(cx, |this, cx| {
+                                            this.checkout_branch(name, None, changes, window, cx)
+                                        });
+                                    }),
+                            )
+                        })
                         .child(
                             DialogAction::new().child(
                                 Button::new("reset-ok")
@@ -760,13 +814,23 @@ impl RepoView {
                             cx.background_executor().timer(RESET_SENDOFF).await;
                             let _ = cx.update(|window, cx| {
                                 window.close_dialog(cx);
-                                let _ = view.update(cx, |this, cx| {
-                                    this.run_op(
+                                let _ = view.update(cx, |this, cx| match checkout {
+                                    // Moves the branch first: the checkout then lands on it.
+                                    Some(changes) => this.run_op(
+                                        "Reset",
+                                        move |r| {
+                                            r.reset_branch(&name, &target, false)?;
+                                            r.switch_to(&name, None, changes)
+                                        },
+                                        window,
+                                        cx,
+                                    ),
+                                    None => this.run_op(
                                         "Reset",
                                         move |r| r.reset_branch(&name, &target, is_head),
                                         window,
                                         cx,
-                                    )
+                                    ),
                                 });
                             });
                         })
