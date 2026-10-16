@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use gix::ObjectId;
 use gpui_kit::{Context, SharedString};
 
+use super::file_view::FileTab;
 use super::{Mode, RepoView, SelectedChange};
 
 /// What a tab shows, as far as going back is concerned.
@@ -19,6 +20,8 @@ pub struct Place {
     pub change: Option<SelectedChange>,
     pub stack: Option<String>,
     pub pr: Option<u64>,
+    /// File page: path, blame revision, tab.
+    pub file: Option<(String, Option<ObjectId>, FileTab)>,
 }
 
 impl Place {
@@ -30,6 +33,7 @@ impl Place {
             change: None,
             stack: None,
             pr: None,
+            file: None,
         }
     }
 
@@ -128,6 +132,12 @@ impl RepoView {
             Mode::Changes => place.change = self.selected_change.clone(),
             Mode::Stack => place.stack = self.stack_focus.clone(),
             Mode::Pr => place.pr = self.pr_page.as_ref().map(|p| p.number),
+            Mode::File => {
+                place.file = self
+                    .file_page
+                    .as_ref()
+                    .map(|p| (p.path.clone(), p.rev, p.tab))
+            }
             Mode::Stats => {}
         }
         place
@@ -202,6 +212,10 @@ impl RepoView {
             Mode::Pr => match place.pr {
                 Some(n) => self.open_pr(n, cx),
                 None => self.set_mode(Mode::Pr, cx),
+            },
+            Mode::File => match place.file {
+                Some((path, rev, tab)) => self.open_file(path, rev, tab, cx),
+                None => self.set_mode(Mode::File, cx),
             },
         }
     }
