@@ -701,7 +701,7 @@ fn interactive_rebase_stops_on_conflicts_then_aborts_or_continues() {
 }
 
 #[test]
-fn rebase_plan_refuses_merges_and_non_ancestors() {
+fn rebase_plan_refuses_merges() {
     let (_dir, repo) = fixture();
     let c1 = repo
         .git()
@@ -710,5 +710,34 @@ fn rebase_plan_refuses_merges_and_non_ancestors() {
     assert!(repo.rebase_plan(c1.trim()).is_err(), "range holds a merge");
     repo.git().run(["switch", "-q", "feature"]).unwrap();
     assert_eq!(repo.rebase_plan(c1.trim()).unwrap().len(), 3);
-    assert!(repo.rebase_plan("main").is_err(), "main is not an ancestor");
+    assert!(
+        repo.rebase_plan("main").unwrap().is_empty(),
+        "main already holds feature"
+    );
+}
+
+#[test]
+fn interactive_rebase_onto_a_diverged_branch() {
+    use mugetsu_git::{RebaseAction as A, RebaseStep};
+    let (dir, repo, base) = linear();
+    let p = dir.path();
+    git(p, &["switch", "-q", "-c", "topic", &base]);
+    commit_file(p, "t1.txt", "t1\n", "t1");
+    commit_file(p, "t2.txt", "t2\n", "t2");
+    // `main` is not an ancestor of `topic`: its commits since the fork point
+    // are replayed onto it.
+    let plan = repo.rebase_plan("main").unwrap();
+    let names: Vec<_> = plan.iter().map(|c| c.summary()).collect();
+    assert_eq!(names, ["t1", "t2"]);
+    let steps: Vec<_> = plan
+        .iter()
+        .rev()
+        .map(|c| RebaseStep {
+            id: c.id.clone(),
+            action: A::Pick,
+            message: None,
+        })
+        .collect();
+    assert!(repo.rebase_interactive("main", &steps).unwrap(), "finished");
+    assert_eq!(subjects(p), ["base", "one", "two", "three", "t2", "t1"]);
 }

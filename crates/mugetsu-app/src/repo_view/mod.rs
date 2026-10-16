@@ -206,6 +206,8 @@ pub struct RepoView {
     /// Commit row celebrating a checkout (tip, sequence): sweep and particles.
     celebrate: Option<(ObjectId, usize)>,
     celebrate_seq: usize,
+    /// A rebase just finished: the next load scrolls to the rebased branch.
+    reveal_head_on_load: bool,
 
     // Sidebar
     sidebar_collapsed: bool,
@@ -380,6 +382,7 @@ impl RepoView {
             expanded_merges: HashSet::new(),
             celebrate: None,
             celebrate_seq: 0,
+            reveal_head_on_load: false,
             sidebar_collapsed: false,
             sidebar_search,
             prs: PrCache::default(),
@@ -578,6 +581,9 @@ impl RepoView {
         match keep.or(self.data.refs.head) {
             Some(id) if keep.is_none() || first_load => self.select_commit(id, true, cx),
             _ => {}
+        }
+        if std::mem::take(&mut self.reveal_head_on_load) {
+            self.reveal_head(cx);
         }
         // New conflicts (a merge, rebase, cherry-pick or stash pop stopped on
         // them, here or in a terminal): straight to the resolver.
@@ -985,6 +991,12 @@ impl RepoView {
         if self.data.uncommitted() > 0 {
             self.run_op("Stash", |r| r.stash_push(None), window, cx);
         }
+    }
+
+    /// Call when a rebase finished: the reload that follows scrolls to the
+    /// rebased branch's new tip instead of leaving the view where it was.
+    pub(crate) fn rebased(&mut self) {
+        self.reveal_head_on_load = true;
     }
 
     fn reveal_head(&mut self, cx: &mut Context<Self>) {

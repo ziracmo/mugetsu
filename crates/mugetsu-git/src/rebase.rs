@@ -142,16 +142,10 @@ impl Repo {
         Ok(PathBuf::from(out.trim()))
     }
 
-    /// Commits after `base` on HEAD, oldest first. Fails when `base` is not
-    /// an ancestor of HEAD or the range holds merge commits.
+    /// Commits on HEAD that `base` lacks, oldest first: the commits after
+    /// `base` when it is an ancestor of HEAD, else the ones since their fork
+    /// point, replayed onto `base`. Fails when the range holds merge commits.
     pub fn rebase_plan(&self, base: &str) -> anyhow::Result<Vec<RebaseCommit>> {
-        if self
-            .git()
-            .run(["merge-base", "--is-ancestor", base, "HEAD"])
-            .is_err()
-        {
-            bail!("this commit is not an ancestor of HEAD");
-        }
         let range = format!("{base}..HEAD");
         if !self
             .git()

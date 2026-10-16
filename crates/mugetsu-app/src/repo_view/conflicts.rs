@@ -335,7 +335,7 @@ impl RepoView {
         } else {
             tr("Continuer", "Continue")
         };
-        self.run_op(
+        self.run_op_then(
             label,
             move |r| {
                 if skip {
@@ -344,6 +344,11 @@ impl RepoView {
                     r.continue_operation(op)
                 }
                 .and_then(stopped_on_conflicts)
+            },
+            move |this, _, _| {
+                if op == Operation::Rebase {
+                    this.rebased();
+                }
             },
             window,
             cx,
