@@ -519,3 +519,31 @@ pub fn empty_state(recent: &[PathBuf], on_open: OnOpen, on_recent: OnRecent) -> 
         ))
         .into_any_element()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn easings_start_at_zero_end_at_one_and_never_go_back() {
+        for ease in [ease_in_out, ease_out] {
+            assert_eq!(ease(0.), 0.);
+            assert!((ease(1.) - 1.).abs() < 1e-6);
+            let mut last = 0.;
+            for i in 0..=100 {
+                let v = ease(i as f32 / 100.);
+                assert!(v >= last - 1e-6, "monotonic");
+                last = v;
+            }
+        }
+        assert!((ease_in_out(0.5) - 0.5).abs() < 1e-6, "symmetric");
+        assert!(ease_out(0.5) > 0.5, "fast start");
+    }
+
+    #[test]
+    fn span_is_progress_through_a_window() {
+        assert_eq!(span(0.1, 0.2, 0.6), 0.);
+        assert!((span(0.4, 0.2, 0.6) - 0.5).abs() < 1e-6);
+        assert_eq!(span(0.9, 0.2, 0.6), 1.);
+    }
+}

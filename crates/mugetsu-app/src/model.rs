@@ -151,3 +151,138 @@ impl RepoData {
         self.status.files.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mugetsu_git::{Branch, FileStatus};
+
+    fn oid(c: char) -> ObjectId {
+        ObjectId::from_hex(c.to_string().repeat(40).as_bytes()).unwrap()
+    }
+
+    fn branch(name: &str, target: ObjectId, is_head: bool) -> Branch {
+        Branch {
+            name: name.into(),
+            target,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            is_head,
+            upstream_gone: false,
+        }
+    }
+
+    /// main (checked out) on `a`, topic on `b`, origin/remote-only on `c`.
+    fn data() -> RepoData {
+        let mut data = RepoData::default();
+        data.refs.head = Some(oid('a'));
+        data.refs.head_branch = Some("main".into());
+        data.refs.branches = vec![
+            branch("main", oid('a'), true),
+            branch("topic", oid('b'), false),
+        ];
+        data.refs.remote_branches = vec![branch("origin/remote-only", oid('c'), false)];
+        data.decorations.insert(
+            oid('a'),
+            vec![RefLabel::Branch {
+                name: "main".into(),
+                head: true,
+            }],
+        );
+        data.decorations.insert(
+            oid('b'),
+            vec![RefLabel::Branch {
+                name: "topic".into(),
+                head: false,
+            }],
+        );
+        data
+    }
+
+    fn head_labels(data: &RepoData) -> Vec<String> {
+        data.decorations
+            .values()
+            .flatten()
+            .filter_map(|l| match l {
+                RefLabel::Branch { name, head: true } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn checking_out_an_existing_branch_moves_head() {
+        let next = data().with_checkout("topic", None).unwrap();
+        assert_eq!(next.refs.head, Some(oid('b')));
+        assert_eq!(next.refs.head_branch.as_deref(), Some("topic"));
+        let heads: Vec<_> = next.refs.branches.iter().filter(|b| b.is_head).collect();
+        assert_eq!(heads.len(), 1);
+        assert_eq!(heads[0].name, "topic");
+        assert_eq!(head_labels(&next), ["topic"]);
+    }
+
+    #[test]
+    fn checking_out_a_remote_branch_adds_a_tracking_branch() {
+        let next = data()
+            .with_checkout("remote-only", Some("origin/remote-only"))
+            .unwrap();
+        assert_eq!(next.refs.head, Some(oid('c')));
+        let names: Vec<_> = next.refs.branches.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["main", "remote-only", "topic"], "kept sorted");
+        let created = next
+            .refs
+            .branches
+            .iter()
+            .find(|b| b.name == "remote-only")
+            .unwrap();
+        assert_eq!(created.upstream.as_deref(), Some("origin/remote-only"));
+        assert!(created.is_head);
+        assert_eq!(head_labels(&next), ["remote-only"]);
+        assert!(matches!(
+            next.decorations[&oid('c')][0],
+            RefLabel::Branch { head: true, .. }
+        ));
+    }
+
+    #[test]
+    fn unknown_branches_cannot_be_previewed() {
+        assert!(data().with_checkout("nope", None).is_none());
+        assert!(data().with_checkout("nope", Some("origin/nope")).is_none());
+    }
+
+    #[test]
+    fn detached_head_label_goes_away() {
+        let mut detached = data();
+        detached
+            .decorations
+            .entry(oid('a'))
+            .or_default()
+            .push(RefLabel::DetachedHead);
+        let next = detached.with_checkout("topic", None).unwrap();
+        assert!(
+            next.decorations
+                .values()
+                .flatten()
+                .all(|l| !matches!(l, RefLabel::DetachedHead))
+        );
+    }
+
+    #[test]
+    fn conflicted_and_uncommitted_counts() {
+        let mut data = data();
+        let file = |path: &str, index: Change| FileStatus {
+            path: path.into(),
+            orig_path: None,
+            index,
+            worktree: Change::Modified,
+        };
+        data.status.files = vec![
+            file("a", Change::Modified),
+            file("b", Change::Conflicted),
+            file("c", Change::Conflicted),
+        ];
+        assert_eq!(data.conflicted().collect::<Vec<_>>(), ["b", "c"]);
+        assert_eq!(data.uncommitted(), 3);
+    }
+}
