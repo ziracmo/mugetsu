@@ -683,6 +683,41 @@ fn double_clicking_a_graph_chip_checks_it_out(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn dropping_a_branch_chip_on_another_rebases_it_after_asking(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let drop_topic_on_main = |window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+        let from = window.find("chip-topic").bounds().center();
+        let to = window.find("chip-main").bounds().center();
+        window.drag(from, to, cx);
+    };
+    // Cancelled: nothing moves.
+    ui_step(cx, handle, &drop_topic_on_main);
+    ui_step(cx, handle, &|window, cx| {
+        window.click("drag-rebase-cancel", cx)
+    });
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("drag-rebase").is_none())
+    });
+    let topic_before = git(dir.path(), &["rev-parse", "topic"]);
+    // Confirmed: topic is replayed on main, main stays checked out.
+    ui_step(cx, handle, &drop_topic_on_main);
+    assert_eq!(git(dir.path(), &["rev-parse", "topic"]), topic_before);
+    ui_step(cx, handle, &|window, cx| window.click("drag-rebase-ok", cx));
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["rev-parse", "topic~1"]),
+        git(dir.path(), &["rev-parse", "main"])
+    );
+    assert_eq!(
+        git(dir.path(), &["branch", "--show-current"]).trim(),
+        "main"
+    );
+}
+
+#[gpui_kit::test]
 fn merged_branch_is_folded_until_its_arrow_is_clicked(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();

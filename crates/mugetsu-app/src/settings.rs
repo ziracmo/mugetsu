@@ -83,6 +83,8 @@ pub struct Settings {
     pub history_compact: bool,
     /// History shows the commit details beside the list instead of below it.
     pub details_side: bool,
+    /// Dropping a branch chip on another asks before rebasing.
+    pub confirm_drag_rebase: bool,
     /// AI tool launched by a PR's "Review with AI".
     pub ai_tool: AiTool,
     /// Shell command run in a terminal for that review; see [`crate::ai_review`].
@@ -234,6 +236,7 @@ impl Default for Settings {
             intro_seen: false,
             history_compact: false,
             details_side: false,
+            confirm_drag_rebase: true,
             ai_tool: AiTool::Claude,
             ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),
             ai_terminal: AiTerminal::System,

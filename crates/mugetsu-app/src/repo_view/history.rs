@@ -16,6 +16,7 @@ use gpui_kit::{
 };
 use mugetsu_git::RefLabel;
 
+use super::drag_rebase::BranchDrag;
 use super::menus;
 use super::{Mode, RepoView, SelectNewer, SelectOlder};
 use crate::fmt;
@@ -88,13 +89,17 @@ fn fold_arrow(
 }
 
 /// Double-click on a branch chip checks it out (with a dialog when needed).
+/// Every branch chip takes a dropped local branch (rebased onto it); local
+/// ones can be picked up themselves (`drag`).
 fn checkout_on_double_click(
     el: gpui_kit::Div,
     name: &str,
     is_remote: bool,
+    drag: Option<BranchDrag>,
     ctx: &ChipContext,
 ) -> AnyElement {
     let (view, branch) = (ctx.view.clone(), name.to_string());
+    let (drop_view, onto) = (ctx.view.clone(), name.to_string());
     el.id(SharedString::from(format!("chip-{name}")))
         .test_support()
         .cursor_pointer()
@@ -106,6 +111,27 @@ fn checkout_on_double_click(
                     this.request_checkout(branch, is_remote, window, cx)
                 });
             }
+        })
+        .when_some(drag, |s, drag| {
+            s.on_drag(drag, |drag, _, _, cx| {
+                cx.stop_propagation();
+                gpui_kit::AppContext::new(cx, |_| drag.clone())
+            })
+        })
+        .drag_over::<BranchDrag>({
+            let onto = onto.clone();
+            move |s, drag, _, _| {
+                if drag.name == onto {
+                    return s;
+                }
+                s.border_color(theme::accent())
+                    .bg(theme::alpha(theme::accent(), 0.3))
+                    .shadow_md()
+            }
+        })
+        .on_drop(move |drag: &BranchDrag, window, cx| {
+            let (branch, onto) = (drag.name.clone(), onto.clone());
+            let _ = drop_view.update(cx, |this, cx| this.drop_branch(branch, onto, window, cx));
         })
         .into_any_element()
 }
@@ -222,6 +248,11 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     ),
                     name,
                     false,
+                    Some(BranchDrag {
+                        name: name.clone(),
+                        color,
+                        head: *head,
+                    }),
                     ctx,
                 );
                 if let Some((_, seq)) = ctx.slashed.as_ref().filter(|(b, _)| b == name) {
@@ -276,6 +307,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 ),
                 name,
                 true,
+                None,
                 ctx,
             )
             .into_any_element();

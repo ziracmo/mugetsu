@@ -535,6 +535,19 @@ fn rebase_conflict_reports_progress_and_aborts() {
 }
 
 #[test]
+fn rebase_branch_moves_another_branch_and_keeps_head() {
+    let (dir, repo, base) = linear();
+    let p = dir.path();
+    git(p, &["switch", "-q", "-c", "side", &base]);
+    commit_file(p, "side.txt", "s\n", "side");
+    git(p, &["switch", "-q", "main"]);
+    assert!(repo.rebase_branch("side", "main").unwrap());
+    assert_eq!(rev(p, "side~1"), rev(p, "main"));
+    let head = repo.git().run(["branch", "--show-current"]).unwrap();
+    assert_eq!(head.trim(), "main");
+}
+
+#[test]
 fn cherry_pick_conflict_is_detected() {
     use mugetsu_git::Operation;
     let (_dir, repo) = conflicting();

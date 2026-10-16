@@ -5,6 +5,7 @@ mod changes;
 mod commit_files;
 mod compact;
 mod conflicts;
+mod drag_rebase;
 pub(crate) mod forms;
 mod history;
 pub(crate) mod links;
@@ -299,6 +300,8 @@ pub struct RepoView {
     pushed: Option<(String, usize)>,
     /// Branch just deleted (name, sequence): its chip is slashed before it goes.
     slashed: Option<(String, usize)>,
+    /// Branch chip dropped on another: the rebase popover asks first.
+    pending_rebase: Option<drag_rebase::PendingRebase>,
     /// Stats view (computed on demand, kept per tab).
     stats: stats_panel::StatsState,
 }
@@ -461,6 +464,7 @@ impl RepoView {
             menu_open: false,
             pushed: None,
             slashed: None,
+            pending_rebase: None,
             stats: Default::default(),
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
@@ -1678,6 +1682,7 @@ impl Render for RepoView {
             .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))
             .on_action(cx.listener(|this, _: &ShowStats, _, cx| this.set_mode(Mode::Stats, cx)))
             .child(self.render_toolbar(cx))
+            .children(self.render_rebase_popover(cx))
             .child(
                 div()
                     .flex_1()
