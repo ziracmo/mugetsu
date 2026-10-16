@@ -368,3 +368,53 @@ fn pull_and_fast_forward_refuse_diverged_history() {
         git(&c, &["rev-parse", "origin/main"])
     );
 }
+
+#[test]
+fn dead_worktrees_and_purge() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    let wt_dir = tempfile::tempdir().unwrap();
+    let wt = |name: &str| wt_dir.path().join(name);
+    for name in ["fresh", "done", "gone", "wip"] {
+        repo.worktree_add(wt(name).to_str().unwrap(), name, true)
+            .unwrap();
+    }
+    // done: one commit, fast-forwarded into main.
+    commit_file(&wt("done"), "d.txt", "d\n", "done work");
+    git(p, &["merge", "-q", "--ff-only", "done"]);
+    std::fs::write(wt("done").join("scratch.txt"), "left over\n").unwrap();
+    // wip: work not merged anywhere.
+    commit_file(&wt("wip"), "w.txt", "w\n", "wip work");
+    // gone: folder deleted by hand.
+    std::fs::remove_dir_all(wt("gone")).unwrap();
+
+    let refs = repo.refs().unwrap();
+    let mut dead = repo.dead_worktrees(&refs);
+    dead.sort_by(|a, b| a.branch.cmp(&b.branch));
+    let found: Vec<_> = dead
+        .iter()
+        .map(|d| (d.branch.as_deref().unwrap_or_default(), d.reason))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("done", mugetsu_git::DeadReason::Merged),
+            ("gone", mugetsu_git::DeadReason::Missing)
+        ]
+    );
+    assert!(dead[0].bytes > 0 && dead[0].dirty, "{:?}", dead[0]);
+    assert_eq!((dead[1].bytes, dead[1].dirty), (0, false));
+
+    for d in &dead {
+        repo.worktree_purge(&d.path).unwrap();
+    }
+    let left: Vec<_> = repo
+        .refs()
+        .unwrap()
+        .worktrees
+        .into_iter()
+        .filter_map(|w| w.branch)
+        .collect();
+    assert_eq!(left, ["main", "fresh", "wip"]);
+    assert!(!wt("done").exists());
+}

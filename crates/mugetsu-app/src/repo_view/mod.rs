@@ -38,7 +38,7 @@ use gpui_kit::{
     Styled as _, Subscription, Task, UniformListScrollHandle, Window, div,
     prelude::FluentBuilder as _,
 };
-use mugetsu_git::{FileDiff, Repo};
+use mugetsu_git::{DeadWorktree, FileDiff, Repo};
 
 use crate::fetch_policy;
 use crate::i18n::tr;
@@ -227,6 +227,10 @@ pub struct RepoView {
     folders: HashMap<String, bool>,
     sidebar_search: Entity<InputState>,
     prs: PrCache,
+    /// Linked worktrees that look finished, with the refs state they were found for.
+    dead_worktrees: Arc<Vec<DeadWorktree>>,
+    dead_key: Option<u64>,
+    _dead_scan: Task<()>,
     /// Diffs PR listings into system notifications.
     pr_watcher: crate::notify::Watcher,
 
@@ -397,6 +401,9 @@ impl RepoView {
             sidebar_collapsed: false,
             sidebar_search,
             prs: PrCache::default(),
+            dead_worktrees: Arc::default(),
+            dead_key: None,
+            _dead_scan: Task::ready(()),
             pr_watcher: Default::default(),
             focused: false,
             fetching: false,
@@ -631,6 +638,7 @@ impl RepoView {
             self.run_search(cx);
         }
         self.refresh_prs(true, cx);
+        self.scan_dead_worktrees(cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
             let upstream = self
                 .data
@@ -641,6 +649,42 @@ impl RepoView {
                 .and_then(|b| b.upstream.clone());
             self.lookup_pr(&head, upstream.as_deref(), false, cx);
         }
+    }
+
+    /// Looks for finished worktrees (and their size) in the background when
+    /// the refs or the worktree list changed.
+    fn scan_dead_worktrees(&mut self, cx: &mut Context<Self>) {
+        use std::hash::{Hash, Hasher};
+        let refs = &self.data.refs;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        refs.fingerprint.hash(&mut h);
+        for w in &refs.worktrees {
+            (&w.path, &w.branch, w.locked, w.prunable).hash(&mut h);
+        }
+        let key = h.finish();
+        if self.dead_key == Some(key) {
+            return;
+        }
+        self.dead_key = Some(key);
+        if refs.worktrees.len() < 2 {
+            self.dead_worktrees = Arc::default();
+            self._dead_scan = Task::ready(());
+            return;
+        }
+        let (repo, refs) = (self.repo.clone(), refs.clone());
+        self._dead_scan = cx.spawn(async move |this, cx| {
+            let dead = cx
+                .background_spawn(async move { repo.dead_worktrees(&refs) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.dead_worktrees = Arc::new(dead);
+                cx.notify();
+            });
+        });
+    }
+
+    pub fn dead_worktrees(&self) -> &[DeadWorktree] {
+        &self.dead_worktrees
     }
 
     // ---- History selection -------------------------------------------------
