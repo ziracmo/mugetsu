@@ -548,6 +548,35 @@ fn rebase_branch_moves_another_branch_and_keeps_head() {
 }
 
 #[test]
+fn rebase_branch_leaves_uncommitted_changes_alone() {
+    let (dir, repo, base) = linear();
+    let p = dir.path();
+    git(p, &["switch", "-q", "-c", "side", &base]);
+    commit_file(p, "side.txt", "s\n", "side");
+    git(p, &["switch", "-q", "main"]);
+    std::fs::write(p.join("one.txt"), "dirty\n").unwrap();
+    assert!(repo.rebase_branch("side", "main").unwrap());
+    assert_eq!(rev(p, "side~1"), rev(p, "main"));
+    assert_eq!(
+        std::fs::read_to_string(p.join("one.txt")).unwrap(),
+        "dirty\n"
+    );
+    let worktrees = repo.git().run(["worktree", "list"]).unwrap();
+    assert_eq!(worktrees.lines().count(), 1, "{worktrees}");
+}
+
+#[test]
+fn rebase_branch_conflicts_stop_on_the_branch() {
+    let (dir, repo, base) = linear();
+    let p = dir.path();
+    git(p, &["switch", "-q", "-c", "side", &base]);
+    commit_file(p, "one.txt", "side\n", "side one");
+    git(p, &["switch", "-q", "main"]);
+    assert!(!repo.rebase_branch("side", "main").unwrap());
+    assert!(!repo.conflicted_paths().unwrap().is_empty());
+}
+
+#[test]
 fn cherry_pick_conflict_is_detected() {
     use mugetsu_git::Operation;
     let (_dir, repo) = conflicting();

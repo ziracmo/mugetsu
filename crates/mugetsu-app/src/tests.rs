@@ -718,6 +718,41 @@ fn dropping_a_branch_chip_on_another_rebases_it_after_asking(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn dropping_a_branch_chip_on_a_row_rebases_it_without_touching_the_checkout(
+    cx: &mut TestAppContext,
+) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::write(dir.path().join("a.txt"), "dirty\n").unwrap();
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let main = git(dir.path(), &["rev-parse", "main"]).trim().to_string();
+    ui_step(cx, handle, &|window, cx| {
+        let from = window.find("chip-topic").bounds().center();
+        // Far right of main's row, away from its chips.
+        let row = window
+            .find(gpui_kit::SharedString::from(main.clone()))
+            .bounds();
+        let to = gpui_kit::point(row.right() - px(40.), row.center().y);
+        window.drag(from, to, cx);
+    });
+    ui_step(cx, handle, &|window, cx| window.click("drag-rebase-ok", cx));
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["rev-parse", "topic~1"]),
+        git(dir.path(), &["rev-parse", "main"])
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "dirty\n"
+    );
+    assert_eq!(
+        git(dir.path(), &["branch", "--show-current"]).trim(),
+        "main"
+    );
+}
+
+#[gpui_kit::test]
 fn merged_branch_is_folded_until_its_arrow_is_clicked(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
