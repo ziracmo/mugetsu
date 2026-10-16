@@ -284,7 +284,7 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         .disabled(b.upstream.is_none() || b.gone)
         .on_click(act(&ctx.view, move |this, window, cx| {
             let (name, upstream) = (name.clone(), upstream.clone().unwrap_or_default());
-            this.confirm_reset(name, upstream, is_head, window, cx);
+            this.confirm_reset(name, upstream, is_head, None, window, cx);
         }))
     };
     let restack = {

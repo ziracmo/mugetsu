@@ -743,6 +743,47 @@ fn checkout_with_local_changes_offers_to_stash(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn double_clicking_a_remote_branch_offers_to_reset_its_local_copy(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(remote.path(), &["init", "-q", "--bare"]);
+    git(
+        dir.path(),
+        &["remote", "add", "origin", remote.path().to_str().unwrap()],
+    );
+    git(dir.path(), &["push", "-q", "-u", "origin", "topic"]);
+    // The local copy falls behind its remote.
+    git(dir.path(), &["branch", "-q", "-f", "topic", "topic~1"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        view.update(cx, |v, cx| {
+            v.request_checkout("origin/topic".into(), true, window, cx)
+        })
+    });
+    cx.update_window(handle, |_, window, _| {
+        assert!(window.try_find("dialog").is_some(), "asks first");
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    ui_step(cx, handle, &|window, cx| window.click("reset-ok", cx));
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(20));
+        settle(cx, &view);
+    }
+    assert_eq!(
+        git(dir.path(), &["branch", "--show-current"]).trim(),
+        "topic"
+    );
+    assert_eq!(
+        git(dir.path(), &["rev-parse", "topic"]),
+        git(dir.path(), &["rev-parse", "origin/topic"]),
+        "reset on the remote branch"
+    );
+}
+
+#[gpui_kit::test]
 fn push_dialog_can_force_with_lease(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
