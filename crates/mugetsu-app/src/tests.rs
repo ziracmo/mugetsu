@@ -1733,3 +1733,111 @@ fn control_r_fetches_every_tab_and_control_shift_r_replays_the_opening(cx: &mut 
 
 mod components;
 mod flows;
+
+/// A click with modifiers held (the test helpers click without any).
+fn click_with(
+    window: &mut gpui_kit::Window,
+    id: &str,
+    modifiers: gpui_kit::Modifiers,
+    cx: &mut gpui_kit::App,
+) {
+    use gpui_kit::test::TestWindowExt as _;
+    window.render_frame(cx);
+    let position = window
+        .find(gpui_kit::ElementId::Name(id.to_string().into()))
+        .bounds()
+        .center();
+    let button = gpui_kit::MouseButton::Left;
+    window.dispatch_event(
+        gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers,
+        }),
+        cx,
+    );
+    window.dispatch_event(
+        gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+            button,
+            position,
+            modifiers,
+            click_count: 1,
+            first_mouse: false,
+        }),
+        cx,
+    );
+    window.dispatch_event(
+        gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent {
+            button,
+            position,
+            modifiers,
+            click_count: 1,
+        }),
+        cx,
+    );
+    window.render_frame(cx);
+}
+
+#[gpui_kit::test]
+fn command_click_picks_branches_then_deletes_them_together(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(dir.path(), &["branch", "spare", "HEAD~1"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let cmd = gpui_kit::Modifiers {
+        platform: true,
+        ..Default::default()
+    };
+    cx.update_window(handle, |_, window, cx| {
+        window.click("branch:feature", cx);
+        click_with(window, "branch:spare", cmd, cx);
+        click_with(window, "branch:topic", cmd, cx);
+        click_with(window, "branch:topic", cmd, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.read(|cx| {
+        assert_eq!(view.read(cx).picked_branches(), vec!["feature", "spare"]);
+    });
+
+    // A plain click starts over.
+    cx.update_window(handle, |_, window, cx| window.click("branch:topic", cx))
+        .unwrap();
+    cx.run_until_parked();
+    cx.read(|cx| assert!(view.read(cx).picked_branches().is_empty()));
+
+    // ⌘-click on a history row picks the branches on that commit.
+    let topic = cx.read(|cx| {
+        let v = view.read(cx);
+        v.data()
+            .refs
+            .branches
+            .iter()
+            .find(|b| b.name == "spare")
+            .unwrap()
+            .target
+    });
+    cx.update_window(handle, |_, window, cx| {
+        click_with(window, &topic.to_string(), cmd, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.read(|cx| {
+        assert_eq!(view.read(cx).picked_branches(), vec!["spare", "topic"]);
+    });
+
+    // topic is unmerged: deleted only once forced.
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            let names = v.picked_branches();
+            v.delete_branches(names, false, window, cx)
+        });
+    })
+    .unwrap();
+    settle(cx, &view);
+    let left = git(dir.path(), &["branch", "--format=%(refname:short)"]);
+    assert!(!left.contains("spare"), "{left}");
+    assert!(left.contains("topic"), "{left}");
+    cx.read(|cx| assert_eq!(view.read(cx).picked_branches(), vec!["topic"]));
+}

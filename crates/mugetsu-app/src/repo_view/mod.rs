@@ -9,6 +9,7 @@ pub(crate) mod forms;
 mod history;
 pub(crate) mod links;
 mod menus;
+mod multi;
 mod particles;
 mod pr_panel;
 mod pr_tip;
@@ -22,7 +23,7 @@ mod stack_panel;
 mod stats_panel;
 mod toolbar;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -169,6 +170,10 @@ pub struct RepoView {
     // History
     selected: Option<ObjectId>,
     selected_ref: Option<SharedString>,
+    /// Local branches picked with ⌘/⌃-click, for batch actions.
+    picked: BTreeSet<String>,
+    /// Last history row ⌘-clicked, where a ⇧-click range starts.
+    pick_anchor: Option<ObjectId>,
     history_scroll: UniformListScrollHandle,
     history_focus: FocusHandle,
     changes_focus: FocusHandle,
@@ -360,6 +365,8 @@ impl RepoView {
             mode: Mode::History,
             selected: None,
             selected_ref: None,
+            picked: BTreeSet::new(),
+            pick_anchor: None,
             history_scroll: UniformListScrollHandle::new(),
             history_focus: cx.focus_handle().tab_stop(true),
             changes_focus: cx.focus_handle(),
@@ -589,6 +596,7 @@ impl RepoView {
                 .collect()
         };
         self.data = data;
+        self.prune_picks();
         if !fresh.is_empty() {
             self.flash_commits(fresh, cx);
         }

@@ -387,6 +387,14 @@ impl RepoView {
             slashed: self.slashed.clone(),
         });
         let hits = Rc::new(self.search_hits.clone());
+        let picked = Rc::new(self.picked_branches());
+        let picked_rows: Rc<HashSet<gix::ObjectId>> = Rc::new(
+            data.decorations
+                .keys()
+                .filter(|id| self.commit_picked(id))
+                .copied()
+                .collect(),
+        );
         let shimmer = self.shimmer.clone();
         let celebrate = self.celebrate;
         let list = if data.folded.is_empty() {
@@ -416,7 +424,8 @@ impl RepoView {
                         let ix = folded.history_row(ix);
                         let commit = &data.history.commits[ix];
                         let toggle = folded.toggle(ix);
-                        let is_selected = selected == Some(commit.id);
+                        let is_selected =
+                            selected == Some(commit.id) || picked_rows.contains(&commit.id);
                         let style = NodeStyle {
                             is_head: head == Some(commit.id),
                             is_merge: commit.parents.len() > 1,
@@ -438,6 +447,10 @@ impl RepoView {
                             .unwrap_or_default();
                         let (menu_ctx, branches, remote_prs) =
                             (menu_ctx.clone(), branches.clone(), remote_prs.clone());
+                        let batch = picked_rows
+                            .contains(&id)
+                            .then(|| picked.clone())
+                            .filter(|p| p.len() > 1);
                         h_flex()
                             .id(SharedString::from(commit.id.to_string()))
                             .test_support()
@@ -546,13 +559,27 @@ impl RepoView {
                                     .text_color(theme::alpha(theme::accent(), 0.7))
                                     .child(commit.id.to_hex_with_len(7).to_string()),
                             )
-                            .on_click(move |_, window, cx| {
+                            .on_click(move |ev, window, cx| {
+                                let (toggle, extend) =
+                                    (super::multi::toggles(ev), super::multi::extends(ev));
                                 let _ = entity.update(cx, |this, cx| {
                                     this.history_focus.focus(window, cx);
+                                    if toggle {
+                                        this.toggle_commit_pick(id, cx);
+                                        return;
+                                    }
+                                    if extend {
+                                        this.pick_commit_range(id, cx);
+                                        return;
+                                    }
+                                    this.clear_picks(cx);
                                     this.select_commit(id, false, cx);
                                 });
                             })
                             .context_menu(move |m, window, cx| {
+                                if let Some(names) = &batch {
+                                    return super::multi::picks_menu(m, &menu_ctx.view, names);
+                                }
                                 menus::commit_menu(
                                     m,
                                     &menu_ctx,
@@ -578,6 +605,7 @@ impl RepoView {
             .size_full()
             .min_h_0()
             .children(self.render_wip_banner(cx))
+            .children(self.render_picks_bar(cx))
             .child(
                 div()
                     .id("history-list")

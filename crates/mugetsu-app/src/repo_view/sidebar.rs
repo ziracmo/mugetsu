@@ -467,6 +467,8 @@ impl RepoView {
             ));
             let info = self.branch_menu_info(b);
             let menu_ctx = ctx.clone();
+            let batch =
+                (self.picked.len() > 1 && self.is_picked(&b.name)).then(|| self.picked_branches());
             let (entity, name, upstream, target, row_id) = (
                 entity.clone(),
                 b.name.clone(),
@@ -474,6 +476,13 @@ impl RepoView {
                 b.target,
                 id.clone(),
             );
+            let menu: MenuBuilder = match batch {
+                Some(names) => {
+                    let view = entity.clone();
+                    Rc::new(move |m, _, _| super::multi::picks_menu(m, &view, &names))
+                }
+                None => Rc::new(move |m, _, _| menus::local_branch_menu(m, &menu_ctx, &info)),
+            };
             render_row(Row {
                 view: entity.clone(),
                 quiet: self.menu_open,
@@ -494,7 +503,7 @@ impl RepoView {
                     theme::muted()
                 },
                 label: node.label.clone(),
-                selected: self.selected_ref.as_ref() == Some(&id),
+                selected: self.selected_ref.as_ref() == Some(&id) || self.is_picked(&b.name),
                 bold: b.is_head,
                 tooltip: Some(match &b.upstream {
                     Some(u) if !b.upstream_gone => {
@@ -510,7 +519,13 @@ impl RepoView {
                 suffix,
                 on_click: Box::new(move |ev, window, cx| {
                     let double = ev.click_count() >= 2;
+                    let toggle = super::multi::toggles(ev);
                     let _ = entity.update(cx, |this, cx| {
+                        if toggle {
+                            this.toggle_branch_pick(&name, cx);
+                            return;
+                        }
+                        this.clear_picks(cx);
                         this.selected_ref = Some(row_id.clone());
                         this.select_commit(target, true, cx);
                         this.lookup_pr(&name, upstream.as_deref(), false, cx);
@@ -519,9 +534,7 @@ impl RepoView {
                         }
                     });
                 }),
-                menu: Some(Rc::new(move |m, _, _| {
-                    menus::local_branch_menu(m, &menu_ctx, &info)
-                })),
+                menu: Some(menu),
             })
         };
         self.tree_rows(

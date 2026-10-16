@@ -418,3 +418,57 @@ fn dead_worktrees_and_purge() {
     assert_eq!(left, ["main", "fresh", "wip"]);
     assert!(!wt("done").exists());
 }
+
+#[test]
+fn batch_delete_reports_unmerged_branches() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    git(p, &["branch", "merged"]);
+    git(p, &["switch", "-q", "-c", "unmerged"]);
+    commit_file(p, "u.txt", "u\n", "u");
+    git(p, &["switch", "-q", "main"]);
+
+    let names = vec!["merged".to_string(), "unmerged".to_string()];
+    let out = repo.delete_branches(&names, false);
+    assert_eq!(out.deleted, vec!["merged".to_string()]);
+    assert_eq!(out.unmerged, vec!["unmerged".to_string()]);
+    assert_eq!(out.failed.len(), 1);
+    assert!(repo.has_local_branch("unmerged"));
+
+    let out = repo.delete_branches(&out.unmerged, true);
+    assert_eq!(out.deleted, vec!["unmerged".to_string()]);
+    assert!(!repo.has_local_branch("unmerged"));
+}
+
+#[test]
+fn batch_rebase_moves_every_branch_or_none() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    for b in ["one", "two"] {
+        git(p, &["switch", "-q", "-c", b, "main~1"]);
+        commit_file(p, &format!("{b}.txt"), "x\n", b);
+    }
+    git(p, &["switch", "-q", "-c", "clash", "main~1"]);
+    commit_file(p, "a.txt", "one\nclash\n", "clash");
+    git(p, &["switch", "-q", "main"]);
+    let main = git(p, &["rev-parse", "main"]);
+    let parent = |b: &str| git(p, &["rev-parse", &format!("{b}~1")]);
+
+    // A conflict on the last branch: nothing moves, HEAD stays on main.
+    let tips: Vec<String> = ["one", "two"]
+        .iter()
+        .map(|b| git(p, &["rev-parse", b]))
+        .collect();
+    let all = ["one", "two", "clash"].map(String::from).to_vec();
+    assert!(repo.rebase_branches("main", &all).is_err());
+    assert_eq!(git(p, &["rev-parse", "one"]), tips[0]);
+    assert_eq!(git(p, &["rev-parse", "two"]), tips[1]);
+    assert_eq!(repo.refs().unwrap().head_branch.as_deref(), Some("main"));
+    assert!(repo.conflicted_paths().unwrap().is_empty());
+
+    let names = ["one", "two"].map(String::from).to_vec();
+    repo.rebase_branches("main", &names).unwrap();
+    assert_eq!(parent("one"), main);
+    assert_eq!(parent("two"), main);
+    assert_eq!(repo.refs().unwrap().head_branch.as_deref(), Some("main"));
+}
