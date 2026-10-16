@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use anyhow::Context as _;
 use serde::Deserialize;
 
-use crate::forge::{Forge, ForgeRepo, agent, encode};
+use crate::forge::{Forge, ForgeKind, ForgeRepo, REPO_PAGES, RemoteRepo, agent, encode};
 use crate::{CheckState, PrDetails, PrState, PrStatus, PullRequest, ReviewDecision};
 
 const API: &str = "https://api.bitbucket.org/2.0";
@@ -23,6 +23,58 @@ pub struct Bitbucket {
 struct Page<T> {
     #[serde(default = "Vec::new")]
     values: Vec<T>,
+    /// URL of the next page, if any.
+    next: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ApiCloneLink {
+    name: String,
+    href: String,
+}
+
+#[derive(Deserialize, Default)]
+struct ApiRepoLinks {
+    #[serde(default)]
+    clone: Vec<ApiCloneLink>,
+}
+
+#[derive(Deserialize)]
+struct ApiUserRepo {
+    full_name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    is_private: bool,
+    #[serde(default)]
+    links: ApiRepoLinks,
+    #[serde(default)]
+    updated_on: String,
+}
+
+impl From<ApiUserRepo> for RemoteRepo {
+    fn from(r: ApiUserRepo) -> Self {
+        let link = |name: &str| {
+            r.links
+                .clone
+                .iter()
+                .find(|l| l.name == name)
+                .map(|l| l.href.clone())
+        };
+        let https_url =
+            link("https").unwrap_or_else(|| format!("https://bitbucket.org/{}.git", r.full_name));
+        let ssh_url =
+            link("ssh").unwrap_or_else(|| format!("git@bitbucket.org:{}.git", r.full_name));
+        RemoteRepo {
+            kind: ForgeKind::Bitbucket,
+            full_name: r.full_name,
+            description: r.description,
+            private: r.is_private,
+            https_url,
+            ssh_url,
+            updated_at: r.updated_on,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -341,6 +393,21 @@ impl Forge for Bitbucket {
         self.auth.as_deref().context("no Bitbucket token")?;
         Ok(self.get_json::<ApiUser>(&format!("{API}/user"))?.login())
     }
+
+    fn user_repos(&self) -> anyhow::Result<Vec<RemoteRepo>> {
+        self.auth.as_deref().context("no Bitbucket token")?;
+        let mut out = Vec::new();
+        let mut url = Some(format!(
+            "{API}/repositories?role=member&sort=-updated_on&pagelen=100"
+        ));
+        for _ in 0..REPO_PAGES {
+            let Some(u) = url.take() else { break };
+            let page: Page<ApiUserRepo> = self.get_json(&u)?;
+            out.extend(page.values.into_iter().map(RemoteRepo::from));
+            url = page.next;
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
@@ -410,6 +477,28 @@ mod tests {
             rollup(vec![st("INPROGRESS", "c")], None).checks,
             Some(CheckState::Pending)
         );
+    }
+
+    #[test]
+    fn maps_repositories() {
+        let json = r#"{"values": [
+            {"full_name": "team/app", "is_private": true, "updated_on": "2026-01-01",
+             "links": {"clone": [
+                {"name": "https", "href": "https://alex@bitbucket.org/team/app.git"},
+                {"name": "ssh", "href": "git@bitbucket.org:team/app.git"}]}},
+            {"full_name": "team/bare"}
+        ], "next": "https://api.bitbucket.org/2.0/repositories?page=2"}"#;
+        let page: Page<ApiUserRepo> = serde_json::from_str(json).unwrap();
+        assert!(page.next.is_some());
+        let repos: Vec<RemoteRepo> = page.values.into_iter().map(RemoteRepo::from).collect();
+        assert!(repos[0].private);
+        assert_eq!(repos[0].ssh_url, "git@bitbucket.org:team/app.git");
+        assert_eq!(
+            repos[0].https_url,
+            "https://alex@bitbucket.org/team/app.git"
+        );
+        assert_eq!(repos[1].name(), "bare");
+        assert_eq!(repos[1].ssh_url, "git@bitbucket.org:team/bare.git");
     }
 
     #[test]

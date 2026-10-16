@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use mugetsu_forge::{Forge, ForgeKind, ForgeRepo, PullRequest};
+use mugetsu_forge::{Forge, ForgeKind, ForgeRepo, PullRequest, RemoteRepo};
 
 const TTL: Duration = Duration::from_secs(120);
 /// Background tabs list their PRs only for notifications, less often (rate limits).
@@ -14,6 +14,7 @@ const BACKGROUND_TTL: Duration = Duration::from_secs(180);
 /// One forge's API client and who "me" is there.
 struct Client {
     api: Box<dyn Forge>,
+    has_token: bool,
     me: OnceLock<Option<String>>,
 }
 
@@ -45,6 +46,7 @@ fn client(repo: &ForgeRepo) -> Arc<Client> {
                 ForgeKind::Bitbucket => mugetsu_forge::bitbucket_token(),
             });
             Arc::new(Client {
+                has_token: token.is_some(),
                 api: mugetsu_forge::client(repo, token),
                 me: OnceLock::new(),
             })
@@ -90,6 +92,94 @@ pub fn recent(repo: &ForgeRepo) -> Result<RecentPrs, String> {
         .get_or_init(|| client.api.viewer_login().ok())
         .clone();
     Ok(RecentPrs { list, me })
+}
+
+/// Repositories of one connected account, offered for cloning.
+#[derive(Clone, Debug)]
+pub struct AccountRepos {
+    pub kind: ForgeKind,
+    pub host: String,
+    pub login: Option<String>,
+    pub repos: Result<Vec<RemoteRepo>, String>,
+}
+
+/// Remote repositories are listed again after this long.
+const ACCOUNTS_TTL: Duration = Duration::from_secs(300);
+
+type AccountsCache = Mutex<Option<(Instant, Vec<AccountRepos>)>>;
+
+fn accounts_cache() -> &'static AccountsCache {
+    static CACHE: OnceLock<AccountsCache> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// The last listing, if it is still fresh.
+pub fn cached_remote_repos() -> Option<Vec<AccountRepos>> {
+    let cache = accounts_cache().lock().unwrap();
+    cache
+        .as_ref()
+        .filter(|(at, _)| at.elapsed() < ACCOUNTS_TTL)
+        .map(|(_, list)| list.clone())
+}
+
+/// Blocking: repositories of every account with a token (GitHub, gitlab.com
+/// and the GitLab servers from Settings, Bitbucket), fetched in parallel.
+pub fn remote_repos() -> Vec<AccountRepos> {
+    let settings = crate::settings::get();
+    let mut targets = vec![
+        (ForgeKind::Github, "github.com".to_string()),
+        (ForgeKind::Gitlab, "gitlab.com".to_string()),
+    ];
+    for host in &settings.gitlab_hosts {
+        if !host.eq_ignore_ascii_case("gitlab.com") {
+            targets.push((ForgeKind::Gitlab, host.clone()));
+        }
+    }
+    targets.push((ForgeKind::Bitbucket, "bitbucket.org".to_string()));
+    let self_hosted = !settings.gitlab_hosts.is_empty();
+    let list: Vec<AccountRepos> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = targets
+            .into_iter()
+            .map(|(kind, host)| {
+                scope.spawn(move || {
+                    let repo = ForgeRepo {
+                        kind,
+                        host: host.clone(),
+                        owner: String::new(),
+                        name: String::new(),
+                    };
+                    let client = client(&repo);
+                    if !client.has_token {
+                        return None;
+                    }
+                    let repos = client.api.user_repos().map_err(|e| e.to_string());
+                    // A GitLab token often belongs to a self-hosted server only.
+                    if repos.is_err()
+                        && kind == ForgeKind::Gitlab
+                        && host == "gitlab.com"
+                        && self_hosted
+                    {
+                        return None;
+                    }
+                    let login = client
+                        .me
+                        .get_or_init(|| client.api.viewer_login().ok())
+                        .clone();
+                    Some(AccountRepos {
+                        kind,
+                        host,
+                        login,
+                        repos,
+                    })
+                })
+            })
+            .collect();
+        jobs.into_iter()
+            .filter_map(|j| j.join().ok().flatten())
+            .collect()
+    });
+    *accounts_cache().lock().unwrap() = Some((Instant::now(), list.clone()));
+    list
 }
 
 #[derive(Clone, Debug)]

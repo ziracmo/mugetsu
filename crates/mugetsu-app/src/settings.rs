@@ -102,6 +102,12 @@ pub struct Settings {
     pub force_delete: ForceDelete,
     /// Last answer to "also delete the local branch" when deleting a remote one.
     pub delete_local_too: bool,
+    /// Workspace folder: where repositories are cloned (asked when unset).
+    pub clone_dir: Option<PathBuf>,
+    /// Ask where to clone every time, even with a workspace folder.
+    pub clone_ask: bool,
+    /// Clone over HTTPS (`Some(true)`) or SSH; `None` picks SSH when a key exists.
+    pub clone_https: Option<bool>,
 }
 
 /// Which branch deletes skip the confirmation. A local one is then forced
@@ -256,6 +262,9 @@ impl Default for Settings {
             bitbucket_token: String::new(),
             force_delete: ForceDelete::default(),
             delete_local_too: false,
+            clone_dir: None,
+            clone_ask: false,
+            clone_https: None,
         }
     }
 }
@@ -291,6 +300,33 @@ impl Settings {
         // Dragged down: lands after the target; dragged up: before it.
         order.insert(if from > to { to } else { to + 1 }, item);
         self.sidebar_order = order.iter().map(|s| s.to_string()).collect();
+    }
+
+    /// Folders scanned for repositories: the repository folders and the
+    /// workspace folder.
+    pub fn scan_folders(&self) -> Vec<PathBuf> {
+        let mut out = self.repo_folders.clone();
+        if let Some(dir) = &self.clone_dir
+            && !out.contains(dir)
+        {
+            out.push(dir.clone());
+        }
+        out
+    }
+
+    /// Clones go over HTTPS: the user's choice, else when no SSH key is found.
+    pub fn clone_over_https(&self) -> bool {
+        self.clone_https.unwrap_or_else(|| {
+            let keys = dirs::home_dir().and_then(|h| std::fs::read_dir(h.join(".ssh")).ok());
+            !keys.is_some_and(|mut rd| {
+                rd.any(|e| {
+                    e.is_ok_and(|e| {
+                        let name = e.file_name().to_string_lossy().to_string();
+                        name.starts_with("id_") && name.ends_with(".pub")
+                    })
+                })
+            })
+        })
     }
 
     pub fn add_recent(&mut self, path: PathBuf) {

@@ -9,7 +9,7 @@ mod forge;
 mod gitlab;
 
 pub use bitbucket::Bitbucket;
-pub use forge::{Forge, ForgeKind, ForgeRepo};
+pub use forge::{Forge, ForgeKind, ForgeRepo, RemoteRepo};
 pub use gitlab::Gitlab;
 
 use anyhow::Context;
@@ -575,6 +575,47 @@ impl Forge for Github {
     fn viewer_login(&self) -> anyhow::Result<String> {
         Github::viewer_login(self)
     }
+
+    fn user_repos(&self) -> anyhow::Result<Vec<RemoteRepo>> {
+        self.token.as_deref().context("no GitHub token")?;
+        let mut out = Vec::new();
+        for page in 1..=forge::REPO_PAGES {
+            let url =
+                format!("https://api.github.com/user/repos?per_page=100&sort=pushed&page={page}");
+            let batch: Vec<ApiUserRepo> = self.get_json(&url)?;
+            let full = batch.len() == 100;
+            out.extend(batch.into_iter().map(RemoteRepo::from));
+            if !full {
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Deserialize)]
+struct ApiUserRepo {
+    full_name: String,
+    description: Option<String>,
+    #[serde(default)]
+    private: bool,
+    clone_url: String,
+    ssh_url: String,
+    pushed_at: Option<String>,
+}
+
+impl From<ApiUserRepo> for RemoteRepo {
+    fn from(r: ApiUserRepo) -> Self {
+        RemoteRepo {
+            kind: ForgeKind::Github,
+            full_name: r.full_name,
+            description: r.description.unwrap_or_default(),
+            private: r.private,
+            https_url: r.clone_url,
+            ssh_url: r.ssh_url,
+            updated_at: r.pushed_at.unwrap_or_default(),
+        }
+    }
 }
 
 fn github_repo(repo: &ForgeRepo) -> anyhow::Result<GithubRepo> {
@@ -637,6 +678,20 @@ fn command(program: impl AsRef<OsStr>) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_user_repositories() {
+        let json = r#"[{"full_name": "o/r", "description": null, "private": true,
+            "clone_url": "https://github.com/o/r.git", "ssh_url": "git@github.com:o/r.git",
+            "pushed_at": "2026-01-01T00:00:00Z"}]"#;
+        let list: Vec<ApiUserRepo> = serde_json::from_str(json).unwrap();
+        let r = RemoteRepo::from(list.into_iter().next().unwrap());
+        assert_eq!(
+            (r.kind, r.name(), r.private),
+            (ForgeKind::Github, "r", true)
+        );
+        assert_eq!(r.https_url, "https://github.com/o/r.git");
+    }
 
     #[test]
     fn builds_web_links() {
