@@ -18,14 +18,41 @@ use gpui_kit::{
 use crate::i18n::tr;
 use crate::theme;
 
-/// Whole opening eclipse, from first light to the app showing through.
-pub const ECLIPSE: Duration = Duration::from_millis(3400);
-/// Totality, as a fraction of [`ECLIPSE`].
+/// The eclipse itself, from first light to the app showing through.
+const SCENE: Duration = Duration::from_millis(3400);
+/// Pause on the finished title, before the light opens onto the app.
+const HOLD: Duration = Duration::from_millis(500);
+/// Whole opening, hold included.
+pub const ECLIPSE: Duration = Duration::from_millis(3400 + 500);
+/// Totality, as a fraction of [`SCENE`].
 const TOTAL: f32 = 0.56;
+/// Where the scene pauses for [`HOLD`], just before the bloom and fade out.
+const PAUSE: f32 = 0.84;
 const SUN: f32 = 150.;
 const STARS: usize = 70;
 const SPARKS: usize = 48;
 const BEADS: usize = 7;
+
+/// Scene time for a fraction `t` of [`ECLIPSE`]: runs at [`SCENE`] pace but
+/// stands still at [`PAUSE`] for [`HOLD`].
+fn scene(t: f32) -> f32 {
+    let (scene, hold) = (SCENE.as_secs_f32(), HOLD.as_secs_f32());
+    let e = t * (scene + hold);
+    let pause = PAUSE * scene;
+    if e < pause {
+        e / scene
+    } else if e < pause + hold {
+        PAUSE
+    } else {
+        (e - hold) / scene
+    }
+}
+
+/// Unpaused scene time, for what keeps moving during the hold
+/// (twinkling, the corona breathing).
+fn live(t: f32) -> f32 {
+    t * ECLIPSE.as_secs_f32() / SCENE.as_secs_f32()
+}
 
 fn ease_in_out(t: f32) -> f32 {
     if t < 0.5 {
@@ -63,7 +90,9 @@ pub fn eclipse(seq: u64) -> AnyElement {
     let warm: Hsla = rgb(0xffd9a0).into();
     let white = gpui_kit::white();
     let c = SUN / 2.;
-    let anim = || Animation::new(ECLIPSE);
+    let anim = || Animation::new(ECLIPSE).with_easing(scene);
+    // Unpaused clock; such animations take `scene(t)` for their staging.
+    let clock = || Animation::new(ECLIPSE);
 
     // Dusk fades out as the moon takes the light.
     let dusk = div()
@@ -91,10 +120,10 @@ pub fn eclipse(seq: u64) -> AnyElement {
             .size(px(size))
             .rounded_full()
             .bg(white)
-            .with_animation(("eclipse-star", i), anim(), move |el, t| {
+            .with_animation(("eclipse-star", i), clock(), move |el, t| {
                 // Stars come out as the light goes, one after the other.
-                let dark = span(t, 0.15 + phase * 0.3, TOTAL);
-                let twinkle = 0.45 + 0.55 * ((t * speed + phase) * TAU).sin().abs();
+                let dark = span(scene(t), 0.15 + phase * 0.3, TOTAL);
+                let twinkle = 0.45 + 0.55 * ((live(t) * speed + phase) * TAU).sin().abs();
                 el.opacity(dark * twinkle * 0.9)
             })
     });
@@ -103,11 +132,12 @@ pub fn eclipse(seq: u64) -> AnyElement {
         .size(px(SUN))
         .rounded_full()
         .bg(warm)
-        .with_animation("eclipse-sun", anim(), move |el, t| {
+        .with_animation("eclipse-sun", clock(), move |el, live_t| {
+            let t = scene(live_t);
             let k = span(t, 0., TOTAL);
             let flare = span(t, TOTAL, TOTAL + 0.08) * (1. - span(t, TOTAL + 0.1, 0.9));
             // The corona breathes once the disc is covered.
-            let breathe = 0.5 + 0.5 * (t * 14.).sin();
+            let breathe = 0.5 + 0.5 * (live(live_t) * 14.).sin();
             let corona = theme::alpha(theme::accent(), 0.35 + 0.6 * k);
             el.shadow(vec![
                 glow(
@@ -270,7 +300,7 @@ pub fn eclipse(seq: u64) -> AnyElement {
             .absolute()
             .rounded_full()
             .with_animation("eclipse-bloom", anim(), move |el, t| {
-                let p = ease_out(span(t, 0.84, 1.));
+                let p = ease_out(span(t, PAUSE, 1.));
                 let size = SUN + p * 2600.;
                 let on = if p > 0. { 1. - p * 0.6 } else { 0. };
                 el.size(px(size))
@@ -305,7 +335,7 @@ pub fn eclipse(seq: u64) -> AnyElement {
                 .child(bloom),
         )
         .with_animation("eclipse-out", anim(), |el, t| {
-            // Holds totality a beat, then lets the app through.
+            // Holds the title a beat, then lets the app through.
             el.opacity(1. - span(t, 0.86, 1.))
         });
     div()
