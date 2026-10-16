@@ -4,6 +4,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::diff::{Diff, DiffFile as UiDiffFile};
 use gpui_kit::component::input::Textarea;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
@@ -131,6 +132,23 @@ impl RepoView {
             .rsplit_once('/')
             .map_or(("", f.path.as_str()), |(d, n)| (d, n));
         let path = f.path.clone();
+        let (view, root) = (cx.entity().downgrade(), self.repo.root().to_path_buf());
+        // Blame reads the file at HEAD: it must exist there and here.
+        let fresh = |c: Change| {
+            matches!(
+                c,
+                Change::Added
+                    | Change::Untracked
+                    | Change::Deleted
+                    | Change::Renamed
+                    | Change::Copied
+            )
+        };
+        let menu = super::menus::FileMenu {
+            path: f.path.clone(),
+            rev: None,
+            blamable: !fresh(f.index) && !fresh(f.worktree),
+        };
         let id = SharedString::from(format!(
             "{}:{}",
             if staged { "staged" } else { "unstaged" },
@@ -230,6 +248,7 @@ impl RepoView {
                     }
                 }),
             )
+            .context_menu(move |m, _, _| super::menus::file_menu(m, &view, &root, &menu))
             .into_any_element()
     }
 

@@ -4,6 +4,7 @@
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::diff::DiffFileStatus;
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -84,6 +85,11 @@ impl RepoView {
             .map(|f| (f.path().clone(), f.status(), f.original_path().cloned()))
             .collect();
         let paths: Vec<&str> = files.iter().map(|f| f.0.as_ref()).collect();
+        let (view, root, rev) = (
+            cx.entity().downgrade(),
+            self.repo.root().to_path_buf(),
+            self.selected,
+        );
         let rows = tree(&paths).into_iter().enumerate().map(|(ix, row)| {
             let base = h_flex()
                 .h(px(22.))
@@ -107,6 +113,11 @@ impl RepoView {
                     let tip = match original.filter(|o| *o != path) {
                         Some(from) => format!("{from} → {path}"),
                         None => path.to_string(),
+                    };
+                    let menu = super::menus::FileMenu {
+                        path: path.to_string(),
+                        rev,
+                        blamable: status != DiffFileStatus::Deleted,
                     };
                     base.id(SharedString::from(format!("commit-file-{path}")))
                         .test_support()
@@ -132,6 +143,10 @@ impl RepoView {
                                 .update(cx, |d, cx| d.scroll_to_file(&path, cx));
                             cx.notify();
                         }))
+                        .context_menu({
+                            let (view, root) = (view.clone(), root.clone());
+                            move |m, _, _| super::menus::file_menu(m, &view, &root, &menu)
+                        })
                         .into_any_element()
                 }
             }

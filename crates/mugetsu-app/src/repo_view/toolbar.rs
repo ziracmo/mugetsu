@@ -473,6 +473,13 @@ impl RepoView {
                     .when_some(
                         self.pr_page.as_ref().filter(|_| mode == Mode::Pr),
                         |s, page| s.child(tab("mode-pr", format!("PR #{}", page.number), "", true)),
+                    )
+                    .when_some(
+                        self.file_page().filter(|_| mode == Mode::File),
+                        |s, page| {
+                            let name = page.path.rsplit('/').next().unwrap_or(&page.path);
+                            s.child(tab("mode-file", name.to_string(), "", true))
+                        },
                     ),
             )
             .when(mode == Mode::History, |s| {

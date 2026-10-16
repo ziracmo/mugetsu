@@ -783,3 +783,37 @@ fn interactive_rebase_onto_a_diverged_branch() {
     assert!(repo.rebase_interactive("main", &steps).unwrap(), "finished");
     assert_eq!(subjects(p), ["base", "one", "two", "three", "t2", "t1"]);
 }
+
+#[test]
+fn file_log_follows_renames_and_blame_names_each_line() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    git(p, &["mv", "a.txt", "renamed.txt"]);
+    git(p, &["commit", "-q", "-m", "rename"]);
+    commit_file(p, "renamed.txt", "one\ntwo\nthree\nfour\nfive\n", "c3");
+
+    let log = repo.file_log("renamed.txt", None).unwrap();
+    let summaries: Vec<&str> = log.iter().map(|c| c.summary.as_str()).collect();
+    assert_eq!(summaries, ["c3", "rename", "c2", "c1"]);
+    assert_eq!(log[1].status, 'R');
+    assert_eq!(log[1].old_path.as_deref(), Some("a.txt"));
+    assert_eq!(log[3].path, "a.txt");
+    let patch = repo.file_patch(&log[3]).unwrap();
+    assert!(patch.contains("+three"), "{patch}");
+
+    std::fs::write(p.join("renamed.txt"), "one\ntwo\nthree\nfour\nfive\nsix\n").unwrap();
+    let blame = repo.blame("renamed.txt", None).unwrap();
+    let who: Vec<(&str, bool)> = blame
+        .iter()
+        .map(|l| (l.summary.as_str(), l.is_uncommitted()))
+        .collect();
+    assert_eq!(blame.len(), 6);
+    assert_eq!(who[0], ("c1", false));
+    assert_eq!(who[3], ("c2", false));
+    assert_eq!(who[4], ("c3", false));
+    assert!(who[5].1, "the unsaved line is uncommitted");
+    assert_eq!(blame[5].text, "six");
+
+    let at_c2 = repo.blame("a.txt", Some(&log[2].id.to_string())).unwrap();
+    assert_eq!(at_c2.len(), 4);
+}
