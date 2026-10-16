@@ -1,10 +1,13 @@
 //! Built-in conflict resolution: the operation banner (continue, skip,
 //! abort) and a three-pane resolver, ours | result | theirs, aligned chunk by
-//! chunk. A conflicting chunk is settled by clicking a side (or both, or
-//! neither); the result can also be edited by hand before marking the file
-//! resolved.
+//! chunk. A conflict is settled by taking a side (or both, or neither), or by
+//! dragging blocks and single lines into its result, where kept pieces can be
+//! reordered or dragged back out. ⌥↑ / ⌥↓ jump from conflict to conflict and
+//! ⌥← / ⌥→ take a side; the result can also be edited by hand before marking
+//! the file resolved.
 
 use std::collections::HashSet;
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,11 +18,11 @@ use gpui_kit::component::input::{Textarea, TextareaState};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, App, AppContext as _, Context, Entity, Hsla,
-    InteractiveElement as _, IntoElement, ParentElement as _, ScrollHandle, SharedString,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
     relative,
 };
-use mugetsu_git::{Chunk, ConflictFile, Operation, Resolution};
+use mugetsu_git::{Chunk, Conflict, ConflictFile, Operation, Resolution};
 
 use super::{Mode, RepoView, SelectedChange};
 use crate::i18n::tr;
@@ -28,6 +31,179 @@ use crate::theme;
 /// Clean runs longer than this fold to their first and last lines.
 const FOLD_OVER: usize = 10;
 const FOLD_KEEP: usize = 3;
+/// Height of the bar over each side of a conflict.
+const BAR_H: f32 = 26.;
+/// Estimated height of a code line, for the overview ruler.
+const LINE_H: f32 = 16.;
+const RULER_W: f32 = 12.;
+
+/// One side of a conflict.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Side {
+    Ours,
+    Theirs,
+}
+
+impl Side {
+    fn lines(self, c: &Conflict) -> &[String] {
+        match self {
+            Self::Ours => &c.ours,
+            Self::Theirs => &c.theirs,
+        }
+    }
+
+    fn color(self) -> Hsla {
+        match self {
+            Self::Ours => ours_color(),
+            Self::Theirs => theirs_color(),
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Ours => "ours",
+            Self::Theirs => "theirs",
+        }
+    }
+}
+
+/// A run of lines from one side, kept in a conflict's result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Piece {
+    side: Side,
+    lines: Range<usize>,
+}
+
+impl Piece {
+    fn whole(side: Side, c: &Conflict) -> Self {
+        Self {
+            side,
+            lines: 0..side.lines(c).len(),
+        }
+    }
+
+    fn text<'a>(&self, c: &'a Conflict) -> &'a [String] {
+        &self.side.lines(c)[self.lines.clone()]
+    }
+}
+
+/// The pieces a one-click resolution keeps.
+fn pieces_for(r: Resolution, c: &Conflict) -> Vec<Piece> {
+    let (a, b) = match r {
+        Resolution::Ours => (Some(Side::Ours), None),
+        Resolution::Theirs => (Some(Side::Theirs), None),
+        Resolution::OursThenTheirs => (Some(Side::Ours), Some(Side::Theirs)),
+        Resolution::TheirsThenOurs => (Some(Side::Theirs), Some(Side::Ours)),
+        Resolution::Neither => (None, None),
+    };
+    let mut pieces: Vec<Piece> = a.into_iter().chain(b).map(|s| Piece::whole(s, c)).collect();
+    normalize(&mut pieces);
+    pieces
+}
+
+/// Drops empty pieces and joins neighbours that continue each other (lines
+/// dragged one after the other).
+fn normalize(pieces: &mut Vec<Piece>) {
+    pieces.retain(|p| !p.lines.is_empty());
+    let mut i = 1;
+    while i < pieces.len() {
+        if pieces[i - 1].side == pieces[i].side && pieces[i - 1].lines.end == pieces[i].lines.start
+        {
+            let end = pieces.remove(i).lines.end;
+            pieces[i - 1].lines.end = end;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Puts `piece` before the kept piece `before` (at the end without one).
+fn insert_piece(pieces: &mut Vec<Piece>, piece: Piece, before: Option<usize>) {
+    let at = before.unwrap_or(pieces.len()).min(pieces.len());
+    pieces.insert(at, piece);
+    normalize(pieces);
+}
+
+/// Moves the kept piece `from` before `before` (to the end without one).
+fn move_piece(pieces: &mut Vec<Piece>, from: usize, before: Option<usize>) {
+    if from >= pieces.len() {
+        return;
+    }
+    let piece = pieces.remove(from);
+    let before = before.map(|b| if b > from { b - 1 } else { b });
+    insert_piece(pieces, piece, before);
+}
+
+/// Whether line `line` of `side` is in the result.
+fn kept(pieces: &[Piece], side: Side, line: usize) -> bool {
+    pieces
+        .iter()
+        .any(|p| p.side == side && p.lines.contains(&line))
+}
+
+/// What is being dragged towards (or out of) a conflict's result.
+#[derive(Clone, Debug)]
+enum Dragged {
+    /// Lines of one side.
+    Lines(Piece),
+    /// A piece already in the result (index): reorder, or drop out to remove.
+    Kept(usize),
+}
+
+#[derive(Clone)]
+struct CodeDrag {
+    conflict: usize,
+    what: Dragged,
+    color: Hsla,
+    first: SharedString,
+    count: usize,
+}
+
+impl Render for CodeDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .w(px(320.))
+            .h(px(30.))
+            .px_2()
+            .gap_2()
+            .rounded_md()
+            .bg(theme::popover())
+            .border_1()
+            .border_color(self.color)
+            .shadow_xl()
+            .child(
+                Icon::new(Lucide::GripVertical)
+                    .xsmall()
+                    .text_color(self.color),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_family(cx.theme().mono_font_family.clone())
+                    .text_xs()
+                    .child(self.first.clone()),
+            )
+            .when(self.count > 1, |el| {
+                el.child(
+                    div()
+                        .flex_none()
+                        .px_1p5()
+                        .rounded_sm()
+                        .text_xs()
+                        .bg(theme::alpha(self.color, 0.2))
+                        .text_color(self.color)
+                        .child(trf!("{} lignes", "{} lines", self.count)),
+                )
+            })
+            .with_animation(
+                "code-lift",
+                Animation::new(Duration::from_millis(160)).with_easing(gpui_kit::ease_out_quint()),
+                |el, t| el.opacity(0.6 + 0.4 * t),
+            )
+    }
+}
 
 /// The resolver's state for one conflicted file.
 pub(super) struct ConflictEditor {
@@ -35,13 +211,15 @@ pub(super) struct ConflictEditor {
     /// `None` while the versions load.
     file: Option<Arc<ConflictFile>>,
     error: Option<String>,
-    /// One per conflicting chunk, in order.
-    choices: Vec<Option<Resolution>>,
+    /// What each conflict keeps, in order; `None` while unresolved.
+    choices: Vec<Option<Vec<Piece>>>,
+    /// The conflict the navigation and the shortcuts act on.
+    current: usize,
     /// Clean chunks unfolded by the user (chunk index).
     unfolded: HashSet<usize>,
     /// Hand-editing the result instead of picking sides.
     editing: Option<Entity<TextareaState>>,
-    /// Last pick (conflict index, sequence), for its entrance animation.
+    /// Last change (conflict index, sequence), for its entrance animation.
     picked: Option<(usize, usize)>,
     seq: usize,
     scroll: ScrollHandle,
@@ -54,6 +232,7 @@ impl ConflictEditor {
             file: None,
             error: None,
             choices: Vec::new(),
+            current: 0,
             unfolded: HashSet::new(),
             editing: None,
             picked: None,
@@ -80,6 +259,45 @@ impl ConflictEditor {
             .nth(conflict)
             .map(|(i, _)| i)
     }
+
+    fn conflict(&self, n: usize) -> Option<&Conflict> {
+        self.file.as_ref()?.conflicts().nth(n)
+    }
+
+    /// The merged text with the current picks.
+    fn render(&self) -> Option<String> {
+        let file = self.file.as_ref()?;
+        Some(file.render_with(|i, c| {
+            self.choices.get(i)?.as_ref().map(|pieces| {
+                pieces
+                    .iter()
+                    .flat_map(|p| p.text(c).iter().map(String::as_str))
+                    .collect()
+            })
+        }))
+    }
+
+    /// Makes `conflict` current and brings it into view, with a few lines of
+    /// context above it.
+    fn focus(&mut self, conflict: usize) {
+        self.current = conflict;
+        if let Some(chunk) = self.chunk_of(conflict) {
+            self.scroll.scroll_to_top_of_item(chunk.saturating_sub(1));
+        }
+    }
+
+    /// The next unresolved conflict after the current one, wrapping.
+    fn next_unresolved(&self) -> Option<usize> {
+        let n = self.choices.len();
+        (1..=n)
+            .map(|k| (self.current + k) % n)
+            .find(|&i| self.choices[i].is_none())
+    }
+
+    fn changed(&mut self, conflict: usize) {
+        self.seq += 1;
+        self.picked = Some((conflict, self.seq));
+    }
 }
 
 /// `Ok(false)` from a step that stopped on (new) conflicts becomes an error,
@@ -100,11 +318,19 @@ fn theirs_color() -> Hsla {
     theme::magenta()
 }
 
-fn side_color(r: Resolution, first: bool) -> Hsla {
-    match (r, first) {
-        (Resolution::Ours | Resolution::OursThenTheirs, true)
-        | (Resolution::TheirsThenOurs, false) => ours_color(),
-        _ => theirs_color(),
+/// The resolver's own opaque ground: nothing of the window shows through it.
+fn ground() -> Hsla {
+    Hsla {
+        a: 1.,
+        ..theme::card()
+    }
+}
+
+/// Opaque bars (file header, column titles, conflict bars).
+fn bar() -> Hsla {
+    Hsla {
+        a: 1.,
+        ..theme::sheet()
     }
 }
 
@@ -115,6 +341,30 @@ fn shown(line: &str) -> String {
     if l.is_empty() { " ".into() } else { l }
 }
 
+/// One code line with its number in the gutter.
+fn code_line(number: usize, text: &str, cx: &App) -> gpui_kit::Div {
+    h_flex()
+        .items_start()
+        .w_full()
+        .min_w_0()
+        .child(
+            div()
+                .w(px(38.))
+                .flex_none()
+                .pr_2()
+                .text_right()
+                .text_color(theme::alpha(theme::muted(), 0.7))
+                .child(number.to_string()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_color(cx.theme().foreground)
+                .child(shown(text)),
+        )
+}
+
 /// Lines with a gutter of numbers starting at `first`.
 fn code(lines: &[&str], first: usize, cx: &App) -> AnyElement {
     v_flex()
@@ -122,22 +372,36 @@ fn code(lines: &[&str], first: usize, cx: &App) -> AnyElement {
         .py(px(2.))
         .font_family(cx.theme().mono_font_family.clone())
         .text_xs()
-        .children(lines.iter().enumerate().map(|(i, l)| {
-            h_flex()
-                .items_start()
-                .w_full()
-                .min_w_0()
-                .child(
-                    div()
-                        .w(px(34.))
-                        .flex_none()
-                        .pr_2()
-                        .text_right()
-                        .text_color(theme::alpha(theme::muted(), 0.6))
-                        .child((first + i).to_string()),
-                )
-                .child(div().flex_1().min_w_0().child(shown(l)))
-        }))
+        .children(
+            lines
+                .iter()
+                .enumerate()
+                .map(|(i, l)| code_line(first + i, l, cx)),
+        )
+        .into_any_element()
+}
+
+/// Muted italic placeholder inside a cell.
+fn placeholder(text: &'static str, cx: &App) -> AnyElement {
+    div()
+        .px_3()
+        .py_1p5()
+        .text_xs()
+        .italic()
+        .text_color(cx.theme().muted_foreground)
+        .child(text)
+        .into_any_element()
+}
+
+/// A small keycap for the shortcut hints.
+fn keycap(k: String) -> AnyElement {
+    div()
+        .px_1()
+        .rounded_sm()
+        .border_1()
+        .border_color(theme::hairline())
+        .bg(theme::raised())
+        .child(k)
         .into_any_element()
 }
 
@@ -204,61 +468,164 @@ impl RepoView {
         cx.notify();
     }
 
-    fn pick(&mut self, conflict: usize, r: Option<Resolution>, cx: &mut Context<Self>) {
+    /// Replaces what `conflict` keeps (`None`: unresolved again). With
+    /// `advance`, a resolved conflict hands over to the next unresolved one.
+    fn set_choice(
+        &mut self,
+        conflict: usize,
+        pieces: Option<Vec<Piece>>,
+        advance: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(editor) = self.conflict.as_mut() else {
             return;
         };
-        if let Some(slot) = editor.choices.get_mut(conflict) {
-            *slot = r;
-            editor.seq += 1;
-            editor.picked = r.map(|_| (conflict, editor.seq));
+        let Some(slot) = editor.choices.get_mut(conflict) else {
+            return;
+        };
+        let resolved = pieces.is_some();
+        *slot = pieces;
+        editor.current = conflict;
+        if resolved {
+            editor.changed(conflict);
+        } else {
+            editor.picked = None;
+        }
+        if advance
+            && resolved
+            && let Some(next) = editor.next_unresolved()
+        {
+            editor.focus(next);
         }
         cx.notify();
+    }
+
+    fn pick(&mut self, conflict: usize, r: Resolution, cx: &mut Context<Self>) {
+        let pieces = self
+            .conflict
+            .as_ref()
+            .and_then(|e| e.conflict(conflict))
+            .map(|c| pieces_for(r, c));
+        if let Some(pieces) = pieces {
+            self.set_choice(conflict, Some(pieces), true, cx);
+        }
+    }
+
+    /// Adds a whole side after what the result already keeps.
+    fn append_side(&mut self, conflict: usize, side: Side, cx: &mut Context<Self>) {
+        let Some(editor) = self.conflict.as_ref() else {
+            return;
+        };
+        let Some(c) = editor.conflict(conflict) else {
+            return;
+        };
+        let mut pieces = editor
+            .choices
+            .get(conflict)
+            .cloned()
+            .flatten()
+            .unwrap_or_default();
+        insert_piece(&mut pieces, Piece::whole(side, c), None);
+        self.set_choice(conflict, Some(pieces), false, cx);
     }
 
     fn pick_all(&mut self, r: Resolution, cx: &mut Context<Self>) {
-        if let Some(editor) = self.conflict.as_mut() {
+        if let Some(editor) = self.conflict.as_mut()
+            && let Some(file) = editor.file.clone()
+        {
             editor.seq += 1;
             editor.picked = None;
-            editor.choices.iter_mut().for_each(|c| *c = Some(r));
+            editor.choices = file.conflicts().map(|c| Some(pieces_for(r, c))).collect();
         }
         cx.notify();
     }
 
-    /// Scrolls to the next (or previous) unresolved conflict after the one
-    /// last picked.
-    fn jump(&mut self, forward: bool, cx: &mut Context<Self>) {
+    /// Dropped into `conflict`'s result, before the kept piece `before` (at
+    /// the end without one).
+    fn drop_code(
+        &mut self,
+        conflict: usize,
+        drag: &CodeDrag,
+        before: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        if drag.conflict != conflict {
+            return;
+        }
         let Some(editor) = self.conflict.as_ref() else {
+            return;
+        };
+        let mut pieces = editor
+            .choices
+            .get(conflict)
+            .cloned()
+            .flatten()
+            .unwrap_or_default();
+        match &drag.what {
+            Dragged::Lines(piece) => insert_piece(&mut pieces, piece.clone(), before),
+            Dragged::Kept(from) => move_piece(&mut pieces, *from, before),
+        }
+        self.set_choice(conflict, Some(pieces), false, cx);
+    }
+
+    /// Takes a kept piece out of the result; the last one out leaves the
+    /// conflict unresolved.
+    fn remove_piece(&mut self, conflict: usize, index: usize, cx: &mut Context<Self>) {
+        let Some(mut pieces) = self
+            .conflict
+            .as_ref()
+            .and_then(|e| e.choices.get(conflict).cloned().flatten())
+        else {
+            return;
+        };
+        if index < pieces.len() {
+            pieces.remove(index);
+        }
+        let choice = (!pieces.is_empty()).then_some(pieces);
+        self.set_choice(conflict, choice, false, cx);
+    }
+
+    /// Goes to the next (or previous) conflict, wrapping.
+    pub(super) fn conflict_jump(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(editor) = self.conflict.as_mut().filter(|e| e.editing.is_none()) else {
             return;
         };
         let n = editor.choices.len();
         if n == 0 {
             return;
         }
-        let from = editor
-            .picked
-            .map_or(if forward { n - 1 } else { 0 }, |(i, _)| i);
-        let next = (1..=n)
-            .map(|k| {
-                if forward {
-                    (from + k) % n
-                } else {
-                    (from + n - k % n) % n
-                }
-            })
-            .find(|&i| editor.choices[i].is_none())
-            .unwrap_or(if forward {
-                (from + 1) % n
-            } else {
-                (from + n - 1) % n
-            });
-        if let Some(chunk) = editor.chunk_of(next) {
-            editor.scroll.scroll_to_item(chunk);
-        }
+        let next = if forward {
+            (editor.current + 1) % n
+        } else {
+            (editor.current + n - 1) % n
+        };
+        editor.focus(next);
+        cx.notify();
+    }
+
+    fn conflict_goto(&mut self, conflict: usize, cx: &mut Context<Self>) {
         if let Some(editor) = self.conflict.as_mut() {
-            editor.picked = Some((next, 0));
+            editor.focus(conflict);
         }
         cx.notify();
+    }
+
+    /// Takes one side for the current conflict (keyboard).
+    pub(super) fn conflict_take(&mut self, ours: bool, cx: &mut Context<Self>) {
+        let Some(current) = self
+            .conflict
+            .as_ref()
+            .filter(|e| e.editing.is_none() && !e.choices.is_empty())
+            .map(|e| e.current)
+        else {
+            return;
+        };
+        let r = if ours {
+            Resolution::Ours
+        } else {
+            Resolution::Theirs
+        };
+        self.pick(current, r, cx);
     }
 
     fn toggle_editing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -269,10 +636,9 @@ impl RepoView {
             cx.notify();
             return;
         }
-        let Some(file) = editor.file.clone() else {
+        let Some(text) = editor.render() else {
             return;
         };
-        let text = file.render(&editor.choices);
         editor.editing = Some(cx.new(|cx| {
             let mut state = TextareaState::new(window, cx);
             state.set_value(text, window, cx);
@@ -286,10 +652,13 @@ impl RepoView {
         let Some(editor) = self.conflict.as_ref() else {
             return;
         };
-        let content = match (&editor.editing, &editor.file) {
-            (Some(text), _) => text.read(cx).value().to_string(),
-            (None, Some(file)) if editor.all_resolved() => file.render(&editor.choices),
-            _ => return,
+        let content = match &editor.editing {
+            Some(text) => text.read(cx).value().to_string(),
+            None if editor.all_resolved() => match editor.render() {
+                Some(text) => text,
+                None => return,
+            },
+            None => return,
         };
         let path = editor.path.clone();
         self.run_op_then(
@@ -588,9 +957,10 @@ impl RepoView {
             h_flex()
                 .flex_1()
                 .min_w_0()
+                .h_full()
                 .gap_1p5()
                 .px_3()
-                .child(div().size(px(7.)).rounded_full().bg(color))
+                .child(div().flex_none().size(px(7.)).rounded_full().bg(color))
                 .child(
                     div()
                         .flex_none()
@@ -602,19 +972,31 @@ impl RepoView {
         };
         let columns = h_flex()
             .flex_none()
-            .h(px(26.))
+            .h(px(28.))
             .text_xs()
             .text_color(cx.theme().muted_foreground)
             .border_b_1()
             .border_color(cx.theme().border)
-            .bg(theme::panel())
+            .bg(bar())
             .child(column_title("Ours", ours_label, ours_color()))
-            .child(column_title(
-                tr("Résultat", "Result"),
-                editor.path.rsplit('/').next().unwrap_or("").to_string(),
-                theme::accent(),
-            ))
-            .child(column_title("Theirs", theirs_label, theirs_color()));
+            .child(
+                column_title(
+                    tr("Résultat", "Result"),
+                    editor.path.rsplit('/').next().unwrap_or("").to_string(),
+                    theme::accent(),
+                )
+                .border_x_1()
+                .border_color(cx.theme().border),
+            )
+            .child(column_title("Theirs", theirs_label, theirs_color()))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(RULER_W))
+                    .h_full()
+                    .border_l_1()
+                    .border_color(cx.theme().border),
+            );
 
         let body = if let Some(text) = &editor.editing {
             div()
@@ -625,23 +1007,33 @@ impl RepoView {
                 .child(Textarea::new(text).h_full())
                 .into_any_element()
         } else {
-            let rows = self.conflict_rows(editor, &file, cx);
-            div()
-                .id("conflict-rows")
+            let (rows, marks, total) = self.conflict_rows(editor, &file, cx);
+            h_flex()
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .track_scroll(&editor.scroll)
-                .children(rows)
+                .items_stretch()
+                .child(
+                    div()
+                        .id("conflict-rows")
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .overflow_y_scroll()
+                        .track_scroll(&editor.scroll)
+                        .children(rows),
+                )
+                .child(self.conflict_ruler(editor, marks, total, cx))
                 .into_any_element()
         };
 
         v_flex()
             .size_full()
             .min_h_0()
+            .bg(ground())
             .child(self.conflict_header(editor, cx))
             .when(editor.editing.is_none(), |el| el.child(columns))
             .child(body)
+            .when(editor.editing.is_none(), |el| el.child(conflict_hints(cx)))
             .into_any_element()
     }
 
@@ -663,11 +1055,59 @@ impl RepoView {
         } else {
             theme::accent()
         };
+        let alt = if cfg!(target_os = "macos") {
+            "⌥"
+        } else {
+            "Alt+"
+        };
+        let navigator = h_flex()
+            .flex_none()
+            .gap_0p5()
+            .px_0p5()
+            .rounded_md()
+            .border_1()
+            .border_color(theme::hairline())
+            .bg(theme::raised())
+            .child(
+                Button::new("conflict-prev")
+                    .xsmall()
+                    .ghost()
+                    .icon(Icon::new(Lucide::ChevronUp))
+                    .tooltip(format!(
+                        "{} ({alt}↑)",
+                        tr("Conflit précédent", "Previous conflict")
+                    ))
+                    .on_click(cx.listener(|this, _, _, cx| this.conflict_jump(false, cx))),
+            )
+            .child(
+                div()
+                    .px_1()
+                    .text_xs()
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .child(trf!(
+                        "Conflit {} sur {}",
+                        "Conflict {} of {}",
+                        editor.current + 1,
+                        total
+                    )),
+            )
+            .child(
+                Button::new("conflict-next")
+                    .xsmall()
+                    .ghost()
+                    .icon(Icon::new(Lucide::ChevronDown))
+                    .tooltip(format!(
+                        "{} ({alt}↓)",
+                        tr("Conflit suivant", "Next conflict")
+                    ))
+                    .on_click(cx.listener(|this, _, _, cx| this.conflict_jump(true, cx))),
+            );
         h_flex()
             .flex_none()
-            .h(px(40.))
+            .h(px(44.))
             .px_3()
             .gap_2()
+            .bg(bar())
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
@@ -677,6 +1117,7 @@ impl RepoView {
             )
             .child(
                 div()
+                    .flex_none()
                     .text_sm()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .child(name.to_string()),
@@ -689,6 +1130,10 @@ impl RepoView {
                     .text_color(cx.theme().muted_foreground)
                     .child(dir.to_string()),
             )
+            .child(div().flex_1())
+            .when(editor.editing.is_none() && total > 0, |el| {
+                el.child(navigator)
+            })
             .child(
                 h_flex()
                     .flex_none()
@@ -729,30 +1174,11 @@ impl RepoView {
                             ),
                     ),
             )
-            .child(div().flex_1())
-            .when(editor.editing.is_none() && total > 1, |el| {
-                el.child(
-                    Button::new("conflict-prev")
-                        .xsmall()
-                        .ghost()
-                        .icon(Icon::new(Lucide::ChevronUp))
-                        .tooltip(tr("Conflit précédent", "Previous conflict"))
-                        .on_click(cx.listener(|this, _, _, cx| this.jump(false, cx))),
-                )
-                .child(
-                    Button::new("conflict-next")
-                        .xsmall()
-                        .ghost()
-                        .icon(Icon::new(Lucide::ChevronDown))
-                        .tooltip(tr("Conflit suivant", "Next conflict"))
-                        .on_click(cx.listener(|this, _, _, cx| this.jump(true, cx))),
-                )
-            })
             .when(editor.editing.is_none(), |el| {
                 el.child(
                     Button::new("all-ours")
                         .xsmall()
-                        .outline()
+                        .ghost()
                         .label(tr("Tout ours", "All ours"))
                         .on_click(
                             cx.listener(|this, _, _, cx| this.pick_all(Resolution::Ours, cx)),
@@ -761,7 +1187,7 @@ impl RepoView {
                 .child(
                     Button::new("all-theirs")
                         .xsmall()
-                        .outline()
+                        .ghost()
                         .label(tr("Tout theirs", "All theirs"))
                         .on_click(
                             cx.listener(|this, _, _, cx| this.pick_all(Resolution::Theirs, cx)),
@@ -771,7 +1197,7 @@ impl RepoView {
             .child(
                 Button::new("conflict-edit")
                     .xsmall()
-                    .ghost()
+                    .outline()
                     .icon(Icon::new(if editor.editing.is_some() {
                         Lucide::Columns3
                     } else {
@@ -796,68 +1222,140 @@ impl RepoView {
             .into_any_element()
     }
 
-    /// One row per chunk: the three columns stay aligned while scrolling.
+    /// One row per chunk, so the three columns stay aligned while scrolling;
+    /// plus where each conflict sits (start, height) for the ruler, and the
+    /// total height, in estimated pixels.
     fn conflict_rows(
         &self,
         editor: &ConflictEditor,
         file: &ConflictFile,
         cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    ) -> (Vec<AnyElement>, Vec<(usize, f32, f32)>, f32) {
+        let count = editor.choices.len();
+        let dragging = cx.has_active_drag();
         let (mut n_ours, mut n_result, mut n_theirs) = (1, 1, 1);
         let mut conflict = 0;
         let mut rows = Vec::with_capacity(file.chunks.len());
+        let mut marks = Vec::with_capacity(count);
+        let mut y = 0.;
         for (i, chunk) in file.chunks.iter().enumerate() {
             match chunk {
                 Chunk::Clean(lines) => {
-                    rows.push(self.clean_row(
-                        i,
-                        lines,
-                        (n_ours, n_result, n_theirs),
-                        editor.unfolded.contains(&i),
-                        cx,
-                    ));
+                    let unfolded = editor.unfolded.contains(&i);
+                    rows.push(self.clean_row(i, lines, (n_ours, n_result, n_theirs), unfolded, cx));
+                    let shown = if unfolded || lines.len() <= FOLD_OVER {
+                        lines.len()
+                    } else {
+                        2 * FOLD_KEEP + 1
+                    };
+                    y += LINE_H * shown as f32;
                     n_ours += lines.len();
                     n_result += lines.len();
                     n_theirs += lines.len();
                 }
                 Chunk::Conflict(c) => {
-                    let choice = editor.choices.get(conflict).copied().flatten();
-                    let ours: Vec<&str> = c.ours.iter().map(String::as_str).collect();
-                    let theirs: Vec<&str> = c.theirs.iter().map(String::as_str).collect();
-                    let result = choice.map(|r| c.lines(r));
+                    let pieces = editor.choices.get(conflict).cloned().flatten();
+                    let kept_lines: usize = pieces.iter().flatten().map(|p| p.lines.len()).sum();
                     let fresh = editor
                         .picked
-                        .filter(|(k, s)| *k == conflict && *s > 0)
+                        .filter(|(k, _)| *k == conflict)
                         .map(|(_, s)| s);
-                    let focused = editor.picked.is_some_and(|(k, _)| k == conflict);
+                    let current = editor.current == conflict;
                     rows.push(
                         h_flex()
                             .id(("conflict", conflict))
                             .items_stretch()
                             .w_full()
                             .my_1()
-                            .child(self.side_cell(conflict, &ours, n_ours, true, choice, cx))
-                            .child(self.result_cell(
+                            .border_y_1()
+                            .border_color(if current {
+                                theme::alpha(theme::accent(), 0.7)
+                            } else {
+                                cx.theme().border
+                            })
+                            .child(self.side_cell(
                                 conflict,
                                 c,
-                                choice,
-                                result.as_deref(),
-                                n_result,
-                                fresh,
-                                focused,
+                                Side::Ours,
+                                n_ours,
+                                pieces.as_deref(),
                                 cx,
                             ))
-                            .child(self.side_cell(conflict, &theirs, n_theirs, false, choice, cx))
+                            .child(self.result_cell(
+                                conflict,
+                                count,
+                                c,
+                                pieces.as_deref(),
+                                n_result,
+                                fresh,
+                                current,
+                                dragging,
+                                cx,
+                            ))
+                            .child(self.side_cell(
+                                conflict,
+                                c,
+                                Side::Theirs,
+                                n_theirs,
+                                pieces.as_deref(),
+                                cx,
+                            ))
                             .into_any_element(),
                     );
-                    n_ours += ours.len();
-                    n_theirs += theirs.len();
-                    n_result += result.map_or(0, |r| r.len());
+                    let tallest = c.ours.len().max(c.theirs.len()).max(kept_lines).max(2);
+                    let height = BAR_H + LINE_H * tallest as f32 + 8.;
+                    marks.push((conflict, y, height));
+                    y += height;
+                    n_ours += c.ours.len();
+                    n_theirs += c.theirs.len();
+                    n_result += kept_lines;
                     conflict += 1;
                 }
             }
         }
-        rows
+        (rows, marks, y.max(1.))
+    }
+
+    /// The overview strip: where each conflict sits in the file, coloured by
+    /// state; a click jumps there.
+    fn conflict_ruler(
+        &self,
+        editor: &ConflictEditor,
+        marks: Vec<(usize, f32, f32)>,
+        total: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .relative()
+            .flex_none()
+            .w(px(RULER_W))
+            .h_full()
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .bg(bar())
+            .children(marks.into_iter().map(|(k, start, height)| {
+                let resolved = editor.choices.get(k).is_some_and(Option::is_some);
+                let current = editor.current == k;
+                let color = if resolved {
+                    theme::lime()
+                } else {
+                    theme::accent()
+                };
+                div()
+                    .id(("conflict-mark", k))
+                    .absolute()
+                    .left(px(3.))
+                    .right(px(3.))
+                    .top(relative((start / total).min(0.99)))
+                    .h(relative(height / total))
+                    .min_h(px(4.))
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .bg(theme::alpha(color, if current { 1. } else { 0.55 }))
+                    .hover(|s| s.bg(color))
+                    .on_click(cx.listener(move |this, _, _, cx| this.conflict_goto(k, cx)))
+            }))
+            .into_any_element()
     }
 
     fn clean_row(
@@ -874,8 +1372,7 @@ impl RepoView {
             h_flex()
                 .w_full()
                 .items_start()
-                .text_color(cx.theme().muted_foreground)
-                .child(div().flex_1().min_w_0().opacity(0.65).child(code(
+                .child(div().flex_1().min_w_0().opacity(0.55).child(code(
                     slice,
                     n_ours + offset,
                     cx,
@@ -886,10 +1383,10 @@ impl RepoView {
                         .min_w_0()
                         .border_x_1()
                         .border_color(cx.theme().border)
-                        .text_color(cx.theme().foreground)
+                        .opacity(0.85)
                         .child(code(slice, n_result + offset, cx)),
                 )
-                .child(div().flex_1().min_w_0().opacity(0.65).child(code(
+                .child(div().flex_1().min_w_0().opacity(0.55).child(code(
                     slice,
                     n_theirs + offset,
                     cx,
@@ -912,14 +1409,16 @@ impl RepoView {
                 h_flex()
                     .id(("unfold", index))
                     .w_full()
-                    .h(px(20.))
+                    .h(px(LINE_H))
                     .justify_center()
                     .gap_1()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .bg(theme::panel())
+                    .bg(bar())
+                    .border_y_1()
+                    .border_color(cx.theme().border)
                     .cursor_pointer()
-                    .hover(|s| s.bg(theme::raised()).text_color(cx.theme().foreground))
+                    .hover(|s| s.text_color(cx.theme().foreground))
                     .child(Icon::new(Lucide::ChevronsUpDown).xsmall())
                     .child(trf!("{} lignes identiques", "{} unchanged lines", hidden))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -933,257 +1432,403 @@ impl RepoView {
             .into_any_element()
     }
 
-    /// Ours or theirs for one conflict: click to take it.
+    /// Ours or theirs for one conflict: a bar to take the side (or drag the
+    /// whole block), then its lines, each draggable on its own. Kept pieces
+    /// dragged back here leave the result.
     fn side_cell(
         &self,
         conflict: usize,
-        lines: &[&str],
+        c: &Conflict,
+        side: Side,
         first: usize,
-        ours: bool,
-        choice: Option<Resolution>,
+        pieces: Option<&[Piece]>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let color = if ours { ours_color() } else { theirs_color() };
-        let taken = match choice {
-            Some(Resolution::Ours) => ours,
-            Some(Resolution::Theirs) => !ours,
-            Some(Resolution::OursThenTheirs | Resolution::TheirsThenOurs) => true,
-            _ => false,
+        let color = side.color();
+        let ours = side == Side::Ours;
+        let lines = side.lines(c);
+        let whole = 0..lines.len();
+        let taken = pieces.is_some_and(|p| {
+            !lines.is_empty() && p.iter().any(|p| p.side == side && p.lines == whole)
+        });
+        let resolved = pieces.is_some();
+        let drag_of = |range: Range<usize>| CodeDrag {
+            conflict,
+            color,
+            first: lines
+                .get(range.start)
+                .map(|l| shown(l).trim().to_string())
+                .unwrap_or_default()
+                .into(),
+            count: range.len(),
+            what: Dragged::Lines(Piece { side, lines: range }),
         };
-        let dropped = choice.is_some() && !taken;
-        let pick = if ours {
-            Resolution::Ours
-        } else {
-            Resolution::Theirs
-        };
-        let tag = h_flex()
-            .absolute()
-            .top(px(3.))
-            .when(ours, |s| s.right(px(6.)))
-            .when(!ours, |s| s.left(px(6.)))
-            .gap_1()
-            .px_1p5()
-            .rounded_sm()
-            .text_xs()
-            .bg(theme::alpha(color, if taken { 0.3 } else { 0.16 }))
-            .text_color(color)
-            .when(!ours, |s| s.child(Icon::new(Lucide::ArrowLeft).xsmall()))
-            .child(if taken {
-                tr("pris", "taken")
+
+        let take = Button::new(SharedString::from(format!("{}:{conflict}", side.id())))
+            .xsmall()
+            .map(|b| if taken { b.primary() } else { b.outline() })
+            .icon(Icon::new(if taken {
+                Lucide::Check
+            } else if ours {
+                Lucide::ArrowRight
             } else {
-                tr("prendre", "take")
+                Lucide::ArrowLeft
+            }))
+            .label(if taken {
+                tr("Pris", "Taken")
+            } else {
+                tr("Prendre", "Take")
             })
-            .when(ours, |s| s.child(Icon::new(Lucide::ArrowRight).xsmall()));
-        div()
-            .id(SharedString::from(format!(
-                "{}:{conflict}",
-                if ours { "ours" } else { "theirs" }
-            )))
+            .tooltip(if ours {
+                tr("Garder ours pour ce conflit", "Keep ours for this conflict")
+            } else {
+                tr(
+                    "Garder theirs pour ce conflit",
+                    "Keep theirs for this conflict",
+                )
+            })
+            .on_click(cx.listener(move |this, ev: &gpui_kit::ClickEvent, _, cx| {
+                // ⌥-click: this side after what is already kept.
+                if ev.modifiers().alt {
+                    this.append_side(conflict, side, cx)
+                } else {
+                    let r = if ours {
+                        Resolution::Ours
+                    } else {
+                        Resolution::Theirs
+                    };
+                    this.pick(conflict, r, cx)
+                }
+            }));
+        let append = Button::new(SharedString::from(format!(
+            "{}-append:{conflict}",
+            side.id()
+        )))
+        .xsmall()
+        .ghost()
+        .icon(Icon::new(Lucide::Plus))
+        .tooltip(tr("Ajouter à la suite du résultat", "Append to the result"))
+        .on_click(cx.listener(move |this, _, _, cx| this.append_side(conflict, side, cx)));
+
+        let header = h_flex()
+            .id(SharedString::from(format!("{}-bar:{conflict}", side.id())))
+            .flex_none()
+            .h(px(BAR_H))
+            .px_2()
+            .gap_1p5()
+            .text_xs()
+            .bg(theme::alpha(color, 0.12))
+            .border_b_1()
+            .border_color(theme::alpha(color, 0.3))
+            .when(!lines.is_empty(), |el| {
+                el.child(
+                    Icon::new(Lucide::GripVertical)
+                        .xsmall()
+                        .text_color(cx.theme().muted_foreground),
+                )
+            })
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(color)
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .child(if lines.is_empty() {
+                        tr("rien de ce côté", "nothing on this side").to_string()
+                    } else {
+                        trf!("{} ligne(s)", "{} line(s)", lines.len())
+                    }),
+            )
+            .child(div().flex_1())
+            .when(resolved && !taken && !lines.is_empty(), |el| {
+                el.child(append)
+            })
+            .child(take)
+            .when(!lines.is_empty(), |el| {
+                el.cursor_grab()
+                    .on_drag(drag_of(whole.clone()), |drag, _, _, cx| {
+                        cx.new(|_| drag.clone())
+                    })
+            });
+
+        let body = if lines.is_empty() {
+            placeholder(tr("(lignes supprimées)", "(lines deleted)"), cx)
+        } else {
+            v_flex()
+                .w_full()
+                .py(px(2.))
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_xs()
+                .children(lines.iter().enumerate().map(|(i, l)| {
+                    let in_result = pieces.is_some_and(|p| kept(p, side, i));
+                    code_line(first + i, l, cx)
+                        .id(SharedString::from(format!(
+                            "{}-line:{conflict}:{i}",
+                            side.id()
+                        )))
+                        .cursor_grab()
+                        .when(in_result, |s| s.bg(theme::alpha(color, 0.14)))
+                        .when(resolved && !in_result, |s| s.opacity(0.45))
+                        .hover(|s| s.bg(theme::alpha(color, 0.24)))
+                        .on_drag(drag_of(i..i + 1), |drag, _, _, cx| cx.new(|_| drag.clone()))
+                }))
+                .into_any_element()
+        };
+
+        v_flex()
+            .id(SharedString::from(format!("{}-cell:{conflict}", side.id())))
             .test_support()
-            .relative()
             .flex_1()
             .min_w_0()
-            .min_h(px(26.))
-            .cursor_pointer()
-            .bg(theme::alpha(color, if taken { 0.13 } else { 0.06 }))
-            .border_y_1()
-            .border_color(theme::alpha(color, 0.25))
+            .bg(theme::alpha(color, if taken { 0.08 } else { 0.04 }))
             .when(ours, |s| s.border_l_2())
             .when(!ours, |s| s.border_r_2())
-            .when(dropped, |s| s.opacity(0.45))
-            .hover(|s| s.bg(theme::alpha(color, 0.18)))
-            .child(if lines.is_empty() {
-                div()
-                    .px_3()
-                    .py_1()
-                    .text_xs()
-                    .italic()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr("(lignes supprimées)", "(lines deleted)"))
-                    .into_any_element()
-            } else {
-                code(lines, first, cx)
-            })
-            .child(tag)
-            .on_click(cx.listener(move |this, ev: &gpui_kit::ClickEvent, _, cx| {
-                // ⌥-click: this side after the other one, keeping both.
-                let r = if ev.modifiers().alt {
-                    if ours {
-                        Resolution::TheirsThenOurs
-                    } else {
-                        Resolution::OursThenTheirs
-                    }
+            .border_color(theme::alpha(color, 0.6))
+            .child(header)
+            .child(body)
+            .drag_over::<CodeDrag>(move |s, drag, _, _| {
+                if drag.conflict == conflict && matches!(drag.what, Dragged::Kept(_)) {
+                    s.bg(theme::alpha(theme::red(), 0.12))
                 } else {
-                    pick
-                };
-                this.pick(conflict, Some(r), cx)
+                    s
+                }
+            })
+            .on_drop(cx.listener(move |this, drag: &CodeDrag, _, cx| {
+                if let Dragged::Kept(k) = drag.what
+                    && drag.conflict == conflict
+                {
+                    this.remove_piece(conflict, k, cx)
+                }
             }))
             .into_any_element()
     }
 
+    /// What one conflict keeps: a bar with the one-click choices, then the
+    /// kept pieces (reorderable, removable), or a drop zone while unresolved.
     #[allow(clippy::too_many_arguments)]
     fn result_cell(
         &self,
         conflict: usize,
-        c: &mugetsu_git::Conflict,
-        choice: Option<Resolution>,
-        result: Option<&[&str]>,
+        count: usize,
+        c: &Conflict,
+        pieces: Option<&[Piece]>,
         first: usize,
         fresh: Option<usize>,
-        focused: bool,
+        current: bool,
+        dragging: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let accent = theme::accent();
-        let cell = div()
-            .relative()
-            .flex_1()
-            .min_w_0()
-            .min_h(px(26.))
-            .mx_1()
-            .rounded_md()
-            .overflow_hidden();
-        let (Some(r), Some(lines)) = (choice, result) else {
-            // Unresolved: a pulsing frame with the ways out.
-            let choice_button = |id: &'static str, label: &'static str, r: Option<Resolution>| {
-                Button::new((id, conflict))
-                    .xsmall()
-                    .ghost()
-                    .label(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.pick(conflict, r.or(Some(Resolution::Neither)), cx)
-                    }))
-            };
-            let both_label = tr("Les deux", "Both");
-            return cell
-                .border_1()
-                .border_color(theme::alpha(accent, 0.5))
-                .bg(theme::alpha(accent, 0.05))
-                .when(focused, |s| s.border_color(accent))
-                .child(
-                    v_flex()
-                        .size_full()
-                        .items_center()
-                        .justify_center()
-                        .gap_1()
-                        .py_2()
-                        .child(
-                            h_flex()
-                                .gap_1()
-                                .text_xs()
-                                .text_color(accent)
-                                .child(Icon::new(Lucide::GitMergeConflict).xsmall())
-                                .child(trf!(
-                                    "{} ligne(s) contre {}",
-                                    "{} line(s) vs {}",
-                                    c.ours.len(),
-                                    c.theirs.len()
-                                )),
-                        )
-                        .child(
-                            h_flex()
-                                .gap_0p5()
-                                .flex_wrap()
-                                .justify_center()
-                                .child(choice_button("res-ours", "← Ours", Some(Resolution::Ours)))
-                                .child(choice_button(
-                                    "res-both",
-                                    both_label,
-                                    Some(Resolution::OursThenTheirs),
-                                ))
-                                .child(choice_button(
-                                    "res-theirs",
-                                    "Theirs →",
-                                    Some(Resolution::Theirs),
-                                ))
-                                .child(choice_button(
-                                    "res-none",
-                                    tr("Aucun", "Neither"),
-                                    Some(Resolution::Neither),
-                                )),
-                        ),
-                )
-                .with_animation(
-                    ("unresolved", conflict),
-                    Animation::new(Duration::from_millis(1600))
-                        .repeat()
-                        .with_easing(gpui_kit::pulsating_between(0.35, 1.)),
-                    move |el, t| el.border_color(theme::alpha(accent, 0.25 + 0.6 * t)),
-                )
-                .into_any_element();
+        let resolved = pieces.is_some();
+        let state_color = if resolved { theme::lime() } else { accent };
+        let choice = |id: &'static str, label: &'static str, r: Resolution| {
+            Button::new((id, conflict))
+                .xsmall()
+                .ghost()
+                .label(label)
+                .on_click(cx.listener(move |this, _, _, cx| this.pick(conflict, r, cx)))
         };
+        let header = h_flex()
+            .flex_none()
+            .h(px(BAR_H))
+            .px_2()
+            .gap_1()
+            .overflow_hidden()
+            .text_xs()
+            .bg(theme::alpha(state_color, if current { 0.2 } else { 0.1 }))
+            .border_b_1()
+            .border_color(theme::alpha(state_color, 0.35))
+            .child(
+                Icon::new(if resolved {
+                    Lucide::CircleCheck
+                } else {
+                    Lucide::GitMergeConflict
+                })
+                .xsmall()
+                .text_color(state_color),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .text_color(state_color)
+                    .child(format!("{}/{count}", conflict + 1)),
+            )
+            .child(div().flex_1())
+            .child(choice("res-ours", "Ours", Resolution::Ours))
+            .child(choice(
+                "res-both",
+                tr("Les deux", "Both"),
+                Resolution::OursThenTheirs,
+            ))
+            .child(choice("res-theirs", "Theirs", Resolution::Theirs))
+            .child(choice(
+                "res-none",
+                tr("Aucun", "Neither"),
+                Resolution::Neither,
+            ))
+            .when(resolved, |el| {
+                el.child(
+                    Button::new(("res-undo", conflict))
+                        .xsmall()
+                        .ghost()
+                        .icon(Icon::new(Lucide::Undo2))
+                        .tooltip(tr("Annuler ce choix", "Undo this pick"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_choice(conflict, None, false, cx)
+                        })),
+                )
+            });
 
-        // Lines tinted by the side they come from.
-        let split = match r {
-            Resolution::OursThenTheirs => c.ours.len(),
-            Resolution::TheirsThenOurs => c.theirs.len(),
-            _ => lines.len(),
-        };
-        let first_color = side_color(r, true);
-        let second_color = side_color(r, false);
-        let part = |slice: &[&str], start: usize, color: Hsla, cx: &App| {
-            div()
-                .w_full()
-                .bg(theme::alpha(color, 0.1))
-                .border_l_2()
-                .border_color(theme::alpha(color, 0.7))
-                .child(code(slice, start, cx))
-        };
-        let content = if lines.is_empty() {
-            div()
-                .px_3()
-                .py_1()
+        let body = match pieces {
+            None => v_flex()
+                .m_2()
+                .py_3()
+                .px_2()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .rounded_md()
+                .border_1()
+                .border_dashed()
+                .border_color(theme::alpha(accent, if dragging { 0.9 } else { 0.45 }))
                 .text_xs()
-                .italic()
                 .text_color(cx.theme().muted_foreground)
-                .child(tr("(rien de gardé)", "(nothing kept)"))
-                .into_any_element()
-        } else {
-            v_flex()
-                .w_full()
-                .when(split > 0, |el| {
-                    el.child(part(&lines[..split], first, first_color, cx))
-                })
-                .when(split < lines.len(), |el| {
-                    el.child(part(&lines[split..], first + split, second_color, cx))
-                })
-                .into_any_element()
+                .child(
+                    Icon::new(Lucide::GripVertical)
+                        .small()
+                        .text_color(theme::alpha(accent, 0.8)),
+                )
+                .child(tr(
+                    "Glissez des lignes ici, ou choisissez un côté",
+                    "Drag lines here, or pick a side",
+                ))
+                .child(
+                    div()
+                        .text_color(theme::alpha(theme::muted(), 0.8))
+                        .child(trf!(
+                            "{} ligne(s) contre {}",
+                            "{} line(s) vs {}",
+                            c.ours.len(),
+                            c.theirs.len()
+                        )),
+                )
+                .into_any_element(),
+            Some([]) => placeholder(tr("(rien de gardé)", "(nothing kept)"), cx),
+            Some(pieces) => {
+                let mut n = first;
+                v_flex()
+                    .w_full()
+                    .py(px(2.))
+                    .gap(px(1.))
+                    .children(pieces.iter().enumerate().map(|(k, p)| {
+                        let color = p.side.color();
+                        let text: Vec<&str> = p.text(c).iter().map(String::as_str).collect();
+                        let start = n;
+                        n += text.len();
+                        let drag = CodeDrag {
+                            conflict,
+                            color,
+                            first: text
+                                .first()
+                                .map(|l| shown(l).trim().to_string())
+                                .unwrap_or_default()
+                                .into(),
+                            count: text.len(),
+                            what: Dragged::Kept(k),
+                        };
+                        h_flex()
+                            .id(SharedString::from(format!("kept:{conflict}:{k}")))
+                            .items_stretch()
+                            .w_full()
+                            .bg(theme::alpha(color, 0.1))
+                            .cursor_grab()
+                            .hover(|s| s.bg(theme::alpha(color, 0.17)))
+                            .child(div().flex_none().w(px(3.)).bg(color))
+                            .child(div().flex_1().min_w_0().child(code(&text, start, cx)))
+                            .child(
+                                div().flex_none().w(px(24.)).flex().justify_center().child(
+                                    Button::new(SharedString::from(format!(
+                                        "kept-remove:{conflict}:{k}"
+                                    )))
+                                    .xsmall()
+                                    .ghost()
+                                    .icon(Icon::new(Lucide::X))
+                                    .tooltip(tr("Retirer du résultat", "Remove from the result"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_piece(conflict, k, cx)
+                                    })),
+                                ),
+                            )
+                            .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                            .drag_over::<CodeDrag>(move |s, drag, _, _| {
+                                if drag.conflict == conflict {
+                                    s.border_t_2().border_color(accent)
+                                } else {
+                                    s
+                                }
+                            })
+                            .on_drop(cx.listener(move |this, drag: &CodeDrag, _, cx| {
+                                this.drop_code(conflict, drag, Some(k), cx)
+                            }))
+                    }))
+                    .when(dragging, |el| {
+                        el.child(
+                            h_flex()
+                                .mx_2()
+                                .my_1()
+                                .h(px(20.))
+                                .justify_center()
+                                .rounded_sm()
+                                .border_1()
+                                .border_dashed()
+                                .border_color(theme::alpha(accent, 0.6))
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr("déposer à la fin", "drop at the end")),
+                        )
+                    })
+                    .into_any_element()
+            }
         };
-        let undo = Button::new(("res-undo", conflict))
-            .xsmall()
-            .ghost()
-            .icon(Icon::new(Lucide::Undo2))
-            .tooltip(tr("Annuler ce choix", "Undo this pick"))
-            .on_click(cx.listener(move |this, _, _, cx| this.pick(conflict, None, cx)));
-        let from_left = matches!(r, Resolution::Ours | Resolution::OursThenTheirs);
-        let cell = cell
-            .border_1()
-            .border_color(theme::alpha(theme::lime(), 0.35))
-            .bg(theme::alpha(theme::lime(), 0.03))
-            .child(content)
-            .child(div().absolute().top(px(1.)).right(px(1.)).child(undo));
-        match fresh {
-            // Just picked: the lines slide in from their side with a glow.
-            Some(seq) => cell
+        let body = match fresh {
+            // Just changed: the kept lines fade in with a short glow.
+            Some(seq) => div()
+                .w_full()
+                .child(body)
                 .with_animation(
                     ("picked", seq),
-                    Animation::new(Duration::from_millis(460))
+                    Animation::new(Duration::from_millis(420))
                         .with_easing(gpui_kit::ease_out_quint()),
                     move |el, t| {
-                        let dx = if from_left { -18. } else { 18. } * (1. - t);
-                        el.opacity(0.2 + 0.8 * t)
-                            .left(px(dx))
-                            .shadow(vec![gpui_kit::BoxShadow {
-                                color: theme::alpha(first_color, 0.6 * (1. - t)),
-                                offset: gpui_kit::point(px(0.), px(0.)),
-                                blur_radius: px(4. + 16. * t),
-                                spread_radius: px(0.),
-                                inset: false,
-                            }])
+                        el.opacity(0.3 + 0.7 * t)
+                            .bg(theme::alpha(accent, 0.12 * (1. - t)))
                     },
                 )
                 .into_any_element(),
-            None => cell.into_any_element(),
-        }
+            None => body,
+        };
+
+        v_flex()
+            .id(SharedString::from(format!("result-cell:{conflict}")))
+            .flex_1()
+            .min_w_0()
+            .border_x_1()
+            .border_color(cx.theme().border)
+            .bg(ground())
+            .child(header)
+            .child(body)
+            .drag_over::<CodeDrag>(move |s, drag, _, _| {
+                if drag.conflict == conflict {
+                    s.bg(theme::alpha(accent, 0.08))
+                } else {
+                    s
+                }
+            })
+            .on_drop(cx.listener(move |this, drag: &CodeDrag, _, cx| {
+                this.drop_code(conflict, drag, None, cx)
+            }))
+            .into_any_element()
     }
 
     /// Deleted on one side, or binary: keep one whole version.
@@ -1281,5 +1926,118 @@ impl RepoView {
                 |el, t| el.opacity(t).mt(px(12. * (1. - t))),
             )
             .into_any_element()
+    }
+}
+
+/// Shortcut hints under the resolver.
+fn conflict_hints(cx: &App) -> AnyElement {
+    let alt = if cfg!(target_os = "macos") {
+        "⌥"
+    } else {
+        "Alt+"
+    };
+    let hint = |keys: Vec<String>, text: &'static str| {
+        h_flex()
+            .flex_none()
+            .gap_1()
+            .children(keys.into_iter().map(keycap))
+            .child(text)
+    };
+    h_flex()
+        .flex_none()
+        .h(px(26.))
+        .px_3()
+        .gap_4()
+        .overflow_hidden()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .bg(bar())
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .child(
+            h_flex()
+                .flex_none()
+                .gap_1()
+                .child(Icon::new(Lucide::GripVertical).xsmall())
+                .child(tr(
+                    "Glissez un bloc ou une ligne vers le résultat",
+                    "Drag a block or a line into the result",
+                )),
+        )
+        .child(hint(
+            vec![format!("{alt}↑"), format!("{alt}↓")],
+            tr("conflit précédent / suivant", "previous / next conflict"),
+        ))
+        .child(hint(
+            vec![format!("{alt}←"), format!("{alt}→")],
+            tr("prendre ours / theirs", "take ours / theirs"),
+        ))
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn piece(side: Side, lines: Range<usize>) -> Piece {
+        Piece { side, lines }
+    }
+
+    #[test]
+    fn dragged_lines_join_their_neighbours() {
+        let mut pieces = vec![piece(Side::Ours, 0..1)];
+        insert_piece(&mut pieces, piece(Side::Ours, 1..2), None);
+        assert_eq!(pieces, vec![piece(Side::Ours, 0..2)]);
+        insert_piece(&mut pieces, piece(Side::Theirs, 3..4), Some(0));
+        assert_eq!(
+            pieces,
+            vec![piece(Side::Theirs, 3..4), piece(Side::Ours, 0..2)]
+        );
+        assert!(kept(&pieces, Side::Ours, 1));
+        assert!(!kept(&pieces, Side::Theirs, 0));
+    }
+
+    #[test]
+    fn kept_pieces_reorder() {
+        let mut pieces = vec![
+            piece(Side::Ours, 0..1),
+            piece(Side::Theirs, 0..2),
+            piece(Side::Ours, 4..5),
+        ];
+        move_piece(&mut pieces, 0, None);
+        assert_eq!(
+            pieces,
+            vec![
+                piece(Side::Theirs, 0..2),
+                piece(Side::Ours, 4..5),
+                piece(Side::Ours, 0..1),
+            ]
+        );
+        move_piece(&mut pieces, 2, Some(0));
+        assert_eq!(
+            pieces,
+            vec![
+                piece(Side::Ours, 0..1),
+                piece(Side::Theirs, 0..2),
+                piece(Side::Ours, 4..5),
+            ]
+        );
+        // Before the piece right after it: no move.
+        move_piece(&mut pieces, 0, Some(1));
+        assert_eq!(pieces[0], piece(Side::Ours, 0..1));
+    }
+
+    #[test]
+    fn one_click_resolutions_become_pieces() {
+        let c = Conflict {
+            ours: vec!["a\n".into()],
+            base: vec![],
+            theirs: vec![],
+        };
+        assert_eq!(
+            pieces_for(Resolution::TheirsThenOurs, &c),
+            vec![piece(Side::Ours, 0..1)]
+        );
+        assert!(pieces_for(Resolution::Neither, &c).is_empty());
     }
 }

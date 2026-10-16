@@ -70,7 +70,11 @@ gpui_kit::actions!(
         CommitAndPush,
         StageAll,
         StashChanges,
-        CopyGithubLink
+        CopyGithubLink,
+        NextConflict,
+        PrevConflict,
+        TakeOurs,
+        TakeTheirs
     ]
 );
 
@@ -78,6 +82,13 @@ pub fn init(cx: &mut gpui_kit::App) {
     use gpui_kit::KeyBinding;
     cx.bind_keys([
         KeyBinding::new("up", SelectNewer, Some("History")),
+        // Conflict resolver: from conflict to conflict, and a side for the current one.
+        KeyBinding::new("alt-down", NextConflict, Some("Changes")),
+        KeyBinding::new("alt-up", PrevConflict, Some("Changes")),
+        KeyBinding::new("f7", NextConflict, Some("Changes")),
+        KeyBinding::new("shift-f7", PrevConflict, Some("Changes")),
+        KeyBinding::new("alt-left", TakeOurs, Some("Changes")),
+        KeyBinding::new("alt-right", TakeTheirs, Some("Changes")),
         KeyBinding::new("k", SelectNewer, Some("History")),
         KeyBinding::new("down", SelectOlder, Some("History")),
         KeyBinding::new("j", SelectOlder, Some("History")),

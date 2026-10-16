@@ -119,14 +119,23 @@ impl ConflictFile {
     /// The merged text, `choices` giving one resolution per conflict in
     /// order. Unresolved conflicts keep git's markers.
     pub fn render(&self, choices: &[Option<Resolution>]) -> String {
+        self.render_with(|i, c| choices.get(i).copied().flatten().map(|r| c.lines(r)))
+    }
+
+    /// The merged text, `pick` giving the lines kept for the n-th conflict
+    /// (any mix of both sides). `None` keeps git's markers.
+    pub fn render_with<'a>(
+        &'a self,
+        mut pick: impl FnMut(usize, &'a Conflict) -> Option<Vec<&'a str>>,
+    ) -> String {
         let mut out = String::new();
         let mut i = 0;
         for chunk in &self.chunks {
             match chunk {
                 Chunk::Clean(lines) => lines.iter().for_each(|l| out.push_str(l)),
                 Chunk::Conflict(c) => {
-                    match choices.get(i).copied().flatten() {
-                        Some(r) => c.lines(r).into_iter().for_each(|l| out.push_str(l)),
+                    match pick(i, c) {
+                        Some(lines) => lines.into_iter().for_each(|l| out.push_str(l)),
                         None => {
                             let block = |out: &mut String, marker: &str, lines: &[String]| {
                                 out.push_str(marker);

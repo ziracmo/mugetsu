@@ -14,7 +14,10 @@ use gpui_kit::{
 };
 use mugetsu_git::{Change, FileStatus};
 
-use super::{RepoView, SelectedChange, StageAll, StashChanges};
+use super::{
+    NextConflict, PrevConflict, RepoView, SelectedChange, StageAll, StashChanges, TakeOurs,
+    TakeTheirs,
+};
 use crate::i18n::tr;
 use crate::theme;
 
@@ -501,6 +504,10 @@ impl RepoView {
                 }
             }))
             .on_action(cx.listener(|this, _: &StashChanges, window, cx| this.stash(window, cx)))
+            .on_action(cx.listener(|this, _: &NextConflict, _, cx| this.conflict_jump(true, cx)))
+            .on_action(cx.listener(|this, _: &PrevConflict, _, cx| this.conflict_jump(false, cx)))
+            .on_action(cx.listener(|this, _: &TakeOurs, _, cx| this.conflict_take(true, cx)))
+            .on_action(cx.listener(|this, _: &TakeTheirs, _, cx| this.conflict_take(false, cx)))
             .child(left)
             .child(right)
     }
