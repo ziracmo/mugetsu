@@ -479,6 +479,24 @@ impl Repo {
     pub fn rebase(&self, rev: &str) -> anyhow::Result<bool> {
         self.run_sequencer(&["rebase", rev])
     }
+
+    /// Rebases `branch` onto `onto`, then switches back to the branch that
+    /// was checked out. `Ok(false)`: stopped on conflicts, with `branch`
+    /// checked out.
+    pub fn rebase_branch(&self, branch: &str, onto: &str) -> anyhow::Result<bool> {
+        let previous = self
+            .git()
+            .run(["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .ok()
+            .map(|s| s.trim().to_string());
+        if !self.run_sequencer(&["rebase", onto, branch])? {
+            return Ok(false);
+        }
+        if let Some(previous) = previous.filter(|p| p != branch) {
+            self.git().run(["switch", &previous])?;
+        }
+        Ok(true)
+    }
 }
 
 #[cfg(test)]

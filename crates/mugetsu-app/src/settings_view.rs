@@ -505,6 +505,21 @@ impl Render for SettingsView {
                         }),
                 )
                 .into_any_element(),
+                row(
+                    tr("Glisser-déposer", "Drag and drop"),
+                    Switch::new("confirm-drag-rebase")
+                        .checked(current.confirm_drag_rebase)
+                        .color(theme::accent())
+                        .label(tr(
+                            "Demander avant de rebaser une branche déposée sur une autre",
+                            "Ask before rebasing a branch dropped on another",
+                        ))
+                        .on_click(|on: &bool, _, cx| {
+                            let on = *on;
+                            settings::update(cx, |s| s.confirm_drag_rebase = on)
+                        }),
+                )
+                .into_any_element(),
                 hint(tr(
                     "F dans l'historique ramène sur la branche courante.",
                     "F in the history jumps back to the current branch.",
