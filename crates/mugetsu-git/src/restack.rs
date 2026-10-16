@@ -207,3 +207,19 @@ impl Repo {
         .map(drop)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_finds_a_key_or_returns_empty() {
+        let list = vec![
+            ("a".to_string(), "1".to_string()),
+            ("b".to_string(), "2".to_string()),
+        ];
+        assert_eq!(lookup(&list, "b"), "2");
+        assert_eq!(lookup(&list, "missing"), "");
+        assert_eq!(lookup(&[], "a"), "");
+    }
+}

@@ -125,3 +125,33 @@ pub fn init(cx: &mut App) {
 pub fn node_fill() -> Hsla {
     rgb(0x161618).into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lane_colors_cycle_through_the_palette() {
+        assert_eq!(lane_color(0), lane_color(LANES.len() as u16));
+        assert_eq!(lane_color(3), lane_color(3 + 2 * LANES.len() as u16));
+        let distinct: std::collections::HashSet<_> = LANES.iter().collect();
+        assert_eq!(distinct.len(), LANES.len(), "no duplicate lane colour");
+        let first: Hsla = rgb(LANES[0]).into();
+        assert_eq!(lane_color(0), first);
+        assert_eq!(lane_color(u16::MAX).a, 1.);
+    }
+
+    #[test]
+    fn alpha_only_changes_opacity() {
+        let c = lane_color(1);
+        let faded = alpha(c, 0.25);
+        assert_eq!(faded.a, 0.25);
+        assert_eq!((faded.h, faded.s, faded.l), (c.h, c.s, c.l));
+    }
+
+    #[test]
+    fn bundled_theme_parses() {
+        let value: serde_json::Value = serde_json::from_str(THEME_JSON).unwrap();
+        assert!(value.is_object());
+    }
+}

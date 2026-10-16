@@ -152,3 +152,23 @@ fn paint(row: &GraphRow, style: NodeStyle, bounds: Bounds<Pixels>, window: &mut 
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_width_grows_per_lane_and_is_clamped() {
+        assert_eq!(column_width(0), column_width(1), "at least one lane");
+        assert_eq!(column_width(1), px(PADDING * 2. + LANE_WIDTH));
+        assert_eq!(column_width(3) - column_width(2), px(LANE_WIDTH));
+        assert_eq!(column_width(500), column_width(MAX_VISIBLE_LANES));
+    }
+
+    #[test]
+    fn lanes_are_centred_in_their_column() {
+        let bounds = Bounds::new(point(px(100.), px(0.)), gpui_kit::size(px(200.), px(20.)));
+        assert_eq!(lane_x(&bounds, 0), px(100. + PADDING + LANE_WIDTH / 2.));
+        assert_eq!(lane_x(&bounds, 2) - lane_x(&bounds, 1), px(LANE_WIDTH));
+    }
+}

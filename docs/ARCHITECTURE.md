@@ -29,9 +29,17 @@ Measured on git.git (85,593 commits, 1,017 refs, 4 cores):
 cargo test --workspace
 ```
 
-- `mugetsu-git`: unit tests (parsers, graph, ordering) and integration tests against real temporary
-  repositories.
-- `mugetsu-forge`: URL parsing, PR state mapping and grouping, avatar URLs.
-- `mugetsu-app`: UI integration tests in headless windows (branch click and double-click checkout, keyboard
-  navigation, folders and sidebar filter, right-click rename, collapsible commit body, commit search, sidebar
-  toggle) and end-to-end flows (stage then commit from the UI, background tab dot after a fetch).
+Three layers:
+
+- **Unit tests**, next to the code (`#[cfg(test)] mod tests`): parsers, graph layout, ordering, forge URL
+  parsing and PR grouping, the optimistic checkout model, theme and animation curves.
+- **Integration tests** in `crates/mugetsu-git/tests/`: every git operation against real temporary
+  repositories (`repo.rs`: history, refs, conflicts, rebase, restack; `ops.rs`: stage, commit, branches, tags,
+  stashes, worktrees, remotes, push, pull).
+- **App tests** in `crates/mugetsu-app/src/tests*`, real views in headless GPUI windows driven by native clicks
+  and keys: `tests/components.rs` checks one view at a time (welcome screen, changes view, history menu),
+  `tests/flows.rs` and `tests.rs` run whole user flows (checkout, stage and commit, rename, cherry-pick, revert,
+  new branch or tag from a commit, conflicts, interactive rebase, palette, workspaces).
+
+On Linux the app tests need `libxkbcommon-dev libxkbcommon-x11-dev` to link. CI (`.github/workflows/ci.yml`)
+runs fmt, clippy and the whole suite on every pull request, on Linux and macOS.
