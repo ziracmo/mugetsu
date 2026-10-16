@@ -259,7 +259,7 @@ fn parse_ident(s: &str) -> (String, String) {
 }
 
 /// `12\t3\tpath` (binary files show `-`).
-fn parse_numstat(line: &str) -> Option<(u64, u64, &str)> {
+pub(crate) fn parse_numstat(line: &str) -> Option<(u64, u64, &str)> {
     let mut parts = line.splitn(3, '\t');
     let add = parts.next()?;
     let del = parts.next()?;
@@ -268,7 +268,7 @@ fn parse_numstat(line: &str) -> Option<(u64, u64, &str)> {
 }
 
 /// Keys that make two (name, email) pairs the same person.
-fn identity_keys(name: &str, email: &str) -> Vec<String> {
+pub(crate) fn identity_keys(name: &str, email: &str) -> Vec<String> {
     let mut keys = Vec::new();
     let email = email.trim().to_lowercase();
     if !email.is_empty() && email != WEB_FLOW {
@@ -296,15 +296,15 @@ fn identity_keys(name: &str, email: &str) -> Vec<String> {
 
 /// Union-find over interned (name, email) pairs.
 #[derive(Default)]
-struct Identities {
-    pairs: Vec<(String, String)>,
+pub(crate) struct Identities {
+    pub(crate) pairs: Vec<(String, String)>,
     pair_index: HashMap<(String, String), usize>,
     parent: Vec<usize>,
     by_key: HashMap<String, usize>,
 }
 
 impl Identities {
-    fn intern(&mut self, pair: &(String, String)) -> usize {
+    pub(crate) fn intern(&mut self, pair: &(String, String)) -> usize {
         if let Some(&i) = self.pair_index.get(pair) {
             return i;
         }
@@ -323,7 +323,7 @@ impl Identities {
         i
     }
 
-    fn find(&mut self, mut i: usize) -> usize {
+    pub(crate) fn find(&mut self, mut i: usize) -> usize {
         while self.parent[i] != i {
             self.parent[i] = self.parent[self.parent[i]];
             i = self.parent[i];

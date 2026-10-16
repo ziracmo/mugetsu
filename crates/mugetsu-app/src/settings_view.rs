@@ -747,6 +747,21 @@ impl Render for SettingsView {
                     )
                     .into_any_element(),
                     row(
+                        tr("Recap hebdo", "Weekly recap"),
+                        Switch::new("recap-reminder")
+                            .checked(current.recap_reminder)
+                            .color(theme::accent())
+                            .label(tr(
+                                "Le proposer le vendredi à partir de 16 h",
+                                "Offer it on Fridays from 4 pm",
+                            ))
+                            .on_click(|on: &bool, _, cx| {
+                                let on = *on;
+                                settings::update(cx, |s| s.recap_reminder = on)
+                            }),
+                    )
+                    .into_any_element(),
+                    row(
                         tr("Portée", "Scope"),
                         switch(
                             "notify-others",

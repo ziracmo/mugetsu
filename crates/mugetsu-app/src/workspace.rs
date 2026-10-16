@@ -6,12 +6,14 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::base::Selectable as _;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Icon, Sizable as _, TitleBar, WindowExt as _, h_flex,
+    v_flex,
 };
 use gpui_kit::{
     Animation, AnimationExt as _, AppContext as _, Context, Entity, InteractiveElement as _,
@@ -22,7 +24,9 @@ use gpui_kit::{
 use mugetsu_git::Repo;
 
 use crate::i18n::tr;
+use crate::overview::Target;
 use crate::palette::{Palette, PaletteEvent, SearchBranches, TogglePalette};
+use crate::recap::{Recap, RecapEvent};
 use crate::repo_view::{RepoEvent, RepoView};
 use crate::session::{RepoSet, Session};
 use crate::theme;
@@ -35,7 +39,9 @@ gpui_kit::actions!(
         NextTab,
         PreviousTab,
         FetchAll,
-        ReloadApp
+        ReloadApp,
+        ToggleOverview,
+        OpenRecap
     ]
 );
 
@@ -51,6 +57,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-shift-[", PreviousTab, Some("Workspace")),
         KeyBinding::new("ctrl-r", FetchAll, Some("Workspace")),
         KeyBinding::new("ctrl-shift-r", ReloadApp, Some("Workspace")),
+        KeyBinding::new("secondary-shift-o", ToggleOverview, Some("Workspace")),
     ]);
 }
 
@@ -83,6 +90,12 @@ pub struct Workspace {
     /// ⌘K palette while shown, and where focus goes back afterwards.
     palette: Option<(Entity<Palette>, Subscription)>,
     palette_return: Option<gpui_kit::FocusHandle>,
+    /// The overview replaces the tab's content (sidebar included).
+    overview: bool,
+    /// Weekly recap over the window while shown.
+    recap: Option<(Entity<Recap>, Subscription)>,
+    /// Friday reminder waiting for the next frame (needs the window).
+    recap_due: bool,
 }
 
 /// Height of the title bar holding the tabs.
@@ -123,6 +136,9 @@ impl Workspace {
             switcher: None,
             palette: None,
             palette_return: None,
+            overview: false,
+            recap: None,
+            recap_due: false,
         };
         if persist && !cfg!(test) && !crate::settings::get().intro_seen {
             crate::settings::remember(|s| s.intro_seen = true);
@@ -271,6 +287,7 @@ impl Workspace {
             return;
         }
         self.active = index;
+        self.overview = false;
         self.refocus = true;
         self.sync_focus(cx);
         self.save(cx);
@@ -292,21 +309,143 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The tab drawn and focused, if any (none while the overview shows).
+    fn shown(&self) -> Option<usize> {
+        (!self.overview).then_some(self.active)
+    }
+
     fn sync_focus(&mut self, cx: &mut Context<Self>) {
-        let (active, window_active) = (self.active, self.window_active);
+        let (active, window_active) = (self.shown(), self.window_active);
         for (i, tab) in self.tabs.iter().enumerate() {
-            tab.view
-                .update(cx, |v, cx| v.set_focused(window_active && i == active, cx));
+            tab.view.update(cx, |v, cx| {
+                v.set_focused(window_active && active == Some(i), cx)
+            });
         }
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
-        let (active, window_active) = (self.active, self.window_active);
+        let (active, window_active) = (self.shown(), self.window_active);
         for (i, tab) in self.tabs.iter().enumerate() {
-            tab.view
-                .update(cx, |v, cx| v.tick(window_active && i == active, now, cx));
+            tab.view.update(cx, |v, cx| {
+                v.tick(window_active && active == Some(i), now, cx)
+            });
         }
+        let settings = crate::settings::get();
+        if self.persist
+            && !self.tabs.is_empty()
+            && self.recap.is_none()
+            && settings.recap_reminder
+            && crate::recap::reminder_due(chrono::Local::now(), &settings.recap_offered)
+        {
+            let week = crate::recap::week_key(chrono::Local::now());
+            crate::settings::remember(|s| s.recap_offered = week);
+            self.recap_due = true;
+            cx.notify();
+        }
+    }
+
+    // ---- Overview and recap -------------------------------------------------
+
+    /// ⇧⌘O / the icon left of the tabs: shows the overview, or goes back to the tab.
+    pub fn toggle_overview(&mut self, cx: &mut Context<Self>) {
+        self.overview = !self.overview && !self.tabs.is_empty();
+        self.refocus = !self.overview;
+        self.sync_focus(cx);
+        cx.notify();
+    }
+
+    pub fn overview_shown(&self) -> bool {
+        self.overview
+    }
+
+    /// A card (or one of its signals) was clicked: its tab, at that place.
+    pub fn open_from_overview(
+        &mut self,
+        index: usize,
+        target: Option<Target>,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate(index, cx);
+        if let (Some(target), Some(tab)) = (target, self.tabs.get(index)) {
+            tab.view.update(cx, |v, cx| v.show_target(target, cx));
+        }
+    }
+
+    /// Shows the weekly recap of the open repositories.
+    pub fn open_recap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.tabs.is_empty() {
+            return;
+        }
+        let sources = self
+            .tabs
+            .iter()
+            .map(|t| t.view.read(cx).recap_source())
+            .collect();
+        let name = self.sets[self.current].name.clone();
+        let recap = cx.new(|cx| Recap::new(name, sources, cx));
+        self.show_recap(recap, window, cx);
+    }
+
+    pub fn show_recap(
+        &mut self,
+        recap: Entity<Recap>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sub =
+            cx.subscribe_in(
+                &recap,
+                window,
+                |this, _, event: &RecapEvent, window, cx| match event {
+                    RecapEvent::Closed => {
+                        this.recap = None;
+                        this.refocus = !this.overview;
+                        if this.overview {
+                            window.blur(cx);
+                        }
+                        cx.notify();
+                    }
+                },
+            );
+        let focus = recap.read(cx).focus_handle();
+        focus.focus(window, cx);
+        self.recap = Some((recap, sub));
+        cx.notify();
+    }
+
+    #[cfg(test)]
+    pub fn recap(&self) -> Option<Entity<Recap>> {
+        self.recap.as_ref().map(|(r, _)| r.clone())
+    }
+
+    /// The Friday toast offering the recap.
+    fn offer_recap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let this = cx.entity().downgrade();
+        let note = gpui_kit::component::notification::Notification::info(tr(
+            "Ta semaine est prête à être revue : commits, lignes, rythme, PR.",
+            "Your week is ready to look back on: commits, lines, rhythm, PRs.",
+        ))
+        .title(tr("Recap de la semaine", "Weekly recap"))
+        .autohide(false)
+        .content(move |_, _, cx| {
+            let this = this.clone();
+            h_flex()
+                .pt_2()
+                .child(
+                    Button::new("recap-toast-open")
+                        .primary()
+                        .small()
+                        .icon(Icon::new(Lucide::Sparkles))
+                        .label(tr("Voir le recap", "See the recap"))
+                        .on_click(cx.listener(move |note, _, window, cx| {
+                            note.dismiss(window, cx);
+                            let _ = this.update(cx, |ws, cx| ws.open_recap(window, cx));
+                        })),
+                )
+                .into_any_element()
+        });
+        window.push_notification(note, cx);
     }
 
     fn save(&mut self, cx: &Context<Self>) {
@@ -540,11 +679,50 @@ impl Workspace {
             })
     }
 
+    /// Icon left of the tabs: the workspace overview, lit while shown.
+    fn render_overview_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let shown = self.overview;
+        let alerts = !shown
+            && self.tabs.iter().any(|t| {
+                t.view
+                    .read(cx)
+                    .card()
+                    .signals()
+                    .first()
+                    .is_some_and(|s| s.level() == crate::overview::Level::Alert)
+            });
+        div()
+            .relative()
+            .flex_none()
+            .child(
+                Button::new("overview-toggle")
+                    .ghost()
+                    .xsmall()
+                    .icon(Icon::new(Lucide::LayoutGrid))
+                    .selected(shown)
+                    .disabled(self.tabs.is_empty())
+                    .tooltip(tr("Vue d'ensemble (⇧⌘O)", "Overview (⇧⌘O)"))
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_overview(cx))),
+            )
+            // Something blocks in a repository: a red dot on the icon.
+            .when(alerts, |s| {
+                s.child(
+                    div()
+                        .absolute()
+                        .top(px(2.))
+                        .right(px(2.))
+                        .size(px(6.))
+                        .rounded_full()
+                        .bg(theme::red()),
+                )
+            })
+    }
+
     /// Safari-like tab: equal widths, frosted pill for the active one,
     /// close button on hover, repository + current branch.
     fn render_tab(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let view = self.tabs[index].view.read(cx);
-        let active = index == self.active;
+        let active = self.shown() == Some(index);
         let name = view.name();
         let branch = view.head_label();
         let updates = view.has_updates();
@@ -555,7 +733,7 @@ impl Workspace {
         let emoji = crate::settings::get().repo_icons.get(&root).cloned();
         let group = SharedString::from(format!("tab-group-{index}"));
         // A thin divider between two inactive neighbours, like macOS tabs.
-        let divider = index > 0 && !active && index != self.active + 1;
+        let divider = index > 0 && !active && self.shown().is_none_or(|a| index != a + 1);
         h_flex()
             .id(SharedString::from(format!("tab-{name}")))
             .test_support()
@@ -746,7 +924,15 @@ impl Render for Workspace {
         let tabs: Vec<_> = (0..self.tabs.len())
             .map(|i| self.render_tab(i, cx).into_any_element())
             .collect();
+        if std::mem::take(&mut self.recap_due) {
+            self.offer_recap(window, cx);
+        }
         let body = match self.active() {
+            Some(_) if self.overview => {
+                let cards: Vec<_> = self.tabs.iter().map(|t| t.view.read(cx).card()).collect();
+                let name = self.sets[self.current].name.clone();
+                crate::overview::render(&cards, &name, cx)
+            }
             Some(view) => view.clone().into_any_element(),
             None => {
                 let open = cx.entity().downgrade();
@@ -763,6 +949,8 @@ impl Render for Workspace {
             }
         };
         if std::mem::take(&mut self.refocus)
+            && !self.overview
+            && self.recap.is_none()
             && let Some(view) = self.active()
         {
             let handle = view.read(cx).history_focus_handle();
@@ -781,6 +969,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &CloseTab, _, cx| this.close(this.active, cx)))
             .on_action(cx.listener(|this, _: &FetchAll, _, cx| this.fetch_all(cx)))
             .on_action(cx.listener(|this, _: &ReloadApp, _, cx| this.reload_app(cx)))
+            .on_action(cx.listener(|this, _: &ToggleOverview, _, cx| this.toggle_overview(cx)))
+            .on_action(cx.listener(|this, _: &OpenRecap, window, cx| this.open_recap(window, cx)))
             .on_action(cx.listener(|this, _: &TogglePalette, window, cx| {
                 this.toggle_palette(false, window, cx)
             }))
@@ -819,6 +1009,7 @@ impl Render for Workspace {
                                 .mx_1()
                                 .bg(theme::hairline()),
                         )
+                        .child(self.render_overview_button(cx))
                         .children(tabs)
                         .child(
                             Button::new("open")
@@ -835,6 +1026,7 @@ impl Render for Workspace {
             .child(div().flex_1().min_h_0().child(body))
             .children(switcher)
             .children(self.intro.map(crate::welcome::eclipse))
+            .children(self.recap.as_ref().map(|(r, _)| r.clone()))
             .children(self.palette.as_ref().map(|(p, _)| p.clone()))
     }
 }
