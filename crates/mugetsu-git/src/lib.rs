@@ -4,6 +4,7 @@
 //! Everything else (status, diff, refs, writes, network) goes through the `git`
 //! CLI so that user config, hooks, credential helpers and fsmonitor keep working.
 
+pub mod batch;
 pub mod cli;
 pub mod conflict;
 pub mod diff;
@@ -21,6 +22,7 @@ pub mod worktrees;
 
 use std::path::{Path, PathBuf};
 
+pub use batch::BatchDelete;
 pub use cli::{Git, Identity, global_identity, set_global_identity};
 pub use conflict::{Chunk, Conflict, ConflictFile, Operation, OperationState, Resolution};
 pub use diff::{DiffFile, DiffLine, FileDiff, Hunk, LineKind};

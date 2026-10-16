@@ -55,7 +55,7 @@ fn lookup<'a>(list: &'a [(String, String)], key: &str) -> &'a str {
 }
 
 impl Repo {
-    fn rev(&self, rev: &str) -> anyhow::Result<String> {
+    pub(crate) fn rev(&self, rev: &str) -> anyhow::Result<String> {
         Ok(self
             .git()
             .run([
