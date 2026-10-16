@@ -152,7 +152,7 @@ pub fn remote_repos() -> Vec<AccountRepos> {
                     if !client.has_token {
                         return None;
                     }
-                    let repos = client.api.user_repos().map_err(|e| e.to_string());
+                    let repos = client.api.user_repos().map_err(|e| format!("{e:#}"));
                     // A GitLab token often belongs to a self-hosted server only.
                     if repos.is_err()
                         && kind == ForgeKind::Gitlab

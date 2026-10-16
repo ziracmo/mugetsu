@@ -582,6 +582,7 @@ impl OpenRepoForm {
                     .child(
                         div()
                             .flex_1()
+                            .min_w_0()
                             .whitespace_normal()
                             .text_xs()
                             .text_color(theme::muted())
@@ -687,12 +688,19 @@ impl OpenRepoForm {
                         inset: false,
                     }])
                     .child(if done {
-                        Icon::new(Lucide::Check)
-                            .text_color(theme::lime())
+                        div()
+                            .child(
+                                Icon::new(Lucide::Check)
+                                    .size(px(26.))
+                                    .text_color(theme::lime()),
+                            )
                             .with_animation(
                                 ("clone-done", id),
                                 Animation::new(Duration::from_millis(520)),
-                                |el, t| el.size(px(26. * back(t).max(0.))),
+                                |el, t| {
+                                    let k = back(t);
+                                    el.opacity(t).mt(px(10. * (1. - k)))
+                                },
                             )
                             .into_any_element()
                     } else if failed {
