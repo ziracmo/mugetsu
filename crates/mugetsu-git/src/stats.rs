@@ -156,6 +156,43 @@ impl Repo {
     }
 }
 
+impl Repo {
+    /// Commits per local day over the last `days` days (oldest first, today
+    /// last), across every local and remote branch: the sidebar's pulse.
+    /// `utc_offset` is the local offset in seconds, so days break at midnight.
+    pub fn daily_commits(
+        &self,
+        days: usize,
+        now: i64,
+        utc_offset: i64,
+    ) -> anyhow::Result<Vec<u32>> {
+        let since = format!("--since=@{}", now - days as i64 * DAY);
+        let raw = self
+            .git()
+            .run(["log", "--branches", "--remotes", "--format=%at", &since])?;
+        let times = raw.lines().filter_map(|l| l.trim().parse().ok());
+        Ok(bucket_days(times, days, now, utc_offset))
+    }
+}
+
+/// Counts `times` (unix seconds) per local calendar day, the last bucket being today.
+fn bucket_days(
+    times: impl Iterator<Item = i64>,
+    days: usize,
+    now: i64,
+    utc_offset: i64,
+) -> Vec<u32> {
+    let today = (now + utc_offset).div_euclid(DAY);
+    let mut out = vec![0; days];
+    for t in times {
+        let ago = today - (t + utc_offset).div_euclid(DAY);
+        if (0..days as i64).contains(&ago) {
+            out[days - 1 - ago as usize] += 1;
+        }
+    }
+    out
+}
+
 /// `%x1e` starts a commit, `%x1f` separates fields, `%x1d` separates trailers.
 const META_FORMAT: &str = "--format=%x1e%H%x1f%P%x1f%aN%x1f%aE%x1f%cN%x1f%cE%x1f%at%x1f%ad%x1f%(trailers:only,unfold,separator=%x1d)";
 
@@ -582,5 +619,18 @@ mod tests {
         // A year: weekly bars.
         let stats = Acc::new("main", vec![], Some(now - 365 * DAY), now).snapshot();
         assert_eq!(stats.bucket_days, 7);
+    }
+
+    #[test]
+    fn buckets_days_at_local_midnight() {
+        let now = 100 * DAY + 3600; // 01:00 UTC
+        let times = [now, now - 2 * 3600, now - 29 * DAY, now - 40 * DAY];
+        // UTC: the commit at 23:00 the day before lands on yesterday.
+        let utc = bucket_days(times.into_iter(), 30, now, 0);
+        assert_eq!((utc[29], utc[28], utc[0]), (1, 1, 1));
+        // UTC+2: both are today (03:00 and 01:00).
+        let east = bucket_days(times.into_iter(), 30, now, 7200);
+        assert_eq!((east[29], east[28]), (2, 0));
+        assert_eq!(east.iter().sum::<u32>(), 3);
     }
 }

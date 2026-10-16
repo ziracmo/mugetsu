@@ -1088,6 +1088,7 @@ impl RepoView {
                         )))
                     }),
             )
+            .children(self.render_pulse())
     }
 }
 
