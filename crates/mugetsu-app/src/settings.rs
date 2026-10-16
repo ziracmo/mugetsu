@@ -98,6 +98,19 @@ pub struct Settings {
     pub gitlab_hosts: Vec<String>,
     /// Bitbucket `user:app-password` or access token (else `BITBUCKET_TOKEN`).
     pub bitbucket_token: String,
+    /// Branch deletes done at once, without asking (local ones forced).
+    pub force_delete: ForceDelete,
+    /// Last answer to "also delete the local branch" when deleting a remote one.
+    pub delete_local_too: bool,
+}
+
+/// Which branch deletes skip the confirmation. A local one is then forced
+/// (`git branch -D`), merged or not, like Fork does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ForceDelete {
+    pub local: bool,
+    pub remote: bool,
 }
 
 /// Which pull request events raise a system notification.
@@ -241,6 +254,8 @@ impl Default for Settings {
             gitlab_token: String::new(),
             gitlab_hosts: Vec::new(),
             bitbucket_token: String::new(),
+            force_delete: ForceDelete::default(),
+            delete_local_too: false,
         }
     }
 }

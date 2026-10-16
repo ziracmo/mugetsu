@@ -330,19 +330,7 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
         item(tr("Supprimer…", "Delete…"), Lucide::Trash)
             .disabled(b.is_head)
             .on_click(act(&ctx.view, move |this, window, cx| {
-                let name = name.clone();
-                this.confirm(
-                    trf!("Supprimer la branche '{name}' ?", "Delete branch '{name}'?"),
-                    tr(
-                        "La branche locale est supprimée. Git refuse si elle n'est pas mergée.",
-                        "The local branch is deleted. Git refuses if it isn't merged.",
-                    )
-                    .into(),
-                    tr("Supprimer", "Delete"),
-                    move |this, window, cx| this.delete_branch(name.clone(), false, window, cx),
-                    window,
-                    cx,
-                );
+                this.request_delete_branch(name.clone(), window, cx)
             }))
     };
 
@@ -397,30 +385,7 @@ pub fn remote_branch_menu(
             Lucide::Trash,
         )
         .on_click(act(&ctx.view, move |this, window, cx| {
-            let (remote, branch) = (remote.clone(), branch.clone());
-            this.confirm(
-                trf!(
-                    "Supprimer '{branch}' sur '{remote}' ?",
-                    "Delete '{branch}' on '{remote}'?"
-                ),
-                tr(
-                    "La branche est supprimée sur le serveur pour tout le monde.",
-                    "The branch is deleted on the server for everyone.",
-                )
-                .into(),
-                tr("Supprimer", "Delete"),
-                move |this, window, cx| {
-                    let (remote, branch) = (remote.clone(), branch.clone());
-                    this.run_op(
-                        tr("Supprimer", "Delete"),
-                        move |r| r.delete_remote_branch(&remote, &branch),
-                        window,
-                        cx,
-                    );
-                },
-                window,
-                cx,
-            );
+            this.request_delete_remote_branch(remote.clone(), branch.clone(), window, cx)
         }))
     };
     menu.item(checkout)
