@@ -500,6 +500,94 @@ pub fn tag_menu(menu: PopupMenu, ctx: &MenuContext, tag: &str) -> PopupMenu {
         .item(item(tr("Copier le nom du tag", "Copy tag name"), Lucide::Copy).on_click(copy(tag)))
 }
 
+/// A linked worktree as shown in a menu.
+#[derive(Clone)]
+pub struct WorktreeMenu {
+    pub path: String,
+    /// Branch, or "(detached)".
+    pub label: String,
+    pub dead: Option<mugetsu_git::DeadWorktree>,
+}
+
+pub fn worktree_menu(menu: PopupMenu, ctx: &MenuContext, wt: &WorktreeMenu) -> PopupMenu {
+    let exists = Path::new(&wt.path).exists();
+    let open = {
+        let path = PathBuf::from(&wt.path);
+        item(
+            tr("Ouvrir dans un onglet", "Open in a tab"),
+            Lucide::FolderOpen,
+        )
+        .disabled(!exists)
+        .on_click(act(&ctx.view, move |_, _, cx| {
+            cx.emit(RepoEvent::OpenWorktree(path.clone()))
+        }))
+    };
+    let delete = {
+        let wt = wt.clone();
+        item(tr("Supprimer le worktree…", "Remove worktree…"), Lucide::Trash).on_click(act(
+            &ctx.view,
+            move |this, window, cx| {
+                let (path, label) = (wt.path.clone(), wt.label.clone());
+                let dirty = wt.dead.as_ref().is_some_and(|d| d.dirty);
+                let description = match &wt.dead {
+                    _ if !Path::new(&path).exists() => tr(
+                        "Le dossier n'existe plus : git oublie ce worktree. La branche reste.",
+                        "The folder no longer exists: git forgets this worktree. The branch stays.",
+                    )
+                    .to_string(),
+                    Some(d) => {
+                        let size = crate::fmt::human_size(d.bytes);
+                        if dirty {
+                            trf!(
+                                "{path} ({size}) est supprimé, modifications non commitées comprises. La branche reste.",
+                                "{path} ({size}) is deleted, uncommitted changes included. The branch stays."
+                            )
+                        } else {
+                            trf!(
+                                "{path} ({size}) est supprimé. La branche reste.",
+                                "{path} ({size}) is deleted. The branch stays."
+                            )
+                        }
+                    }
+                    None => trf!(
+                        "{path} est supprimé (refusé s'il a des modifications non commitées). La branche reste.",
+                        "{path} is deleted (refused if it has uncommitted changes). The branch stays."
+                    ),
+                };
+                let force = wt.dead.is_some();
+                this.confirm(
+                    trf!(
+                        "Supprimer le worktree « {label} » ?",
+                        "Remove worktree '{label}'?"
+                    ),
+                    description,
+                    tr("Supprimer", "Remove"),
+                    move |this, window, cx| {
+                        let path = path.clone();
+                        this.run_op(
+                            tr("Supprimer worktree", "Remove worktree"),
+                            move |r| {
+                                if force {
+                                    r.worktree_purge(&path)
+                                } else {
+                                    r.worktree_remove(&path)
+                                }
+                            },
+                            window,
+                            cx,
+                        );
+                    },
+                    window,
+                    cx,
+                );
+            },
+        ))
+    };
+    menu.item(open).separator().item(delete).separator().item(
+        item(tr("Copier le chemin", "Copy path"), Lucide::Copy).on_click(copy(wt.path.clone())),
+    )
+}
+
 /// Commit row menu: a submenu per ref on the commit, then commit actions.
 #[allow(clippy::too_many_arguments)]
 pub fn commit_menu(

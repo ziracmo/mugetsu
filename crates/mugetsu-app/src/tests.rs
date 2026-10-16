@@ -1060,6 +1060,54 @@ fn new_commits_shimmer_and_worktree_branches_open_their_tab(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn finished_worktrees_are_listed_with_their_size(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let wt = dir.path().with_extension("merged-wt");
+    let fresh = dir.path().with_extension("fresh-wt");
+    git(
+        dir.path(),
+        &["worktree", "add", "-q", wt.to_str().unwrap(), "feature"],
+    );
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "fresh",
+            fresh.to_str().unwrap(),
+        ],
+    );
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let dead: Vec<_> = cx.read(|cx| view.read(cx).dead_worktrees().to_vec());
+    assert_eq!(dead.len(), 1, "{dead:?}");
+    assert_eq!(dead[0].branch.as_deref(), Some("feature"));
+    assert_eq!(dead[0].reason, mugetsu_git::DeadReason::Merged);
+    assert!(dead[0].bytes > 0);
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+
+    std::fs::remove_dir_all(&fresh).unwrap();
+    cx.update(|cx| view.update(cx, |v, cx| v.reload(cx)));
+    settle(cx, &view);
+    let reasons: Vec<_> = cx.read(|cx| {
+        view.read(cx)
+            .dead_worktrees()
+            .iter()
+            .map(|d| d.reason)
+            .collect()
+    });
+    assert!(
+        reasons.contains(&mugetsu_git::DeadReason::Missing),
+        "{reasons:?}"
+    );
+    let _ = std::fs::remove_dir_all(&wt);
+}
+
+#[gpui_kit::test]
 fn deleting_a_branch_slashes_its_chip(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();

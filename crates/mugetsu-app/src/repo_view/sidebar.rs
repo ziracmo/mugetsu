@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::input::Input;
-use gpui_kit::component::menu::ContextMenuExt as _;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
@@ -12,7 +12,7 @@ use gpui_kit::{
     SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
     prelude::FluentBuilder as _, px,
 };
-use mugetsu_git::{Branch, RefsSnapshot};
+use mugetsu_git::{Branch, DeadReason, RefsSnapshot};
 
 use super::menus::{self, BranchMenu, MenuBuilder, MenuContext};
 use super::toolbar::pr_chip;
@@ -691,6 +691,7 @@ impl RepoView {
 
     fn worktree_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let entity = cx.entity().downgrade();
+        let ctx = self.menu_context(cx);
         self.data
             .refs
             .worktrees
@@ -710,6 +711,44 @@ impl RepoView {
                     .clone()
                     .unwrap_or_else(|| tr("(détaché)", "(detached)").into());
                 let is_current = path == self.repo.root();
+                let dead = self.dead_worktrees.iter().find(|d| d.path == w.path);
+                let mut suffix = vec![];
+                if w.locked {
+                    suffix.push(Icon::new(Lucide::Lock).xsmall().into_any_element());
+                }
+                if let Some(d) = dead {
+                    suffix.push(
+                        div()
+                            .flex_none()
+                            .px_1p5()
+                            .rounded_md()
+                            .text_xs()
+                            .bg(theme::alpha(theme::red(), 0.16))
+                            .text_color(theme::red())
+                            .child(if d.reason == DeadReason::Missing {
+                                tr("absent", "missing").to_string()
+                            } else {
+                                crate::fmt::human_size(d.bytes)
+                            })
+                            .into_any_element(),
+                    );
+                }
+                let menu: Option<MenuBuilder> = (!w.is_main && !is_current).then(|| {
+                    let (menu_ctx, wt) = (
+                        ctx.clone(),
+                        menus::WorktreeMenu {
+                            path: w.path.clone(),
+                            label: label.clone(),
+                            dead: dead.cloned(),
+                        },
+                    );
+                    let menu: MenuBuilder = Rc::new(
+                        move |m: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+                            menus::worktree_menu(m, &menu_ctx, &wt)
+                        },
+                    );
+                    menu
+                });
                 render_row(Row {
                     view: entity.clone(),
                     quiet: self.menu_open,
@@ -718,6 +757,8 @@ impl RepoView {
                     icon: Lucide::FolderGit2,
                     icon_color: if is_current {
                         theme::accent()
+                    } else if dead.is_some() {
+                        theme::muted()
                     } else {
                         theme::lime()
                     },
@@ -730,9 +771,11 @@ impl RepoView {
                     selected: false,
                     bold: is_current,
                     tooltip: Some(format!(
-                        "{}{}",
+                        "{}{}{}",
                         w.path,
-                        if is_current {
+                        dead.map(|d| format!("\n{}", dead_reason(d.reason)))
+                            .unwrap_or_default(),
+                        if is_current || dead.is_some_and(|d| d.reason == DeadReason::Missing) {
                             ""
                         } else {
                             tr(
@@ -741,23 +784,113 @@ impl RepoView {
                             )
                         }
                     )),
-                    suffix: if w.locked {
-                        vec![Icon::new(Lucide::Lock).xsmall().into_any_element()]
-                    } else {
-                        vec![]
-                    },
+                    suffix,
                     on_click: Box::new(move |_, _, cx| {
                         let path = path.clone();
                         let _ = entity.update(cx, |_, cx| {
-                            if !is_current {
+                            if !is_current && path.exists() {
                                 cx.emit(RepoEvent::OpenWorktree(path));
                             }
                         });
                     }),
-                    menu: None,
+                    menu,
                 })
             })
             .collect()
+    }
+
+    /// Broom in the Worktrees header: removes every dead worktree after asking.
+    fn clean_worktrees_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let total: u64 = self.dead_worktrees.iter().map(|d| d.bytes).sum();
+        div()
+            .id("clean-worktrees")
+            .test_support()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_1()
+            .py_0p5()
+            .rounded_sm()
+            .text_xs()
+            .text_color(theme::red())
+            .hover(|s| s.bg(theme::raised()))
+            .child(Icon::new(Lucide::Sparkles).xsmall())
+            .when(total > 0, |s| s.child(crate::fmt::human_size(total)))
+            .tooltip(|window, cx| {
+                Tooltip::new(tr(
+                    "Supprimer les worktrees morts…",
+                    "Remove dead worktrees…",
+                ))
+                .build(window, cx)
+            })
+            .on_click(cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                this.confirm_clean_worktrees(window, cx);
+            }))
+            .into_any_element()
+    }
+
+    pub fn confirm_clean_worktrees(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dead = self.dead_worktrees.clone();
+        if dead.is_empty() {
+            return;
+        }
+        let n = dead.len();
+        let total = crate::fmt::human_size(dead.iter().map(|d| d.bytes).sum());
+        let mut lines: Vec<String> = dead
+            .iter()
+            .map(|d| {
+                let name = d
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| tr("(détaché)", "(detached)").into());
+                let size = if d.reason == DeadReason::Missing {
+                    String::new()
+                } else {
+                    format!(" · {}", crate::fmt::human_size(d.bytes))
+                };
+                let dirty = if d.dirty {
+                    tr(" · modifs non commitées", " · uncommitted changes")
+                } else {
+                    ""
+                };
+                format!("• {name} · {}{size}{dirty}", dead_reason(d.reason))
+            })
+            .collect();
+        lines.push(String::new());
+        lines.push(if dead.iter().any(|d| d.dirty) {
+            tr(
+                "Les dossiers sont supprimés, modifications non commitées comprises. Les branches restent.",
+                "The folders are deleted, uncommitted changes included. Branches stay.",
+            )
+        } else {
+            tr(
+                "Les dossiers sont supprimés. Les branches restent.",
+                "The folders are deleted. Branches stay.",
+            )
+        }
+        .to_string());
+        let paths: Vec<String> = dead.iter().map(|d| d.path.clone()).collect();
+        self.confirm(
+            trf!(
+                "Supprimer {n} worktree(s) mort(s) ({total}) ?",
+                "Remove {n} dead worktree(s) ({total})?"
+            ),
+            lines.join("\n"),
+            tr("Supprimer", "Remove"),
+            move |this, window, cx| {
+                let paths = paths.clone();
+                this.run_op(
+                    tr("Nettoyer les worktrees", "Clean worktrees"),
+                    move |r| purge_all(r, &paths),
+                    window,
+                    cx,
+                );
+            },
+            window,
+            cx,
+        );
     }
 
     fn stash_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -872,7 +1005,7 @@ impl RepoView {
                 nw,
                 worktrees,
                 searching,
-                None,
+                (!self.dead_worktrees.is_empty()).then(|| self.clean_worktrees_button(cx)),
                 cx,
             ),
             self.section("tags", "Tags", Lucide::Tags, nt, tags, searching, None, cx),
@@ -942,5 +1075,28 @@ impl RepoView {
                         )))
                     }),
             )
+    }
+}
+
+/// Why a worktree is listed as dead, for its tooltip and the cleanup dialog.
+pub fn dead_reason(reason: DeadReason) -> &'static str {
+    match reason {
+        DeadReason::Missing => tr("dossier disparu", "folder gone"),
+        DeadReason::BranchGone => tr("branche supprimée", "branch deleted"),
+        DeadReason::UpstreamGone => tr("branche distante supprimée", "remote branch deleted"),
+        DeadReason::Merged => tr("mergé", "merged"),
+    }
+}
+
+/// Removes every worktree in `paths`, going on past failures.
+fn purge_all(repo: &mugetsu_git::Repo, paths: &[String]) -> anyhow::Result<()> {
+    let errors: Vec<String> = paths
+        .iter()
+        .filter_map(|p| repo.worktree_purge(p).err().map(|e| format!("{p}: {e:#}")))
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!("{}", errors.join("\n"))
     }
 }

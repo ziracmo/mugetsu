@@ -17,6 +17,7 @@ pub mod refs;
 pub mod restack;
 pub mod stats;
 pub mod status;
+pub mod worktrees;
 
 use std::path::{Path, PathBuf};
 
@@ -32,6 +33,7 @@ pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};
 pub use restack::{Restack, StackLink};
 pub use stats::{FileHeat, Person, RepoStats};
 pub use status::{Change, FileStatus, Status};
+pub use worktrees::{DeadReason, DeadWorktree};
 
 /// Handle on one repository. Cheap to clone, safe to send to background threads.
 #[derive(Clone, Debug)]
