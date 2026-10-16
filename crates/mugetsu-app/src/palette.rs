@@ -1335,7 +1335,7 @@ pub fn entries(ws: &Workspace, window: &Window, cx: &App) -> Vec<Entry> {
         seen.insert(root);
     }
     let settings = crate::settings::get();
-    let found = crate::open_repo::find_repos(&settings.repo_folders);
+    let found = crate::open_repo::find_repos(&settings.scan_folders());
     for root in settings.recent.iter().chain(found.iter()) {
         if !seen.insert(root.clone()) {
             continue;

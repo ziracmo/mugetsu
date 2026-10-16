@@ -8,7 +8,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, TitleBar, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Icon, Sizable as _, TitleBar, h_flex, v_flex,
+};
 use gpui_kit::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Div, Entity, Global,
     InteractiveElement as _, IntoElement, ParentElement as _, PathPromptOptions, Render,
@@ -286,6 +288,23 @@ fn add_folder(cx: &mut App) {
                     }
                 })
             });
+        }
+    })
+    .detach();
+}
+
+fn pick_clone_dir(cx: &mut App) {
+    let picked = cx.prompt_for_paths(PathPromptOptions {
+        files: false,
+        directories: true,
+        multiple: false,
+        prompt: Some(tr("Choisir", "Choose").into()),
+    });
+    cx.spawn(async move |cx| {
+        if let Ok(Ok(Some(paths))) = picked.await
+            && let Some(dir) = paths.into_iter().next()
+        {
+            cx.update(|cx| settings::update(cx, |s| s.clone_dir = Some(dir)));
         }
     })
     .detach();
@@ -572,6 +591,101 @@ impl Render for SettingsView {
                         ))),
                 )
                 .into_any_element(),
+                row(
+                    tr("Dossier workspace", "Workspace folder"),
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_2()
+                        .text_sm()
+                        .child(
+                            Icon::new(Lucide::FolderDown)
+                                .xsmall()
+                                .text_color(theme::muted()),
+                        )
+                        .child(match &current.clone_dir {
+                            Some(dir) => div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(dir.display().to_string()),
+                            None => div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(theme::muted())
+                                .child(tr(
+                                    "Aucun : demandé à chaque clone",
+                                    "None: asked on each clone",
+                                )),
+                        })
+                        .child(
+                            Button::new("pick-clone-dir")
+                                .outline()
+                                .xsmall()
+                                .label(tr("Choisir…", "Choose…"))
+                                .on_click(|_, _, cx| pick_clone_dir(cx)),
+                        )
+                        .when(current.clone_dir.is_some(), |s| {
+                            s.child(
+                                Button::new("clear-clone-dir")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(Lucide::X))
+                                    .on_click(|_, _, cx| {
+                                        settings::update(cx, |s| s.clone_dir = None)
+                                    }),
+                            )
+                        }),
+                )
+                .into_any_element(),
+                row(
+                    "",
+                    Switch::new("clone-always")
+                        .checked(current.clone_dir.is_some() && !current.clone_ask)
+                        .disabled(current.clone_dir.is_none())
+                        .color(theme::accent())
+                        .label(tr(
+                            "Toujours cloner ici, sans demander",
+                            "Always clone here, without asking",
+                        ))
+                        .on_click(|on: &bool, _, cx| {
+                            let ask = !*on;
+                            settings::update(cx, |s| s.clone_ask = ask)
+                        }),
+                )
+                .into_any_element(),
+                row(
+                    tr("Cloner via", "Clone over"),
+                    h_flex()
+                        .p(px(2.))
+                        .gap_0p5()
+                        .rounded_lg()
+                        .bg(theme::alpha(gpui_kit::white(), 0.05))
+                        .border_1()
+                        .border_color(theme::hairline())
+                        .children(
+                            [
+                                (None, tr("Auto", "Auto")),
+                                (Some(false), "SSH"),
+                                (Some(true), "HTTPS"),
+                            ]
+                            .into_iter()
+                            .map(|(value, label)| {
+                                let id = format!("clone-proto-{label}").to_lowercase();
+                                choice(id, label, current.clone_https == value)
+                                    .on_click(move |_, _, cx| {
+                                        settings::update(cx, |s| s.clone_https = value)
+                                    })
+                                    .test_support()
+                            }),
+                        ),
+                )
+                .into_any_element(),
+                hint(tr(
+                    "Les dépôts distants de vos comptes et les URL collées dans ⌘O sont clonés dans le dossier workspace. Auto : SSH si une clé existe dans ~/.ssh, sinon HTTPS.",
+                    "Remote repositories from your accounts and URLs pasted in ⌘O are cloned into the workspace folder. Auto: SSH when a key exists in ~/.ssh, else HTTPS.",
+                )),
             ],
             Section::PullRequests => vec![
                 row(

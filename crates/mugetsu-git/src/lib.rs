@@ -6,6 +6,7 @@
 
 pub mod batch;
 pub mod cli;
+pub mod clone;
 pub mod conflict;
 pub mod diff;
 pub mod fold;
@@ -24,6 +25,7 @@ use std::path::{Path, PathBuf};
 
 pub use batch::BatchDelete;
 pub use cli::{Git, Identity, global_identity, set_global_identity};
+pub use clone::{ClonePhase, CloneProgress, clone, clone_name, is_clone_url};
 pub use conflict::{Chunk, Conflict, ConflictFile, Operation, OperationState, Resolution};
 pub use diff::{DiffFile, DiffLine, FileDiff, Hunk, LineKind};
 pub use fold::Folded;

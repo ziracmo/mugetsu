@@ -122,6 +122,18 @@ impl Git {
             .with_context(|| format!("failed to spawn {cmd:?}"))
     }
 
+    /// Starts git with stderr piped (where it reports progress), stdout dropped.
+    pub fn spawn_stderr<I, S>(&self, args: I) -> anyhow::Result<std::process::Child>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut cmd = self.command(args);
+        cmd.stdout(Stdio::null()).stderr(Stdio::piped());
+        cmd.spawn()
+            .with_context(|| format!("failed to spawn {cmd:?}"))
+    }
+
     /// Runs git feeding `input` on stdin.
     pub fn run_with_stdin<I, S>(&self, args: I, input: &[u8]) -> anyhow::Result<String>
     where

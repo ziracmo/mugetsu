@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use anyhow::Context as _;
 use serde::Deserialize;
 
-use crate::forge::{Forge, ForgeRepo, agent, encode};
+use crate::forge::{Forge, ForgeKind, ForgeRepo, REPO_PAGES, RemoteRepo, agent, encode};
 use crate::{CheckState, PrDetails, PrState, PrStatus, PullRequest, ReviewDecision};
 
 pub struct Gitlab {
@@ -276,11 +276,66 @@ impl Forge for Gitlab {
         self.token.as_deref().context("no GitLab token")?;
         Ok(self.get_json::<ApiUser>(&self.api("user"))?.username)
     }
+
+    fn user_repos(&self) -> anyhow::Result<Vec<RemoteRepo>> {
+        self.token.as_deref().context("no GitLab token")?;
+        let mut out = Vec::new();
+        for page in 1..=REPO_PAGES {
+            let url = self.api(&format!(
+                "projects?membership=true&simple=true&order_by=last_activity_at&sort=desc&per_page=100&page={page}"
+            ));
+            let batch: Vec<ApiProject> = self.get_json(&url)?;
+            let full = batch.len() == 100;
+            out.extend(batch.into_iter().map(RemoteRepo::from));
+            if !full {
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[derive(Deserialize)]
+struct ApiProject {
+    path_with_namespace: String,
+    description: Option<String>,
+    /// Missing from `simple` listings on older servers.
+    visibility: Option<String>,
+    http_url_to_repo: String,
+    ssh_url_to_repo: String,
+    last_activity_at: Option<String>,
+}
+
+impl From<ApiProject> for RemoteRepo {
+    fn from(p: ApiProject) -> Self {
+        RemoteRepo {
+            kind: ForgeKind::Gitlab,
+            full_name: p.path_with_namespace,
+            description: p.description.unwrap_or_default(),
+            private: p.visibility.is_some_and(|v| v != "public"),
+            https_url: p.http_url_to_repo,
+            ssh_url: p.ssh_url_to_repo,
+            updated_at: p.last_activity_at.unwrap_or_default(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maps_projects() {
+        let json = r#"[{"path_with_namespace": "g/sub/p", "description": null,
+            "visibility": "internal", "http_url_to_repo": "https://gitlab.com/g/sub/p.git",
+            "ssh_url_to_repo": "git@gitlab.com:g/sub/p.git", "last_activity_at": "2026-01-01T00:00:00Z"}]"#;
+        let list: Vec<ApiProject> = serde_json::from_str(json).unwrap();
+        let r = RemoteRepo::from(list.into_iter().next().unwrap());
+        assert_eq!(r.name(), "p");
+        assert!(r.private);
+        assert_eq!(r.ssh_url, "git@gitlab.com:g/sub/p.git");
+        assert_eq!(r.description, "");
+    }
 
     #[test]
     fn maps_merge_requests() {

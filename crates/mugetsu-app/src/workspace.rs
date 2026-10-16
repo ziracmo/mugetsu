@@ -411,14 +411,8 @@ impl Workspace {
         }
     }
 
-    /// ⌘O: the repository picker when there is something to offer, else the
-    /// native folder dialog.
+    /// ⌘O: the repository picker (local, remote, clone by URL, browse).
     fn prompt_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let settings = crate::settings::get();
-        if settings.recent.is_empty() && settings.repo_folders.is_empty() {
-            self.browse(window, cx);
-            return;
-        }
         let (pick_ws, browse_ws) = (cx.entity().downgrade(), cx.entity().downgrade());
         crate::open_repo::open(
             window,

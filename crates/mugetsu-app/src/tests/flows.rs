@@ -159,3 +159,60 @@ fn copy_sha_from_the_menu(cx: &mut TestAppContext) {
     let topic = git(dir.path(), &["rev-parse", "topic"]).trim().to_string();
     cx.read(|cx| assert_eq!(cx.read_from_clipboard().and_then(|c| c.text()), Some(topic)));
 }
+
+#[gpui_kit::test]
+fn a_pasted_url_is_cloned_into_the_workspace_folder_and_opened(cx: &mut TestAppContext) {
+    init(cx);
+    let origin = tempfile::tempdir().unwrap();
+    fixture(origin.path());
+    let open = tempfile::tempdir().unwrap();
+    fixture(open.path());
+    let workspace = tempfile::tempdir().unwrap();
+    cx.update(|cx| {
+        crate::settings::update(cx, |s| {
+            s.clone_dir = Some(workspace.path().to_path_buf());
+            s.clone_ask = false;
+        })
+    });
+    let session = session_of(vec![open.path().to_path_buf()], 0);
+    let (handle, ws) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| Workspace::new(session, false, window, cx))
+        })
+        .unwrap()
+    });
+    cx.run_until_parked();
+    ui_step(cx, handle, &|window, cx| {
+        window.dispatch_action(Box::new(crate::workspace::OpenRepository), cx)
+    });
+    let url = format!("file://{}/", origin.path().display());
+    ui_step(cx, handle, &|window, cx| window.input(&url, cx));
+    ui_step(cx, handle, &|window, cx| {
+        assert!(
+            window.try_find("open-url").is_some(),
+            "a clone row for the URL"
+        );
+        window.press("enter", cx)
+    });
+    let name = origin.path().file_name().unwrap().to_owned();
+    let dest = workspace.path().join(&name);
+    for _ in 0..300 {
+        cx.executor().advance_clock(Duration::from_millis(100));
+        cx.run_until_parked();
+        if cx.read(|cx| ws.read(cx).tab_roots(cx).len()) == 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        dest.join("a.txt").exists(),
+        "cloned into the workspace folder"
+    );
+    let roots = cx.read(|cx| ws.read(cx).tab_roots(cx));
+    assert_eq!(roots.len(), 2, "the clone opens in a new tab");
+    assert_eq!(
+        roots[1].canonicalize().unwrap(),
+        dest.canonicalize().unwrap()
+    );
+    cx.update(|cx| crate::settings::update(cx, |s| s.clone_dir = None));
+}

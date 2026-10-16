@@ -183,6 +183,27 @@ pub(crate) fn encode(s: &str) -> String {
     out
 }
 
+/// A repository the token's owner can reach, offered for cloning.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteRepo {
+    pub kind: ForgeKind,
+    /// `owner/name` (GitLab: full project path).
+    pub full_name: String,
+    pub description: String,
+    pub private: bool,
+    pub https_url: String,
+    pub ssh_url: String,
+    /// ISO 8601, last push or activity.
+    pub updated_at: String,
+}
+
+impl RemoteRepo {
+    /// Last segment of the path: the folder a clone goes into.
+    pub fn name(&self) -> &str {
+        self.full_name.rsplit('/').next().unwrap_or(&self.full_name)
+    }
+}
+
 /// Pull / merge requests of one forge, the same shape whatever the service.
 pub trait Forge: Send + Sync {
     /// The most recently updated PRs, newest first.
@@ -199,7 +220,13 @@ pub trait Forge: Send + Sync {
     fn pull_details(&self, repo: &ForgeRepo, number: u64) -> anyhow::Result<PrDetails>;
     /// Login of the token's owner.
     fn viewer_login(&self) -> anyhow::Result<String>;
+    /// Repositories the token's owner owns or is a member of, most recently
+    /// active first.
+    fn user_repos(&self) -> anyhow::Result<Vec<RemoteRepo>>;
 }
+
+/// Pages fetched at most when listing repositories (100 per page).
+pub(crate) const REPO_PAGES: usize = 3;
 
 pub(crate) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
