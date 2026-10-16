@@ -365,7 +365,7 @@ impl RepoView {
                         PopupMenuItem::new(trf!("Review IA ({})", "AI review ({})", tool.label()))
                             .icon(Icon::new(Lucide::Sparkles))
                             .on_click(move |_, window, cx| {
-                                if let Err(e) = crate::ai_review::launch(&root, &review_pr) {
+                                if let Err(e) = crate::ai_review::launch(&root, &review_pr, cx) {
                                     gpui_kit::component::WindowExt::push_notification(
                                         window,
                                         gpui_kit::component::notification::Notification::error(

@@ -10,10 +10,10 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, TitleBar, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, Global,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Div, Entity, Global,
     InteractiveElement as _, IntoElement, ParentElement as _, PathPromptOptions, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder as _, px, rgb, size,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
+    WindowBounds, WindowOptions, div, prelude::FluentBuilder as _, px, rgb, size,
 };
 
 use crate::i18n::tr;
@@ -671,34 +671,21 @@ impl Render for SettingsView {
                 ]
             }
             Section::Ai => {
-                let tools =
-                    AiTool::ALL.iter().map(|&tool| {
-                        let active = current.ai_tool == tool;
-                        div()
-                            .id(SharedString::from(
-                                format!("ai-tool-{tool:?}").to_lowercase(),
-                            ))
-                            .test_support()
-                            .px_3()
-                            .h(px(24.))
-                            .flex()
-                            .items_center()
-                            .rounded_md()
-                            .cursor_pointer()
-                            .text_sm()
-                            .when(active, |s| {
-                                s.bg(theme::alpha(gpui_kit::white(), 0.14))
-                                    .border_1()
-                                    .border_color(theme::glass_edge())
-                                    .shadow_sm()
-                                    .text_color(gpui_kit::white())
-                            })
-                            .when(!active, |s| s.text_color(theme::muted()))
-                            .child(tool.label())
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.pick_tool(tool, window, cx)
-                            }))
-                    });
+                let tools = AiTool::ALL.iter().map(|&tool| {
+                    let id = format!("ai-tool-{tool:?}").to_lowercase();
+                    choice(id, tool.label(), current.ai_tool == tool).on_click(
+                        cx.listener(move |this, _, window, cx| this.pick_tool(tool, window, cx)),
+                    )
+                });
+                let terminals = crate::ai_review::terminals().iter().map(|&terminal| {
+                    let id = format!("ai-terminal-{terminal:?}").to_lowercase();
+                    choice(id, terminal.label(), current.ai_terminal == terminal)
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            settings::remember(|s| s.ai_terminal = terminal);
+                            cx.notify();
+                        }))
+                        .test_support()
+                });
                 vec![
                     row(
                         tr("Outil", "Tool"),
@@ -720,9 +707,22 @@ impl Render for SettingsView {
                             .child(Input::new(&self.ai_command).small()),
                     )
                     .into_any_element(),
+                    row(
+                        tr("Lancer dans", "Open in"),
+                        h_flex()
+                            .flex_wrap()
+                            .p(px(2.))
+                            .gap_0p5()
+                            .rounded_lg()
+                            .bg(theme::alpha(gpui_kit::white(), 0.05))
+                            .border_1()
+                            .border_color(theme::hairline())
+                            .children(terminals),
+                    )
+                    .into_any_element(),
                     hint(tr(
-                        "Lancée dans un Terminal, dans le dossier du dépôt, depuis « Review IA » sur une PR. Variables : {url} {number} {branch} {base} {title}.",
-                        "Run in a Terminal, in the repository folder, from a PR's “AI review”. Variables: {url} {number} {branch} {base} {title}.",
+                        "Lancée dans le terminal choisi, dans le dossier du dépôt, depuis « Review IA » sur une PR. Variables : {url} {number} {branch} {base} {title}. Claude Desktop (s'il est installé) ouvre une nouvelle session Claude Code, préremplie avec la demande, après confirmation du dossier.",
+                        "Run in the chosen terminal, in the repository folder, from a PR's “AI review”. Variables: {url} {number} {branch} {base} {title}. Claude Desktop (when installed) opens a new Claude Code session, prefilled with the request, once you confirm the folder.",
                     )),
                 ]
             }
@@ -799,6 +799,28 @@ impl Render for SettingsView {
                     ),
             )
     }
+}
+
+/// One option of a segmented picker.
+fn choice(id: String, label: &'static str, active: bool) -> Stateful<Div> {
+    div()
+        .id(SharedString::from(id))
+        .px_3()
+        .h(px(24.))
+        .flex()
+        .items_center()
+        .rounded_md()
+        .cursor_pointer()
+        .text_sm()
+        .when(active, |s| {
+            s.bg(theme::alpha(gpui_kit::white(), 0.14))
+                .border_1()
+                .border_color(theme::glass_edge())
+                .shadow_sm()
+                .text_color(gpui_kit::white())
+        })
+        .when(!active, |s| s.text_color(theme::muted()))
+        .child(label)
 }
 
 fn hint(text: &'static str) -> AnyElement {
