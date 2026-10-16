@@ -56,6 +56,37 @@ fn mark_match(el: AnyElement, name: &str, ctx: &ChipContext) -> AnyElement {
         .into_any_element()
 }
 
+/// Arrow left of a merge that folds its merged branch (empty slot elsewhere).
+fn fold_arrow(
+    merge: gix::ObjectId,
+    folded: Option<bool>,
+    view: gpui_kit::WeakEntity<RepoView>,
+) -> AnyElement {
+    let slot = div().flex_none().w(px(14.)).h_full().flex().items_center();
+    let Some(folded) = folded else {
+        return slot.into_any_element();
+    };
+    slot.id(SharedString::from(format!("fold-{merge}")))
+        .test_support()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(theme::muted())
+        .hover(|s| s.text_color(gpui_kit::white()))
+        .child(
+            Icon::new(if folded {
+                Lucide::ChevronRight
+            } else {
+                Lucide::ChevronDown
+            })
+            .xsmall(),
+        )
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            let _ = view.update(cx, |this, cx| this.toggle_merge(merge, cx));
+        })
+        .into_any_element()
+}
+
 /// Double-click on a branch chip checks it out (with a dialog when needed).
 fn checkout_on_double_click(
     el: gpui_kit::Div,
@@ -357,7 +388,7 @@ impl RepoView {
         let hits = Rc::new(self.search_hits.clone());
         let shimmer = self.shimmer.clone();
         let celebrate = self.celebrate;
-        let list = if data.history.is_empty() {
+        let list = if data.folded.is_empty() {
             v_flex()
                 .size_full()
                 .items_center()
@@ -371,15 +402,19 @@ impl RepoView {
                 .when(!self.loading, |s| s.child(tr("Aucun commit", "No commits")))
                 .into_any_element()
         } else {
-            uniform_list("history", data.history.len(), move |range, _, cx| {
+            let gutter = data.folded.has_toggles();
+            uniform_list("history", data.folded.len(), move |range, _, cx| {
+                let folded = &data.folded;
                 // The graph column adapts to the lanes actually visible.
-                let rows: Vec<_> = range.clone().map(|ix| data.graph.row(ix)).collect();
+                let rows: Vec<_> = range.clone().map(|ix| folded.graph.row(ix)).collect();
                 let graph_width =
                     graph_view::column_width(rows.iter().map(|r| r.width).max().unwrap_or(1));
                 range
                     .zip(rows)
                     .map(|(ix, row)| {
+                        let ix = folded.history_row(ix);
                         let commit = &data.history.commits[ix];
+                        let toggle = folded.toggle(ix);
                         let is_selected = selected == Some(commit.id);
                         let style = NodeStyle {
                             is_head: head == Some(commit.id),
@@ -440,6 +475,7 @@ impl RepoView {
                                         .child(super::shimmer::sweep(seq))
                                 },
                             )
+                            .when(gutter, |s| s.child(fold_arrow(id, toggle, entity.clone())))
                             .child(
                                 div()
                                     .flex_none()

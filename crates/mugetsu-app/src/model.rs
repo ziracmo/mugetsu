@@ -1,18 +1,19 @@
 //! Everything a repository tab displays, loaded off the UI thread in one go.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gix::ObjectId;
 use mugetsu_forge::{ForgeRepo, GithubRepo};
-use mugetsu_git::{Change, Graph, History, OperationState, RefLabel, RefsSnapshot, Repo, Status};
+use mugetsu_git::{Change, Folded, History, OperationState, RefLabel, RefsSnapshot, Repo, Status};
 
 #[derive(Clone, Default)]
 pub struct RepoData {
     pub refs: RefsSnapshot,
     /// Shared so optimistic updates copy only the small parts.
     pub history: Arc<History>,
-    pub graph: Arc<Graph>,
+    /// Rows shown once merged branches are folded, and their graph.
+    pub folded: Arc<Folded>,
     pub decorations: HashMap<ObjectId, Vec<RefLabel>>,
     pub status: Status,
     /// The remote's forge (GitHub, GitLab, Bitbucket).
@@ -24,11 +25,12 @@ pub struct RepoData {
 }
 
 impl RepoData {
-    pub fn load(repo: &Repo) -> anyhow::Result<Arc<Self>> {
+    /// Loads everything; merges outside `expanded` start folded.
+    pub fn load(repo: &Repo, expanded: &HashSet<ObjectId>) -> anyhow::Result<Arc<Self>> {
         let refs = repo.refs()?;
         let history = repo.history(&refs.tips(), crate::settings::get().commit_order.into())?;
-        let graph = mugetsu_git::layout(&history.commits);
         let decorations = refs.decorations();
+        let folded = Self::fold(&history, &decorations, refs.head, expanded);
         let status = repo.status()?;
         let operation = repo.operation().unwrap_or_default();
         let gitlab_hosts = crate::settings::get().gitlab_hosts;
@@ -42,13 +44,37 @@ impl RepoData {
         Ok(Arc::new(Self {
             refs,
             history: Arc::new(history),
-            graph: Arc::new(graph),
+            folded: Arc::new(folded),
             decorations,
             status,
             forge,
             github,
             operation,
         }))
+    }
+
+    /// Folds merged branches; commits carrying a ref or HEAD always show.
+    pub fn fold(
+        history: &History,
+        decorations: &HashMap<ObjectId, Vec<RefLabel>>,
+        head: Option<ObjectId>,
+        expanded: &HashSet<ObjectId>,
+    ) -> Folded {
+        let pinned: HashSet<ObjectId> = decorations.keys().copied().chain(head).collect();
+        Folded::new(history, &pinned, expanded)
+    }
+
+    /// Folds again after a merge was expanded or folded.
+    pub fn refold(&self, expanded: &HashSet<ObjectId>) -> Self {
+        Self {
+            folded: Arc::new(Self::fold(
+                &self.history,
+                &self.decorations,
+                self.refs.head,
+                expanded,
+            )),
+            ..self.clone()
+        }
     }
 
     /// What the data will look like once `local` is checked out (created from
