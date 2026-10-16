@@ -211,6 +211,17 @@ impl RepoView {
         cx.notify();
     }
 
+    /// Moves the commit details between below the history and beside it.
+    pub fn toggle_details_side(&mut self, cx: &mut Context<Self>) {
+        self.details_side = !self.details_side;
+        let side = self.details_side;
+        // Tests run in parallel and share the settings: keep them out of it.
+        if !cfg!(test) {
+            crate::settings::update(cx, |s| s.details_side = side);
+        }
+        cx.notify();
+    }
+
     /// Branch summaries for the loaded data, recomputed when it changes.
     fn compact_rows(&mut self) -> Arc<Vec<BranchSummary>> {
         if let Some((data, rows)) = &self.compact_cache

@@ -136,14 +136,19 @@ impl RepoView {
                 }
             }
         });
+        let side = self.details_side;
         v_flex()
             .id("commit-files")
-            .w(px(240.))
             .flex_none()
-            .h_full()
             .p_1()
             .overflow_y_scroll()
-            .border_r_1()
+            .map(|s| {
+                if side {
+                    s.w_full().max_h(px(180.)).border_b_1()
+                } else {
+                    s.w(px(240.)).h_full().border_r_1()
+                }
+            })
             .border_color(cx.theme().border)
             .bg(theme::panel())
             .children(rows)

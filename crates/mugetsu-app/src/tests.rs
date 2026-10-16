@@ -1326,6 +1326,30 @@ fn compact_view_lists_branches_and_goes_back(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn commit_details_move_beside_the_history_and_back(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    settle(cx, &view);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("toggle-details-side", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("copy-sha").is_some());
+    })
+    .unwrap();
+    cx.read(|cx| assert!(view.read(cx).details_side()));
+    cx.update_window(handle, |_, window, cx| {
+        window.click("toggle-details-side", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("copy-sha").is_some());
+    })
+    .unwrap();
+    cx.read(|cx| assert!(!view.read(cx).details_side()));
+}
+
+#[gpui_kit::test]
 fn merge_conflicts_resolve_in_three_panes(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
