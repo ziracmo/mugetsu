@@ -5097,6 +5097,7 @@ dependencies = [
  "smallvec",
  "sys-locale",
  "tempfile",
+ "usvg 0.46.0",
  "winresource",
 ]
 

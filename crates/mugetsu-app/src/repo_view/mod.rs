@@ -23,6 +23,7 @@ mod shimmer;
 mod sidebar;
 mod stack_panel;
 mod stats_panel;
+mod svg_preview;
 mod toolbar;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -205,6 +206,8 @@ pub struct RepoView {
     selected_change: Option<SelectedChange>,
     change_diff: Entity<DiffState>,
     change_hunks: Option<FileDiff>,
+    /// Rendered before/after of the selected change when it is an SVG.
+    change_svg: Option<svg_preview::SvgPreview>,
     message: Entity<TextareaState>,
     amend: bool,
     /// Three-pane resolver on the selected conflicted file.
@@ -394,6 +397,7 @@ impl RepoView {
             selected_change: None,
             change_diff,
             change_hunks: None,
+            change_svg: None,
             message,
             amend: false,
             conflict: None,
