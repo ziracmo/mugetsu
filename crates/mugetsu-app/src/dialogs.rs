@@ -5,10 +5,12 @@ use std::rc::Rc;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::v_flex;
 use gpui_kit::{
-    AppContext as _, Context, Focusable as _, ParentElement as _, Styled as _, Window, px,
+    AppContext as _, Context, Focusable as _, ParentElement as _, Styled as _, Window, div, px,
 };
 
 use crate::i18n::tr;
@@ -80,6 +82,61 @@ pub fn confirm<T: 'static>(
             .cancel_text(tr("Annuler", "Cancel"))
             .on_ok(move |_, window, cx| {
                 let _ = view.update(cx, |this, cx| action(this, window, cx));
+                true
+            })
+    });
+}
+
+/// Like [`confirm`], with a checkbox under the description; `action` gets
+/// whether it is ticked.
+#[allow(clippy::too_many_arguments)]
+pub fn confirm_with_option<T: 'static>(
+    title: String,
+    description: String,
+    option: String,
+    checked: bool,
+    ok: &'static str,
+    action: impl Fn(&mut T, bool, &mut Window, &mut Context<T>) + 'static,
+    window: &mut Window,
+    cx: &mut Context<T>,
+) {
+    let view = cx.entity().downgrade();
+    let action = Rc::new(action);
+    let ticked = Rc::new(Cell::new(checked));
+    window.open_dialog(cx, move |dialog, _, _| {
+        let (view, action, toggle, read) =
+            (view.clone(), action.clone(), ticked.clone(), ticked.clone());
+        dialog
+            .bg(crate::theme::sheet())
+            .title(title.clone())
+            .w(px(460.))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(crate::theme::muted())
+                            .child(description.clone()),
+                    )
+                    .child(
+                        Checkbox::new("confirm-option")
+                            .label(option.clone())
+                            .checked(ticked.get())
+                            .on_click(move |on: &bool, window, _| {
+                                toggle.set(*on);
+                                window.refresh();
+                            }),
+                    ),
+            )
+            .footer(
+                DialogFooter::new()
+                    .child(DialogClose::new().trigger(|b| b.ghost().label(tr("Annuler", "Cancel"))))
+                    .child(DialogAction::new().child(Button::new("confirm-ok").danger().label(ok))),
+            )
+            .on_ok(move |_, window, cx| {
+                let on = read.get();
+                let _ = view.update(cx, |this, cx| action(this, on, window, cx));
                 true
             })
     });

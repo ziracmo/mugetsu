@@ -1148,6 +1148,42 @@ fn an_unmerged_branch_is_only_deleted_when_forced(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn deleting_a_remote_branch_can_delete_its_local_copy_too(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(remote.path(), &["init", "-q", "--bare"]);
+    git(
+        dir.path(),
+        &["remote", "add", "origin", remote.path().to_str().unwrap()],
+    );
+    git(dir.path(), &["push", "-q", "-u", "origin", "feature"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.read(|cx| {
+        let v = view.read(cx);
+        assert_eq!(
+            v.local_twin("origin", "feature").as_deref(),
+            Some("feature")
+        );
+        assert_eq!(v.local_twin("origin", "main"), None, "checked out");
+    });
+    ui_step(cx, handle, &|window, cx| {
+        view.update(cx, |v, cx| {
+            v.request_delete_remote_branch("origin".into(), "feature".into(), window, cx)
+        })
+    });
+    ui_step(cx, handle, &|window, cx| window.click("confirm-option", cx));
+    ui_step(cx, handle, &|window, cx| window.click("confirm-ok", cx));
+    settle(cx, &view);
+    assert!(git(remote.path(), &["branch", "--list", "feature"]).is_empty());
+    assert!(
+        !git(dir.path(), &["branch", "--list", "feature"]).contains("feature"),
+        "the local copy went too"
+    );
+}
+
+#[gpui_kit::test]
 fn f_key_jumps_to_head_and_shimmers_it(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();

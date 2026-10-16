@@ -400,6 +400,36 @@ impl Render for SettingsView {
                     "Enregistrés dans ~/.gitconfig (user.name, user.email), pour tous les dépôts.",
                     "Saved to ~/.gitconfig (user.name, user.email), for every repository.",
                 )),
+                row(
+                    tr("Supprimer sans demander", "Delete without asking"),
+                    v_flex()
+                        .gap_2p5()
+                        .child(
+                            Switch::new("force-delete-local")
+                                .checked(current.force_delete.local)
+                                .color(theme::accent())
+                                .label(tr("Branches locales", "Local branches"))
+                                .on_click(|on: &bool, _, cx| {
+                                    let on = *on;
+                                    settings::update(cx, |s| s.force_delete.local = on)
+                                }),
+                        )
+                        .child(
+                            Switch::new("force-delete-remote")
+                                .checked(current.force_delete.remote)
+                                .color(theme::accent())
+                                .label(tr("Branches distantes", "Remote branches"))
+                                .on_click(|on: &bool, _, cx| {
+                                    let on = *on;
+                                    settings::update(cx, |s| s.force_delete.remote = on)
+                                }),
+                        ),
+                )
+                .into_any_element(),
+                hint(tr(
+                    "Une branche locale est alors forcée (git branch -D), même non mergée.",
+                    "A local branch is then forced (git branch -D), even unmerged.",
+                )),
             ],
             Section::Appearance => vec![
                 row(
