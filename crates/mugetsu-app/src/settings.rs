@@ -81,6 +81,8 @@ pub struct Settings {
     pub intro_seen: bool,
     /// History shows one row per branch instead of every commit.
     pub history_compact: bool,
+    /// History shows the commit details beside the list instead of below it.
+    pub details_side: bool,
     /// AI tool launched by a PR's "Review with AI".
     pub ai_tool: AiTool,
     /// Shell command run in a terminal for that review; see [`crate::ai_review`].
@@ -231,6 +233,7 @@ impl Default for Settings {
             pr_chips: PrFilter::All,
             intro_seen: false,
             history_compact: false,
+            details_side: false,
             ai_tool: AiTool::Claude,
             ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),
             ai_terminal: AiTerminal::System,

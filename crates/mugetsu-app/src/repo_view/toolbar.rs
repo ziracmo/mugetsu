@@ -512,6 +512,35 @@ impl RepoView {
                         })
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_compact(cx))),
                 )
+                .child({
+                    let side = self.details_side;
+                    h_flex()
+                        .id("toggle-details-side")
+                        .test_support()
+                        .size(px(26.))
+                        .justify_center()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .text_color(theme::muted())
+                        .hover(|s| s.bg(theme::raised()))
+                        .child(
+                            Icon::new(if side {
+                                Lucide::PanelBottom
+                            } else {
+                                Lucide::PanelRight
+                            })
+                            .small(),
+                        )
+                        .tooltip(move |window, cx| {
+                            Tooltip::new(if side {
+                                tr("Détails du commit en bas", "Commit details below")
+                            } else {
+                                tr("Détails du commit à droite", "Commit details on the right")
+                            })
+                            .build(window, cx)
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_details_side(cx)))
+                })
             })
             .child(div().flex_1())
             .child(self.fetch_button(cx))

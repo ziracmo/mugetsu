@@ -64,6 +64,7 @@ gpui_kit::actions!(
         Stash,
         RevealHead,
         ToggleCompact,
+        ToggleDetailsSide,
         SearchCommits,
         CloseSearch,
         CheckoutBranch,
@@ -275,6 +276,8 @@ pub struct RepoView {
     /// History as one row per branch (see `compact`).
     compact: bool,
     compact_seq: usize,
+    /// Commit details beside the history instead of below it.
+    details_side: bool,
     compact_cache: Option<(Arc<RepoData>, Arc<Vec<compact::BranchSummary>>)>,
     /// Head of a PR in the stack shown by `Mode::Stack`.
     stack_focus: Option<String>,
@@ -439,6 +442,7 @@ impl RepoView {
             pr_list: Arc::default(),
             compact: crate::settings::get().history_compact,
             compact_seq: 0,
+            details_side: crate::settings::get().details_side,
             compact_cache: None,
             stack_focus: None,
             stack_seq: 0,
@@ -463,6 +467,9 @@ impl RepoView {
                 if order != this.commit_order {
                     this.commit_order = order;
                     this.reload(cx);
+                }
+                if !cfg!(test) {
+                    this.details_side = crate::settings::get().details_side;
                 }
                 cx.notify();
             }),
@@ -1351,6 +1358,11 @@ impl RepoView {
     }
 
     #[cfg(test)]
+    pub fn details_side(&self) -> bool {
+        self.details_side
+    }
+
+    #[cfg(test)]
     pub fn op_flash(&self) -> Option<(&'static str, bool)> {
         self.op_flash.map(|(l, ok, _)| (l, ok))
     }
@@ -1505,36 +1517,46 @@ impl Render for RepoView {
                 .into_any_element()
         } else {
             let main = match self.mode {
-                Mode::History => v_resizable("history-split")
-                    .child(resizable_panel().size_range(rem * 8. ..rem * 400.).child(
-                        if self.compact {
-                            self.render_compact(cx)
-                        } else if self.compact_seq > 0 {
-                            // Back from the compact view: the list eases in.
-                            let seq = self.compact_seq;
-                            div()
-                                .size_full()
-                                .child(self.render_history(window, cx))
-                                .with_animation(
-                                    ("history-in", seq),
-                                    gpui_kit::Animation::new(std::time::Duration::from_millis(380)),
-                                    |el, t| {
-                                        let k = 1. - (1. - t).powi(3);
-                                        el.opacity(k).mt(gpui_kit::px(12. * (1. - k)))
-                                    },
-                                )
-                                .into_any_element()
-                        } else {
-                            self.render_history(window, cx).into_any_element()
-                        },
-                    ))
-                    .child(
-                        resizable_panel()
-                            .size(rem * 22.)
-                            .size_range(rem * 8. ..rem * 400.)
-                            .child(self.render_commit_details(cx)),
-                    )
-                    .into_any_element(),
+                Mode::History => {
+                    let side = self.details_side;
+                    let split = if side {
+                        h_resizable("history-split-side")
+                    } else {
+                        v_resizable("history-split")
+                    };
+                    split
+                        .child(resizable_panel().size_range(rem * 8. ..rem * 400.).child(
+                            if self.compact {
+                                self.render_compact(cx)
+                            } else if self.compact_seq > 0 {
+                                // Back from the compact view: the list eases in.
+                                let seq = self.compact_seq;
+                                div()
+                                    .size_full()
+                                    .child(self.render_history(window, cx))
+                                    .with_animation(
+                                        ("history-in", seq),
+                                        gpui_kit::Animation::new(std::time::Duration::from_millis(
+                                            380,
+                                        )),
+                                        |el, t| {
+                                            let k = 1. - (1. - t).powi(3);
+                                            el.opacity(k).mt(gpui_kit::px(12. * (1. - k)))
+                                        },
+                                    )
+                                    .into_any_element()
+                            } else {
+                                self.render_history(window, cx).into_any_element()
+                            },
+                        ))
+                        .child(
+                            resizable_panel()
+                                .size(rem * if side { 36. } else { 22. })
+                                .size_range(rem * if side { 20. } else { 8. }..rem * 400.)
+                                .child(self.render_commit_details(cx)),
+                        )
+                        .into_any_element()
+                }
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
                 Mode::Stats | Mode::Stack | Mode::Pr => div()
                     .size_full()
@@ -1630,6 +1652,10 @@ impl Render for RepoView {
             .on_action(cx.listener(|this, _: &ToggleCompact, _, cx| {
                 this.set_mode(Mode::History, cx);
                 this.toggle_compact(cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleDetailsSide, _, cx| {
+                this.set_mode(Mode::History, cx);
+                this.toggle_details_side(cx)
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &SearchCommits, window, cx| {

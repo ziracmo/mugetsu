@@ -1218,6 +1218,17 @@ pub fn entries(ws: &Workspace, window: &Window, cx: &App) -> Vec<Entry> {
                 "compact branches résumé",
             ),
             a(
+                "toggle-details-side",
+                tr(
+                    "Détails du commit à droite / en bas",
+                    "Commit Details Right / Bottom",
+                ),
+                Lucide::PanelRight,
+                Box::new(repo::ToggleDetailsSide),
+                r,
+                "details détails panneau côté bas layout disposition",
+            ),
+            a(
                 "toggle-sidebar",
                 tr("Barre latérale", "Toggle Sidebar"),
                 Lucide::PanelLeft,

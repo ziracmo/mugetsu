@@ -650,10 +650,11 @@ impl RepoView {
             .map_or((message.to_string(), String::new()), |(s, b)| {
                 (s.to_string(), b.trim().to_string())
             });
+        let side = self.details_side;
         v_flex()
             .size_full()
             .min_h_0()
-            .border_t_1()
+            .map(|s| if side { s.border_l_1() } else { s.border_t_1() })
             .border_color(cx.theme().border)
             .child(
                 v_flex()
@@ -738,7 +739,10 @@ impl RepoView {
                     ),
             )
             .child(
-                h_flex()
+                // Beside the history the panel is narrow: files go above the diff.
+                div()
+                    .flex()
+                    .map(|s| if side { s.flex_col() } else { s.flex_row() })
                     .flex_1()
                     .min_h_0()
                     .when(self.commit_files > 0, |s| {
