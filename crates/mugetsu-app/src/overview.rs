@@ -47,8 +47,60 @@ pub struct RepoCard {
     pub changes_requested: usize,
     pub ready: usize,
     pub my_prs: usize,
+    /// My open PRs, most pressing first.
+    pub mine: Vec<PrLine>,
+    /// Open PRs waiting for my review.
+    pub to_review: Vec<PrLine>,
     /// Commits per day over the last month (the sidebar's pulse).
     pub pulse: Arc<Vec<u32>>,
+}
+
+/// A pull request as the overview lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrLine {
+    pub number: u64,
+    pub title: String,
+    pub mark: PrMark,
+}
+
+/// Where a PR stands, most pressing first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PrMark {
+    Failing,
+    ChangesRequested,
+    Ready,
+    Pending,
+    Open,
+    Draft,
+}
+
+impl PrMark {
+    fn look(self) -> (Lucide, Hsla, &'static str) {
+        match self {
+            PrMark::Failing => (Lucide::CircleX, theme::red(), tr("CI rouge", "CI failing")),
+            PrMark::ChangesRequested => (
+                Lucide::MessageSquareWarning,
+                theme::amber(),
+                tr("changements demandés", "changes requested"),
+            ),
+            PrMark::Ready => (
+                Lucide::GitMerge,
+                theme::lime(),
+                tr("prête à merger", "ready to merge"),
+            ),
+            PrMark::Pending => (
+                Lucide::CircleDashed,
+                theme::amber(),
+                tr("CI en cours", "CI running"),
+            ),
+            PrMark::Open => (Lucide::GitPullRequest, ink2(), tr("ouverte", "open")),
+            PrMark::Draft => (
+                Lucide::GitPullRequestDraft,
+                faint(),
+                tr("brouillon", "draft"),
+            ),
+        }
+    }
 }
 
 /// Where a signal leads in the repository tab.
@@ -187,14 +239,19 @@ impl RepoCard {
     }
 }
 
-/// Signals shown per card before "+n".
-const SHOWN: usize = 5;
-
 fn level_color(level: Level) -> Hsla {
     match level {
         Level::Alert => theme::red(),
         Level::Act => theme::amber(),
         Level::Note => theme::muted(),
+    }
+}
+
+fn level_title(level: Level) -> &'static str {
+    match level {
+        Level::Alert => tr("Bloquant", "Blocking"),
+        Level::Act => tr("À traiter", "To act on"),
+        Level::Note => tr("À noter", "Worth a look"),
     }
 }
 
@@ -208,7 +265,11 @@ fn faint() -> Hsla {
     theme::alpha(gpui_kit::white(), 0.42)
 }
 
-/// The whole window below the title bar: header, totals, the cards.
+/// Repositories per row (workspaces rarely hold more).
+const PER_ROW: usize = 4;
+
+/// The whole window below the title bar: header, a tile per repository,
+/// then everything to do across them and the pull requests.
 pub fn render(cards: &[RepoCard], workspace: &str, cx: &mut Context<Workspace>) -> AnyElement {
     let signals: Vec<Vec<Signal>> = cards.iter().map(RepoCard::signals).collect();
     let count = |level: Level| {
@@ -220,167 +281,147 @@ pub fn render(cards: &[RepoCard], workspace: &str, cx: &mut Context<Workspace>) 
     };
     let (alerts, acts) = (count(Level::Alert), count(Level::Act));
     let calm = signals.iter().filter(|s| s.is_empty()).count();
-    let summary = if cards.is_empty() {
-        tr(
-            "Aucun dépôt ouvert dans ce workspace.",
-            "No repository open in this workspace.",
-        )
-        .to_string()
-    } else if alerts + acts == 0 {
-        tr(
-            "Rien ne bloque : tout est à jour.",
-            "Nothing blocking: all up to date.",
-        )
-        .to_string()
-    } else {
-        [
-            (alerts > 0).then(|| trf!("{alerts} urgence(s)", "{alerts} urgent")),
-            (acts > 0).then(|| trf!("{acts} action(s)", "{acts} to act on")),
-            (calm > 0).then(|| trf!("{calm} dépôt(s) au calme", "{calm} calm repo(s)")),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" · ")
+    let chip = |color: Hsla, text: String| {
+        h_flex()
+            .gap_1p5()
+            .px_2p5()
+            .py_0p5()
+            .rounded_full()
+            .border_1()
+            .border_color(theme::hairline())
+            .bg(theme::alpha(gpui_kit::white(), 0.03))
+            .text_xs()
+            .text_color(ink2())
+            .child(div().size(px(6.)).rounded_full().bg(color))
+            .child(text)
     };
+    let chips = h_flex()
+        .id("overview-summary")
+        .test_support()
+        .gap_2()
+        .when(cards.is_empty(), |s| {
+            s.child(div().text_sm().text_color(faint()).child(tr(
+                "Aucun dépôt ouvert dans ce workspace.",
+                "No repository open in this workspace.",
+            )))
+        })
+        .when(alerts > 0, |s| {
+            s.child(chip(
+                theme::red(),
+                trf!("{alerts} bloquant(s)", "{alerts} blocking"),
+            ))
+        })
+        .when(acts > 0, |s| {
+            s.child(chip(
+                theme::amber(),
+                trf!("{acts} à traiter", "{acts} to act on"),
+            ))
+        })
+        .when(calm > 0, |s| {
+            s.child(chip(theme::lime(), trf!("{calm} au calme", "{calm} calm")))
+        });
     let header = h_flex()
         .w_full()
-        .px_6()
-        .pt_5()
-        .pb_4()
-        .gap_3()
-        .items_end()
+        .px_8()
+        .pt_6()
+        .pb_5()
+        .gap_4()
+        .items_center()
         .child(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .gap_0p5()
+                .gap_2()
                 .child(
-                    div()
-                        .text_xl()
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .text_color(ink())
-                        .child(workspace.to_string()),
+                    h_flex()
+                        .gap_2()
+                        .items_baseline()
+                        .child(
+                            div()
+                                .text_2xl()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .text_color(ink())
+                                .child(workspace.to_string()),
+                        )
+                        .child(div().text_sm().text_color(faint()).child(trf!(
+                            "{} dépôt(s)",
+                            "{} repositories",
+                            cards.len()
+                        ))),
                 )
-                .child(
-                    div()
-                        .id("overview-summary")
-                        .test_support()
-                        .text_sm()
-                        .text_color(faint())
-                        .child(summary),
-                ),
+                .child(chips),
         )
         .child(
             Button::new("overview-recap")
                 .primary()
-                .small()
                 .icon(Icon::new(Lucide::Sparkles))
                 .label(tr("Recap de la semaine", "Weekly recap"))
                 .disabled(cards.is_empty())
                 .on_click(cx.listener(|ws, _, window, cx| ws.open_recap(window, cx))),
         );
-    let grid = h_flex()
-        .w_full()
-        .flex_wrap()
-        .items_start()
-        .gap_4()
-        .children(
-            cards
-                .iter()
-                .zip(signals)
-                .enumerate()
-                .map(|(i, (card, signals))| render_card(i, card, signals, cx)),
-        );
+
+    // Tiles: equal columns filling the width, PER_ROW at most per row.
+    let mut rows: Vec<AnyElement> = Vec::new();
+    for (r, chunk) in cards.chunks(PER_ROW).enumerate() {
+        let mut row = h_flex().w_full().gap_4().items_stretch();
+        for (j, card) in chunk.iter().enumerate() {
+            let i = r * PER_ROW + j;
+            row = row.child(tile(i, card, &signals[i], cx));
+        }
+        // Keep columns aligned on a short last row.
+        for _ in chunk.len()..PER_ROW.min(cards.len()) {
+            row = row.child(div().flex_1());
+        }
+        rows.push(row.into_any_element());
+    }
+
+    let todo = todo_panel(cards, &signals, cx);
+    let prs = prs_panel(cards, cx);
     v_flex()
         .id("overview")
         .test_support()
         .size_full()
         .overflow_y_scroll()
         .child(header)
-        .child(div().h(px(1.)).w_full().flex_none().bg(theme::hairline()))
-        .child(div().w_full().px_6().pt_5().pb_8().child(grid))
+        .child(
+            v_flex()
+                .w_full()
+                .px_8()
+                .pb_8()
+                .gap_4()
+                .children(rows)
+                .child(
+                    h_flex()
+                        .w_full()
+                        .gap_4()
+                        .items_stretch()
+                        .child(v_flex().flex_1().min_w_0().child(todo))
+                        .child(v_flex().flex_1().min_w_0().child(prs)),
+                ),
+        )
         .into_any_element()
 }
 
-fn render_card(
-    index: usize,
-    card: &RepoCard,
-    signals: Vec<Signal>,
-    cx: &mut Context<Workspace>,
+/// A glass panel with a title row, like the Stats view's.
+fn panel(
+    id: &'static str,
+    icon: Lucide,
+    title: &'static str,
+    count: usize,
+    body: impl IntoElement,
 ) -> AnyElement {
-    let emoji = crate::settings::get().repo_icons.get(&card.root).cloned();
-    let worst = signals.first().map(|s| s.level());
-    let rim = worst.map_or(theme::hairline(), |l| theme::alpha(level_color(l), 0.45));
-    let more = signals.len().saturating_sub(SHOWN);
-    let rows: Vec<AnyElement> = if signals.is_empty() {
-        vec![
-            h_flex()
-                .gap_2()
-                .px_2()
-                .py_1()
-                .text_sm()
-                .text_color(ink2())
-                .child(
-                    Icon::new(Lucide::CircleCheck)
-                        .small()
-                        .text_color(theme::lime()),
-                )
-                .child(tr("Rien à faire", "Nothing to do"))
-                .into_any_element(),
-        ]
-    } else {
-        signals
-            .into_iter()
-            .take(SHOWN)
-            .enumerate()
-            .map(|(j, s)| {
-                let target = s.target();
-                h_flex()
-                    .id(SharedString::from(format!("overview-signal-{index}-{j}")))
-                    .test_support()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .text_sm()
-                    .text_color(ink2())
-                    .cursor_pointer()
-                    .hover(|st| st.bg(theme::raised()).text_color(ink()))
-                    .child(
-                        Icon::new(s.icon())
-                            .small()
-                            .text_color(level_color(s.level())),
-                    )
-                    .child(div().flex_1().min_w_0().truncate().child(s.text()))
-                    .child(Icon::new(Lucide::ChevronRight).xsmall().text_color(faint()))
-                    .on_click(cx.listener(move |ws, _, _, cx| {
-                        cx.stop_propagation();
-                        ws.open_from_overview(index, Some(target), cx);
-                    }))
-                    .into_any_element()
-            })
-            .collect()
-    };
-    let initial = card
-        .name
-        .chars()
-        .next()
-        .unwrap_or('?')
-        .to_uppercase()
-        .to_string();
     v_flex()
-        .id(SharedString::from(format!("overview-card-{}", card.name)))
+        .id(id)
         .test_support()
-        .w(px(320.))
+        .w_full()
+        .flex_1()
+        .min_h(px(260.))
         .relative()
         .rounded_xl()
         .border_1()
-        .border_color(rim)
+        .border_color(theme::hairline())
         .bg(theme::alpha(gpui_kit::white(), 0.028))
         .overflow_hidden()
-        .cursor_pointer()
-        .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.05)))
         .child(
             div()
                 .absolute()
@@ -395,26 +436,108 @@ fn render_card(
                 .px_4()
                 .pt_3()
                 .pb_2()
-                .gap_2p5()
+                .gap_2()
+                .child(Icon::new(icon).small().text_color(faint()))
                 .child(
                     div()
-                        .flex_none()
-                        .size(px(30.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_lg()
-                        .bg(theme::alpha(gpui_kit::white(), 0.06))
-                        .child(match &emoji {
-                            Some(e) => crate::repo_icon::view(e, 18.),
-                            None => div()
-                                .text_sm()
-                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                .text_color(ink2())
-                                .child(initial)
-                                .into_any_element(),
-                        }),
+                        .flex_1()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(ink())
+                        .child(title),
                 )
+                .when(count > 0, |s| {
+                    s.child(div().text_xs().text_color(faint()).child(count.to_string()))
+                }),
+        )
+        .child(body)
+        .into_any_element()
+}
+
+fn repo_badge(card: &RepoCard, size: f32) -> AnyElement {
+    let emoji = crate::settings::get().repo_icons.get(&card.root).cloned();
+    let initial = card
+        .name
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string();
+    div()
+        .flex_none()
+        .size(px(size))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_lg()
+        .bg(theme::alpha(gpui_kit::white(), 0.06))
+        .child(match emoji {
+            Some(e) => crate::repo_icon::view(&e, size * 0.6),
+            None => div()
+                .text_sm()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(ink2())
+                .child(initial)
+                .into_any_element(),
+        })
+        .into_any_element()
+}
+
+/// One repository: name, branch and sync state, its month of commits, a
+/// health pill. Clicking opens its tab.
+fn tile(
+    index: usize,
+    card: &RepoCard,
+    signals: &[Signal],
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
+    let worst = signals.first().map(|s| s.level());
+    let (pill_color, pill) = match worst {
+        Some(Level::Alert) => (theme::red(), tr("Bloqué", "Blocked")),
+        Some(Level::Act) => (theme::amber(), tr("À traiter", "To act on")),
+        _ => (theme::lime(), tr("À jour", "Up to date")),
+    };
+    let stat = |icon: Lucide, value: String, color: Hsla| {
+        h_flex()
+            .gap_1()
+            .text_xs()
+            .text_color(color)
+            .child(Icon::new(icon).xsmall())
+            .child(value)
+    };
+    let commits: u32 = card.pulse.iter().sum();
+    v_flex()
+        .id(SharedString::from(format!("overview-card-{}", card.name)))
+        .test_support()
+        .flex_1()
+        .min_w_0()
+        .relative()
+        .p_4()
+        .gap_3()
+        .rounded_xl()
+        .border_1()
+        .border_color(theme::hairline())
+        .bg(theme::alpha(gpui_kit::white(), 0.028))
+        .overflow_hidden()
+        .cursor_pointer()
+        .hover(|s| {
+            s.bg(theme::alpha(gpui_kit::white(), 0.05))
+                .border_color(theme::glass_edge())
+        })
+        // Health on the top rim.
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(px(2.))
+                .bg(theme::alpha(pill_color, 0.7)),
+        )
+        .child(
+            h_flex()
+                .gap_2p5()
+                .child(repo_badge(card, 32.))
                 .child(
                     v_flex()
                         .flex_1()
@@ -422,7 +545,6 @@ fn render_card(
                         .child(
                             div()
                                 .truncate()
-                                .text_sm()
                                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                 .text_color(ink())
                                 .child(card.name.clone()),
@@ -433,56 +555,274 @@ fn render_card(
                                 .text_xs()
                                 .text_color(faint())
                                 .child(Icon::new(Lucide::GitBranch).xsmall())
-                                .child(div().min_w_0().truncate().child(card.branch.clone()))
-                                .when(card.my_prs > 0, |s| {
-                                    s.child("·").child(trf!(
-                                        "{} PR à toi",
-                                        "{} PR(s) of yours",
-                                        card.my_prs
-                                    ))
-                                }),
+                                .child(div().min_w_0().truncate().child(card.branch.clone())),
                         ),
                 )
-                .child(pulse(index, &card.pulse)),
+                .child(
+                    div()
+                        .flex_none()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_full()
+                        .bg(theme::alpha(pill_color, 0.14))
+                        .text_xs()
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .text_color(pill_color)
+                        .child(pill),
+                ),
         )
-        .child(v_flex().px_2().pb_3().children(rows).when(more > 0, |s| {
-            s.child(
-                div()
-                    .pt_0p5()
-                    .text_xs()
-                    .text_color(faint())
-                    .child(trf!("+{more} autre(s)", "+{more} more")),
-            )
-        }))
+        .child(pulse(index, &card.pulse))
+        .child(
+            h_flex()
+                .gap_3()
+                .flex_wrap()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(faint())
+                        .child(trf!("{commits} commits / 30 j", "{commits} commits / 30 d")),
+                )
+                .child(div().flex_1())
+                .when(card.behind > 0, |s| {
+                    s.child(stat(
+                        Lucide::ArrowDownToLine,
+                        card.behind.to_string(),
+                        theme::amber(),
+                    ))
+                })
+                .when(card.ahead > 0, |s| {
+                    s.child(stat(
+                        Lucide::ArrowUpFromLine,
+                        card.ahead.to_string(),
+                        ink2(),
+                    ))
+                })
+                .when(card.dirty > 0, |s| {
+                    s.child(stat(Lucide::Pencil, card.dirty.to_string(), theme::amber()))
+                })
+                .when(card.my_prs > 0, |s| {
+                    s.child(stat(
+                        Lucide::GitPullRequest,
+                        card.my_prs.to_string(),
+                        ink2(),
+                    ))
+                }),
+        )
         .on_click(cx.listener(move |ws, _, _, cx| ws.open_from_overview(index, None, cx)))
         .into_any_element()
 }
 
-/// Last two weeks of commits, as small rising bars.
+/// Everything to do across the repositories, grouped by urgency.
+fn todo_panel(
+    cards: &[RepoCard],
+    signals: &[Vec<Signal>],
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
+    let total: usize = signals.iter().map(Vec::len).sum();
+    let mut body = v_flex().px_2().pb_2();
+    if total == 0 {
+        body = body.child(empty(
+            Lucide::CircleCheck,
+            theme::lime(),
+            tr("Rien à faire. Bon code !", "Nothing to do. Happy coding!"),
+        ));
+    }
+    for level in [Level::Alert, Level::Act, Level::Note] {
+        let items: Vec<(usize, usize, Signal)> = signals
+            .iter()
+            .enumerate()
+            .flat_map(|(i, list)| {
+                list.iter()
+                    .enumerate()
+                    .filter(|(_, s)| s.level() == level)
+                    .map(move |(j, s)| (i, j, *s))
+            })
+            .collect();
+        if items.is_empty() {
+            continue;
+        }
+        body = body.child(
+            div()
+                .px_2()
+                .pt_2()
+                .pb_1()
+                .text_xs()
+                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                .text_color(level_color(level))
+                .child(level_title(level)),
+        );
+        for (i, j, s) in items {
+            let target = s.target();
+            body = body.child(
+                h_flex()
+                    .id(SharedString::from(format!("overview-signal-{i}-{j}")))
+                    .test_support()
+                    .gap_2p5()
+                    .px_2()
+                    .py_1p5()
+                    .rounded_md()
+                    .text_sm()
+                    .text_color(ink2())
+                    .cursor_pointer()
+                    .hover(|st| st.bg(theme::raised()).text_color(ink()))
+                    .child(Icon::new(s.icon()).small().text_color(level_color(level)))
+                    .child(div().flex_1().min_w_0().truncate().child(s.text()))
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(px(160.))
+                            .truncate()
+                            .px_1p5()
+                            .rounded_sm()
+                            .bg(theme::alpha(gpui_kit::white(), 0.05))
+                            .text_xs()
+                            .text_color(faint())
+                            .child(cards[i].name.clone()),
+                    )
+                    .child(Icon::new(Lucide::ChevronRight).xsmall().text_color(faint()))
+                    .on_click(
+                        cx.listener(move |ws, _, _, cx| ws.open_from_overview(i, Some(target), cx)),
+                    ),
+            );
+        }
+    }
+    panel(
+        "overview-todo",
+        Lucide::ListOrdered,
+        tr("À faire", "To do"),
+        total,
+        body,
+    )
+}
+
+/// My open PRs with their state, then the ones waiting for my review.
+fn prs_panel(cards: &[RepoCard], cx: &mut Context<Workspace>) -> AnyElement {
+    let mine: Vec<(usize, &PrLine)> = cards
+        .iter()
+        .enumerate()
+        .flat_map(|(i, c)| c.mine.iter().map(move |p| (i, p)))
+        .collect();
+    let reviews: Vec<(usize, &PrLine)> = cards
+        .iter()
+        .enumerate()
+        .flat_map(|(i, c)| c.to_review.iter().map(move |p| (i, p)))
+        .collect();
+    let row = |key: &'static str, n: usize, i: usize, p: &PrLine, cx: &mut Context<Workspace>| {
+        let (icon, color, label) = p.mark.look();
+        h_flex()
+            .id(SharedString::from(format!("overview-{key}-{n}")))
+            .gap_2p5()
+            .px_2()
+            .py_1p5()
+            .rounded_md()
+            .text_sm()
+            .cursor_pointer()
+            .hover(|st| st.bg(theme::raised()))
+            .child(Icon::new(icon).small().text_color(color))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().truncate().text_color(ink()).child(p.title.clone()))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_xs()
+                            .text_color(faint())
+                            .child(format!("{} #{} · {label}", cards[i].name, p.number)),
+                    ),
+            )
+            .on_click(
+                cx.listener(move |ws, _, _, cx| ws.open_from_overview(i, Some(Target::Prs), cx)),
+            )
+            .into_any_element()
+    };
+    let mut body = v_flex().px_2().pb_2();
+    if mine.is_empty() && reviews.is_empty() {
+        body = body.child(empty(
+            Lucide::GitPullRequest,
+            faint(),
+            tr(
+                "Aucune PR ouverte à toi ni en attente de ta review.",
+                "No open PR of yours nor waiting for your review.",
+            ),
+        ));
+    }
+    let heading = |text: &'static str| {
+        div()
+            .px_2()
+            .pt_2()
+            .pb_1()
+            .text_xs()
+            .font_weight(gpui_kit::FontWeight::MEDIUM)
+            .text_color(faint())
+            .child(text)
+    };
+    if !mine.is_empty() {
+        body = body.child(heading(tr("Tes PR", "Your PRs")));
+        for (n, (i, p)) in mine.iter().enumerate() {
+            body = body.child(row("mine", n, *i, p, cx));
+        }
+    }
+    if !reviews.is_empty() {
+        body = body.child(heading(tr(
+            "Ta review est demandée",
+            "Your review is requested",
+        )));
+        for (n, (i, p)) in reviews.iter().enumerate() {
+            body = body.child(row("review", n, *i, p, cx));
+        }
+    }
+    panel(
+        "overview-prs",
+        Lucide::GitPullRequest,
+        tr("Pull requests", "Pull requests"),
+        mine.len() + reviews.len(),
+        body,
+    )
+}
+
+fn empty(icon: Lucide, color: Hsla, text: &'static str) -> AnyElement {
+    h_flex()
+        .gap_2()
+        .px_2()
+        .py_3()
+        .text_sm()
+        .text_color(ink2())
+        .child(Icon::new(icon).small().text_color(color))
+        .child(text)
+        .into_any_element()
+}
+
+/// The last month of commits, one column per day, rising in turn.
 fn pulse(index: usize, days: &[u32]) -> AnyElement {
-    let days: Vec<u32> = days.iter().rev().take(14).rev().copied().collect();
     let max = days.iter().copied().max().unwrap_or(0).max(1) as f32;
     let n = days.len();
     h_flex()
-        .flex_none()
-        .h(px(24.))
-        .w(px(56.))
+        .w_full()
+        .h(px(64.))
         .items_end()
-        .gap(px(1.5))
-        .children(days.into_iter().enumerate().map(move |(i, v)| {
-            let h = (v as f32 / max).max(0.08);
+        .gap(px(2.))
+        .children(days.iter().copied().enumerate().map(move |(i, v)| {
+            let h = if v == 0 {
+                0.04
+            } else {
+                (v as f32 / max).max(0.12)
+            };
             div()
                 .flex_1()
-                .h(relative(h))
-                .rounded_t(px(1.))
+                .rounded_t(px(1.5))
                 .bg(if i + 1 == n {
                     theme::accent()
+                } else if v == 0 {
+                    theme::alpha(gpui_kit::white(), 0.06)
                 } else {
-                    theme::alpha(gpui_kit::white(), 0.2)
+                    theme::alpha(theme::accent(), 0.45)
                 })
+                .h(relative(0.))
                 .with_animation(
-                    ("overview-pulse", index * 32 + i),
-                    Animation::new(Duration::from_millis(500 + i as u64 * 25))
+                    ("overview-pulse", index * 64 + i),
+                    Animation::new(Duration::from_millis(500 + i as u64 * 12))
                         .with_easing(gpui_kit::ease_out_quint()),
                     move |el, t| el.h(relative(h * t)),
                 )

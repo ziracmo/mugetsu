@@ -4,7 +4,7 @@ use gpui_kit::Context;
 use mugetsu_forge::{CheckState, PrState, ReviewDecision};
 
 use super::{Mode, RepoView, SidebarTab, pr_panel};
-use crate::overview::{RepoCard, Target};
+use crate::overview::{PrLine, PrMark, RepoCard, Target};
 
 impl RepoView {
     /// This repository's card in the overview, from what the tab holds.
@@ -18,6 +18,35 @@ impl RepoView {
             .filter(|p| me.is_some_and(|me| p.author == me))
             .collect();
         let status = |p: &&&mugetsu_forge::PullRequest| p.status.clone().unwrap_or_default();
+        let line = |p: &mugetsu_forge::PullRequest, mark| PrLine {
+            number: p.number,
+            title: p.title.clone(),
+            mark,
+        };
+        let mut my_lines: Vec<PrLine> = self
+            .pr_list
+            .iter()
+            .filter(|p| matches!(p.state, PrState::Open | PrState::Draft))
+            .filter(|p| me.is_some_and(|me| p.author == me))
+            .map(|p| {
+                let s = p.status.clone().unwrap_or_default();
+                let mark = if p.state == PrState::Draft {
+                    PrMark::Draft
+                } else if s.checks == Some(CheckState::Failing) {
+                    PrMark::Failing
+                } else if s.review == Some(ReviewDecision::ChangesRequested) {
+                    PrMark::ChangesRequested
+                } else if s.checks == Some(CheckState::Pending) {
+                    PrMark::Pending
+                } else if s.review == Some(ReviewDecision::Approved) {
+                    PrMark::Ready
+                } else {
+                    PrMark::Open
+                };
+                line(p, mark)
+            })
+            .collect();
+        my_lines.sort_by_key(|l| l.mark);
         RepoCard {
             root: self.repo.root().to_path_buf(),
             name: self.name(),
@@ -51,6 +80,11 @@ impl RepoView {
                 .count(),
             my_prs: mine.len(),
             pulse: self.pulse_days(),
+            mine: my_lines,
+            to_review: open()
+                .filter(|p| pr_panel::awaits(p, me))
+                .map(|p| line(p, PrMark::Open))
+                .collect(),
         }
     }
 
