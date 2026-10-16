@@ -7,6 +7,7 @@
 pub mod cli;
 pub mod conflict;
 pub mod diff;
+pub mod fold;
 pub mod graph;
 pub mod log;
 pub mod ops;
@@ -22,7 +23,8 @@ use std::path::{Path, PathBuf};
 pub use cli::{Git, Identity, global_identity, set_global_identity};
 pub use conflict::{Chunk, Conflict, ConflictFile, Operation, OperationState, Resolution};
 pub use diff::{DiffFile, DiffLine, FileDiff, Hunk, LineKind};
-pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout};
+pub use fold::Folded;
+pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout, layout_with};
 pub use log::{Commit, CommitOrder, History};
 pub use ops::{LocalChanges, PushOptions, ResetMode};
 pub use rebase::{RebaseAction, RebaseCommit, RebaseStep};

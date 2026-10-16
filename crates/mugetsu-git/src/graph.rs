@@ -144,13 +144,24 @@ struct Slot {
 
 /// Assigns lanes to commits given in child-before-parent order. O(n log n).
 pub fn layout(commits: &[Commit]) -> Graph {
+    layout_with(
+        commits.len(),
+        commits.iter().map(|c| (&c.id, c.parents.iter().copied())),
+    )
+}
+
+/// [`layout`] over any child-before-parent sequence of (commit, parents).
+pub fn layout_with<'a, P>(len: usize, commits: impl Iterator<Item = (&'a ObjectId, P)>) -> Graph
+where
+    P: Iterator<Item = ObjectId>,
+{
     let mut slots: Vec<Option<Slot>> = Vec::new();
     let mut free: BTreeSet<usize> = BTreeSet::new();
     // A commit may be awaited by several lanes (its children's first-parent lines);
     // they all converge into the leftmost when it shows up.
     let mut expected: HashMap<ObjectId, SmallVec<[usize; 2]>> = HashMap::new();
     let mut graph = Graph {
-        nodes: Vec::with_capacity(commits.len()),
+        nodes: Vec::with_capacity(len),
         ..Default::default()
     };
     let mut next_color: u16 = 0;
@@ -165,9 +176,11 @@ pub fn layout(commits: &[Commit]) -> Graph {
         }
     };
 
-    for (row, commit) in commits.iter().enumerate() {
+    let mut rows = 0u32;
+    for (row, (id, mut parents)) in commits.enumerate() {
         let row = row as u32;
-        let (lane, color) = match expected.remove(&commit.id) {
+        rows = row + 1;
+        let (lane, color) = match expected.remove(id) {
             Some(lanes) => {
                 let lane = *lanes.iter().min().expect("non-empty");
                 let color = slots[lane]
@@ -204,7 +217,6 @@ pub fn layout(commits: &[Commit]) -> Graph {
             color,
         });
 
-        let mut parents = commit.parents.iter();
         match parents.next() {
             // The first parent always continues straight down in this lane.
             Some(first) => {
@@ -212,14 +224,14 @@ pub fn layout(commits: &[Commit]) -> Graph {
                     color,
                     starts: smallvec::smallvec![(row, lane as Lane)],
                 });
-                expected.entry(*first).or_default().push(lane);
+                expected.entry(first).or_default().push(lane);
             }
             None => {
                 free.insert(lane);
             }
         }
         for parent in parents {
-            if let Some(&existing) = expected.get(parent).and_then(|l| l.first()) {
+            if let Some(&existing) = expected.get(&parent).and_then(|l| l.first()) {
                 // Merge parent already awaited elsewhere: join that line.
                 slots[existing]
                     .as_mut()
@@ -235,7 +247,7 @@ pub fn layout(commits: &[Commit]) -> Graph {
                 color: c,
                 starts: smallvec::smallvec![(row, lane as Lane)],
             });
-            expected.entry(*parent).or_default().push(target);
+            expected.entry(parent).or_default().push(target);
         }
         while slots.last().is_some_and(Option::is_none) {
             slots.pop();
@@ -244,7 +256,7 @@ pub fn layout(commits: &[Commit]) -> Graph {
     }
 
     // Edges to commits outside the walked history (shallow clones) run off the bottom.
-    let end = commits.len() as u32;
+    let end = rows;
     for (i, slot) in slots.into_iter().enumerate() {
         if let Some(slot) = slot {
             for (top_row, top_lane) in slot.starts {
@@ -260,7 +272,7 @@ pub fn layout(commits: &[Commit]) -> Graph {
         }
     }
 
-    let buckets = commits.len().div_ceil(BUCKET).max(1);
+    let buckets = (rows as usize).div_ceil(BUCKET).max(1);
     graph.buckets = vec![Vec::new(); buckets];
     for (si, s) in graph.spans.iter().enumerate() {
         let first = s.top_row as usize / BUCKET;

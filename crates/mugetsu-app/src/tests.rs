@@ -133,7 +133,7 @@ fn loads_history_and_selects_head(cx: &mut TestAppContext) {
             "HEAD is selected on first load"
         );
         assert!(
-            v.data().graph.max_width >= 2,
+            v.data().folded.graph.max_width >= 2,
             "topic branch needs its own lane"
         );
     });
@@ -650,6 +650,35 @@ fn double_clicking_a_graph_chip_checks_it_out(cx: &mut TestAppContext) {
         git(dir.path(), &["branch", "--show-current"]).trim(),
         "topic"
     );
+}
+
+#[gpui_kit::test]
+fn merged_branch_is_folded_until_its_arrow_is_clicked(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(dir.path(), &["branch", "-q", "-D", "feature"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let shown = |cx: &TestAppContext| {
+        cx.read(|cx| {
+            let data = view.read(cx).data().clone();
+            data.folded
+                .rows
+                .iter()
+                .map(|&r| data.history.commits[r as usize].summary.clone())
+                .collect::<Vec<_>>()
+        })
+    };
+    assert!(!shown(cx).contains(&"f1".to_string()), "{:?}", shown(cx));
+    let merge = cx.read(|cx| view.read(cx).data().refs.head.unwrap());
+    ui_step(cx, handle, &|window, cx| {
+        window.click(gpui_kit::SharedString::from(format!("fold-{merge}")), cx)
+    });
+    assert!(shown(cx).contains(&"f1".to_string()), "{:?}", shown(cx));
+    ui_step(cx, handle, &|window, cx| {
+        window.click(gpui_kit::SharedString::from(format!("fold-{merge}")), cx)
+    });
+    assert!(!shown(cx).contains(&"f1".to_string()));
 }
 
 #[gpui_kit::test]

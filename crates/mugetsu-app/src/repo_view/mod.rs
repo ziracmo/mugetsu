@@ -200,6 +200,9 @@ pub struct RepoView {
     search_hits: HashSet<usize>,
     search_pos: usize,
 
+    /// Merges whose merged branch is unfolded (all others start folded).
+    expanded_merges: HashSet<ObjectId>,
+
     /// Commit row celebrating a checkout (tip, sequence): sweep and particles.
     celebrate: Option<(ObjectId, usize)>,
     celebrate_seq: usize,
@@ -374,6 +377,7 @@ impl RepoView {
             search_matches: Vec::new(),
             search_hits: HashSet::new(),
             search_pos: 0,
+            expanded_merges: HashSet::new(),
             celebrate: None,
             celebrate_seq: 0,
             sidebar_collapsed: false,
@@ -528,9 +532,10 @@ impl RepoView {
         let generation = self.generation;
         self.loading = true;
         let repo = self.repo.clone();
+        let expanded = self.expanded_merges.clone();
         self._load = cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(async move { RepoData::load(&repo) })
+                .background_spawn(async move { RepoData::load(&repo, &expanded) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.generation != generation {
@@ -627,9 +632,10 @@ impl RepoView {
         let Some(row) = self.data.history.row_of(&id) else {
             return;
         };
-        if scroll {
+        self.reveal(row);
+        if scroll && let Some(shown) = self.data.folded.shown_row(row) {
             self.history_scroll
-                .scroll_to_item(row, ScrollStrategy::Center);
+                .scroll_to_item(shown, ScrollStrategy::Center);
         }
         if self.selected == Some(id) && !self.commit_diff.read(cx).files().is_empty() {
             cx.notify();
@@ -675,17 +681,51 @@ impl RepoView {
     }
 
     fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let len = self.data.history.len();
-        if len == 0 {
+        let folded = self.data.folded.clone();
+        if folded.is_empty() {
             return;
         }
         let row = self
             .selected
             .and_then(|id| self.data.history.row_of(&id))
+            .and_then(|r| folded.shown_row(r))
             .unwrap_or(0);
-        let next = row.saturating_add_signed(delta).min(len - 1);
-        let id = self.data.history.commits[next].id;
+        let next = row.saturating_add_signed(delta).min(folded.len() - 1);
+        let id = self.data.history.commits[folded.history_row(next)].id;
         self.select_commit(id, true, cx);
+    }
+
+    // ---- Folded merges -----------------------------------------------------
+
+    /// Unfolds the merges hiding history row `row`, if any.
+    fn reveal(&mut self, row: usize) {
+        // One level per round: a merge folded inside another one shows once its parent opens.
+        while let Some(merge) = self.data.folded.owner(row) {
+            if !self
+                .expanded_merges
+                .insert(self.data.history.commits[merge].id)
+            {
+                break;
+            }
+            self.data = Arc::new(self.data.refold(&self.expanded_merges));
+        }
+    }
+
+    /// Folds or unfolds the branch merged by `merge` (the arrow next to it).
+    pub fn toggle_merge(&mut self, merge: ObjectId, cx: &mut Context<Self>) {
+        if !self.expanded_merges.remove(&merge) {
+            self.expanded_merges.insert(merge);
+        }
+        self.data = Arc::new(self.data.refold(&self.expanded_merges));
+        // A selection folded away moves to the merge that hides it.
+        let hidden = self
+            .selected
+            .and_then(|id| self.data.history.row_of(&id))
+            .is_some_and(|r| self.data.folded.shown_row(r).is_none());
+        if hidden {
+            self.select_commit(merge, false, cx);
+        }
+        cx.notify();
     }
 
     // ---- Pull requests -----------------------------------------------------
