@@ -2053,6 +2053,73 @@ fn command_click_picks_branches_then_deletes_them_together(cx: &mut TestAppConte
     cx.read(|cx| assert_eq!(view.read(cx).picked_branches(), vec!["topic"]));
 }
 
+#[gpui_kit::test]
+fn file_context_menu_opens_history_and_blame(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(dir.path(), &["mv", "a.txt", "moved.txt"]);
+    git(dir.path(), &["commit", "-q", "-m", "move"]);
+    commit_file(dir.path(), "moved.txt", "one\ntwo\nthree\n", "three");
+    let (handle, view) = open_repo_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        window.right_click("commit-file-moved.txt", cx)
+    });
+    ui_step(cx, handle, &|window, cx| {
+        let history = window.within("popup-menu").find(1usize);
+        assert_eq!(history.label(), Some("Historique du fichier"));
+        window.within("popup-menu").click(1usize, cx);
+    });
+    settle(cx, &view);
+    cx.run_until_parked();
+    let head = cx.read(|cx| view.read(cx).data().refs.head.unwrap());
+    cx.read(|cx| {
+        let v = view.read(cx);
+        assert_eq!(v.mode(), Mode::File);
+        let page = v.file_page().unwrap();
+        assert_eq!(page.path, "moved.txt");
+        assert_eq!(
+            page.selected,
+            Some(head),
+            "opens on the commit it came from"
+        );
+        let log = match &page.log {
+            Some(Ok(log)) => log.clone(),
+            other => panic!("{:?}", other.as_ref().map(|r| r.as_ref().map(|l| l.len()))),
+        };
+        let summaries: Vec<&str> = log.iter().map(|c| c.summary.as_str()).collect();
+        assert_eq!(
+            summaries,
+            ["three", "move", "c2", "c1"],
+            "follows the rename"
+        );
+        let blame = match &page.blame {
+            Some(Ok(lines)) => lines.clone(),
+            _ => panic!("no blame"),
+        };
+        assert_eq!(blame.len(), 3);
+        assert_eq!(blame[0].summary, "c1");
+        assert_eq!(blame[2].summary, "three");
+    });
+    ui_step(cx, handle, &|window, cx| window.click("file-tab-blame", cx));
+    ui_step(cx, handle, &|window, cx| {
+        assert!(window.try_find("file-commits").is_none());
+        window.click(("blame-line", 1usize), cx);
+    });
+    cx.read(|cx| {
+        let page = view.read(cx).file_page().unwrap();
+        assert_eq!(
+            page.tab,
+            crate::repo_view::file_view::FileTab::History,
+            "a blame line opens its commit"
+        );
+        let c2 = page.log.as_ref().unwrap().as_ref().unwrap()[2].id;
+        assert_eq!(page.selected, Some(c2));
+    });
+    ui_step(cx, handle, &|window, cx| window.click("file-close", cx));
+    cx.read(|cx| assert_eq!(view.read(cx).mode(), Mode::History));
+}
+
 // ---- Overview and weekly recap ---------------------------------------------
 
 fn open_workspace(

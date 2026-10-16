@@ -7,6 +7,7 @@ mod commit_files;
 mod compact;
 mod conflicts;
 mod drag_rebase;
+pub(crate) mod file_view;
 pub(crate) mod forms;
 mod history;
 pub(crate) mod links;
@@ -147,6 +148,8 @@ pub enum Mode {
     Stack,
     /// One pull request (see `pr_page`).
     Pr,
+    /// One file's history and blame (see `file_page`).
+    File,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -269,6 +272,11 @@ pub struct RepoView {
     rage_hints: usize,
     pr_diff: Entity<DiffState>,
     _pr_task: Task<()>,
+    /// The file shown by `Mode::File`, and the diff of its picked commit.
+    file_page: Option<file_view::FilePage>,
+    file_diff: Entity<DiffState>,
+    _file_task: Task<()>,
+    _file_diff_task: Task<()>,
     _fetch: Task<()>,
     _op: Task<()>,
     _search: Subscription,
@@ -446,6 +454,10 @@ impl RepoView {
             rage: (0, Instant::now(), 0),
             rage_hints: 0,
             pr_diff: cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Unified)),
+            file_page: None,
+            file_diff: cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Unified)),
+            _file_task: Task::ready(()),
+            _file_diff_task: Task::ready(()),
             _pr_task: Task::ready(()),
             _fetch: Task::ready(()),
             _op: Task::ready(()),
@@ -1622,7 +1634,7 @@ impl RepoView {
         match self.mode {
             Mode::Changes => self.changes_focus.clone(),
             Mode::History => self.history_focus.clone(),
-            Mode::Stats | Mode::Stack | Mode::Pr => self.root_focus.clone(),
+            Mode::Stats | Mode::Stack | Mode::Pr | Mode::File => self.root_focus.clone(),
         }
     }
 
@@ -1668,7 +1680,7 @@ impl Render for RepoView {
         }
         // Stats, Stack and PR draw no list: keep keys on the tab.
         if self.focused
-            && matches!(self.mode, Mode::Stats | Mode::Stack | Mode::Pr)
+            && matches!(self.mode, Mode::Stats | Mode::Stack | Mode::Pr | Mode::File)
             && (window.focused(cx).is_none() || self.history_focus.is_focused(window))
         {
             self.root_focus.focus(window, cx);
@@ -1733,12 +1745,13 @@ impl Render for RepoView {
                         .into_any_element()
                 }
                 Mode::Changes => self.render_changes(window, cx).into_any_element(),
-                Mode::Stats | Mode::Stack | Mode::Pr => div()
+                Mode::Stats | Mode::Stack | Mode::Pr | Mode::File => div()
                     .size_full()
                     .track_focus(&self.root_focus)
                     .child(match self.mode {
                         Mode::Stats => self.render_stats(cx),
                         Mode::Stack => self.render_stack(cx),
+                        Mode::File => self.render_file_page(cx),
                         _ => self.render_pr_page(cx),
                     })
                     .into_any_element(),

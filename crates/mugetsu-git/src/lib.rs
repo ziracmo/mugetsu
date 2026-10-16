@@ -5,6 +5,7 @@
 //! CLI so that user config, hooks, credential helpers and fsmonitor keep working.
 
 pub mod batch;
+pub mod blame;
 pub mod cli;
 pub mod clone;
 pub mod conflict;
@@ -25,6 +26,7 @@ pub mod worktrees;
 use std::path::{Path, PathBuf};
 
 pub use batch::BatchDelete;
+pub use blame::{BlameLine, FileCommit};
 pub use cli::{Git, Identity, global_identity, set_global_identity};
 pub use clone::{ClonePhase, CloneProgress, clone, clone_name, is_clone_url};
 pub use conflict::{Chunk, Conflict, ConflictFile, Operation, OperationState, Resolution};

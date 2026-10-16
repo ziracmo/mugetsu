@@ -465,6 +465,51 @@ pub fn tag_menu(menu: PopupMenu, ctx: &MenuContext, tag: &str) -> PopupMenu {
         .item(item(tr("Copier le nom du tag", "Copy tag name"), Lucide::Copy).on_click(copy(tag)))
 }
 
+/// A file in a list (working-copy changes, a commit's files).
+pub struct FileMenu {
+    pub path: String,
+    /// Blame as of this commit; the working copy when `None`.
+    pub rev: Option<ObjectId>,
+    /// Git has lines to blame (not untracked, not deleted).
+    pub blamable: bool,
+}
+
+pub fn file_menu(
+    menu: PopupMenu,
+    view: &WeakEntity<RepoView>,
+    root: &Path,
+    file: &FileMenu,
+) -> PopupMenu {
+    use super::file_view::FileTab;
+    let open = |tab: FileTab| {
+        let (path, rev) = (file.path.clone(), file.rev);
+        act(view, move |this, _, cx| {
+            this.open_file(path.clone(), rev, tab, cx)
+        })
+    };
+    menu.item(
+        item("Blame", Lucide::ScanText)
+            .disabled(!file.blamable)
+            .on_click(open(FileTab::Blame)),
+    )
+    .item(
+        item(
+            tr("Historique du fichier", "File history"),
+            Lucide::FileClock,
+        )
+        .on_click(open(FileTab::History)),
+    )
+    .separator()
+    .item(item(tr("Copier le chemin", "Copy path"), Lucide::Copy).on_click(copy(file.path.clone())))
+    .item(
+        item(
+            tr("Copier le chemin complet", "Copy full path"),
+            Lucide::Copy,
+        )
+        .on_click(copy(root.join(&file.path).to_string_lossy().into_owned())),
+    )
+}
+
 /// A linked worktree as shown in a menu.
 #[derive(Clone)]
 pub struct WorktreeMenu {
