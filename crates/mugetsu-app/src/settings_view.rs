@@ -671,12 +671,15 @@ impl Render for SettingsView {
                 ]
             }
             Section::Ai => {
-                let tools = AiTool::ALL.iter().map(|&tool| {
-                    let id = format!("ai-tool-{tool:?}").to_lowercase();
-                    choice(id, tool.label(), current.ai_tool == tool).on_click(
-                        cx.listener(move |this, _, window, cx| this.pick_tool(tool, window, cx)),
-                    )
-                });
+                let tools =
+                    AiTool::ALL.iter().map(|&tool| {
+                        let id = format!("ai-tool-{tool:?}").to_lowercase();
+                        choice(id, tool.label(), current.ai_tool == tool)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.pick_tool(tool, window, cx)
+                            }))
+                            .test_support()
+                    });
                 let terminals = crate::ai_review::terminals().iter().map(|&terminal| {
                     let id = format!("ai-terminal-{terminal:?}").to_lowercase();
                     choice(id, terminal.label(), current.ai_terminal == terminal)
