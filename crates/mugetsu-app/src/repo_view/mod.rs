@@ -1,6 +1,7 @@
 //! One repository tab: sidebar (branches, remotes, tags, worktrees, stashes),
 //! history graph with commit details, and the working-copy "Changes" view.
 
+mod card;
 mod changes;
 mod commit_files;
 mod compact;

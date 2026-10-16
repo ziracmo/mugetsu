@@ -62,7 +62,6 @@ impl RepoView {
         }));
     }
 
-    #[cfg(test)]
     pub fn pulse_days(&self) -> Arc<Vec<u32>> {
         self.pulse.days.clone()
     }
