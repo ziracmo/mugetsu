@@ -46,6 +46,15 @@ impl From<CommitSort> for mugetsu_git::CommitOrder {
     }
 }
 
+/// Compact view order: most recent tip first, or most commits first.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompactSort {
+    #[default]
+    Date,
+    Size,
+}
+
 /// Sidebar sections, in their default order (users can drag them around).
 pub const SECTIONS: [&str; 5] = ["branches", "remotes", "worktrees", "tags", "stashes"];
 
@@ -85,6 +94,8 @@ pub struct Settings {
     pub details_side: bool,
     /// Dropping a branch chip on another asks before rebasing.
     pub confirm_drag_rebase: bool,
+    /// How the compact view orders branches.
+    pub compact_sort: CompactSort,
     /// AI tool launched by a PR's "Review with AI".
     pub ai_tool: AiTool,
     /// Shell command run in a terminal for that review; see [`crate::ai_review`].
@@ -256,6 +267,7 @@ impl Default for Settings {
             history_compact: false,
             details_side: false,
             confirm_drag_rebase: true,
+            compact_sort: CompactSort::default(),
             ai_tool: AiTool::Claude,
             ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),
             ai_terminal: AiTerminal::System,

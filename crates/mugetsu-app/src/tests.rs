@@ -1482,6 +1482,60 @@ fn commit_details_move_beside_the_history_and_back(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn compact_view_filters_by_author_and_sorts(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    fixture(p);
+    git(p, &["switch", "-q", "-c", "ann-work", "HEAD~1"]);
+    for msg in ["ann 1", "ann 2"] {
+        git(
+            p,
+            &[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "--author=Ann <ann@example.com>",
+                "-m",
+                msg,
+            ],
+        );
+    }
+    git(p, &["switch", "-q", "main"]);
+    let (handle, view) = open_repo_view(cx, p);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("toggle-compact", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("compact-ann-work").is_some());
+        // The repository's own identity comes first, then the others.
+        window.click("compact-author-test@example.com", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("compact-topic").is_some());
+        assert!(window.try_find("compact-ann-work").is_none());
+        assert!(window.try_find("compact-main").is_some());
+        window.click("compact-author-ann@example.com", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("compact-ann-work").is_some());
+        assert!(window.try_find("compact-topic").is_none());
+        // Clicking the active author again shows everyone.
+        window.click("compact-author-ann@example.com", cx);
+        window.click("compact-sort-size", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("compact-topic").is_some());
+        assert!(window.try_find("compact-ann-work").is_some());
+    })
+    .unwrap();
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx).compact_sort,
+            crate::settings::CompactSort::Size
+        )
+    });
+    settle(cx, &view);
+}
+
+#[gpui_kit::test]
 fn merge_conflicts_resolve_in_three_panes(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();

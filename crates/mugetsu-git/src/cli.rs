@@ -167,7 +167,10 @@ pub struct Identity {
 /// Where an identity is read from or written to: `["--global"]`, or
 /// `["--file", path]` in tests.
 fn identity_in(scope: &[&str]) -> Identity {
-    let git = Git::new(std::env::temp_dir());
+    identity_with(&Git::new(std::env::temp_dir()), scope)
+}
+
+fn identity_with(git: &Git, scope: &[&str]) -> Identity {
     let get = |key: &str| {
         let mut args = vec!["config"];
         args.extend_from_slice(scope);
@@ -203,6 +206,14 @@ fn set_identity_in(scope: &[&str], id: &Identity) -> anyhow::Result<()> {
 /// The identity in `~/.gitconfig` (empty fields when unset).
 pub fn global_identity() -> Identity {
     identity_in(&["--global"])
+}
+
+impl crate::Repo {
+    /// Identity commits are made with here: the repository's config, else
+    /// the global one.
+    pub fn identity(&self) -> Identity {
+        identity_with(self.git(), &[])
+    }
 }
 
 /// Writes the identity to `~/.gitconfig`; an empty field is unset.
