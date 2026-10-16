@@ -234,6 +234,15 @@ impl RepoView {
         searching || self.folders.get(key).copied().unwrap_or(default)
     }
 
+    fn toggle_section(&mut self, key: &'static str, cx: &mut Context<Self>) {
+        if !self.collapsed.remove(key) {
+            self.collapsed.insert(key);
+        }
+        let folded: Vec<String> = self.collapsed.iter().map(|k| k.to_string()).collect();
+        crate::settings::remember(|s| s.collapsed_sections = folded);
+        cx.notify();
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn section(
         &self,
@@ -256,6 +265,7 @@ impl RepoView {
                 .child(
                     h_flex()
                         .id(SharedString::from(format!("section-{key}")))
+                        .test_support()
                         .h(px(28.))
                         .px_2()
                         .gap_1p5()
@@ -283,15 +293,7 @@ impl RepoView {
                                 .bg(theme::raised())
                                 .child(count.to_string()),
                         )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if !this.collapsed.remove(key) {
-                                this.collapsed.insert(key);
-                            }
-                            let folded: Vec<String> =
-                                this.collapsed.iter().map(|k| k.to_string()).collect();
-                            crate::settings::remember(|s| s.collapsed_sections = folded);
-                            cx.notify();
-                        }))
+                        .on_click(cx.listener(move |this, _, _, cx| this.toggle_section(key, cx)))
                         // Drag a header onto another to reorder the sections.
                         .when(crate::settings::SECTIONS.contains(&key), |s| {
                             s.on_drag(SectionDrag { key, title }, |drag, _, _, cx| {
@@ -301,9 +303,15 @@ impl RepoView {
                                 s.bg(theme::alpha(theme::accent(), 0.18)).rounded_md()
                             })
                             .on_drop(cx.listener(
-                                move |_, drag: &SectionDrag, _, cx| {
+                                move |this, drag: &SectionDrag, _, cx| {
                                     let from = drag.key;
-                                    crate::settings::update(cx, |s| s.move_section(from, key));
+                                    // A click that moved a few pixels starts a drag and
+                                    // swallows the click: dropped on itself, it folds.
+                                    if from == key {
+                                        this.toggle_section(key, cx);
+                                    } else {
+                                        crate::settings::update(cx, |s| s.move_section(from, key));
+                                    }
                                 },
                             ))
                         }),

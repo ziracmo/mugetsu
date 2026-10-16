@@ -543,6 +543,36 @@ fn sidebar_can_be_collapsed(cx: &mut TestAppContext) {
     assert!(cx.read(|cx| view.read(cx).sidebar_collapsed()));
 }
 
+#[gpui_kit::test]
+fn sidebar_sections_fold_and_unfold(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, _view) = open_repo_view(cx, dir.path());
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let shown = |window: &mut gpui_kit::Window| window.try_find("branch:main").is_some();
+        assert!(shown(window));
+        window.click("section-branches", cx);
+        window.render_frame(cx);
+        assert!(!shown(window));
+        window.click("section-branches", cx);
+        window.render_frame(cx);
+        assert!(shown(window));
+        // A trackpad click often moves the pointer a few pixels, which starts
+        // the reorder drag: it still folds and unfolds.
+        let at = window.find("section-branches").bounds().center();
+        let nudge = gpui_kit::point(px(4.), px(1.));
+        window.drag(at, at + nudge, cx);
+        window.render_frame(cx);
+        assert!(!shown(window));
+        window.drag(at, at + nudge, cx);
+        window.render_frame(cx);
+        assert!(shown(window));
+    })
+    .unwrap();
+}
+
 fn session_of(repos: Vec<std::path::PathBuf>, active: usize) -> crate::session::Session {
     crate::session::Session::new(
         vec![crate::session::RepoSet {
