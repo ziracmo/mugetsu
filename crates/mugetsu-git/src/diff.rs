@@ -236,6 +236,17 @@ impl Repo {
         Ok(FileDiff::parse(&out))
     }
 
+    /// Raw bytes of `path` in the index (`staged: false`) or at HEAD (`staged: true`):
+    /// the "before" side of [`Self::diff_worktree`]. `None` when it isn't there.
+    pub fn base_blob(&self, staged: bool, path: &str) -> Option<Vec<u8>> {
+        let spec = if staged {
+            format!("HEAD:{path}")
+        } else {
+            format!(":{path}")
+        };
+        self.git().run_bytes(["cat-file", "blob", &spec]).ok()
+    }
+
     /// Diff introduced by a commit (against its first parent).
     pub fn diff_commit(&self, rev: &str) -> anyhow::Result<FileDiff> {
         let mut args = vec!["show", "--format="];

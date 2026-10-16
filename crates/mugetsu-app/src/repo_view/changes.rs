@@ -55,6 +55,7 @@ impl RepoView {
             None => {
                 self.selected_change = None;
                 self.change_hunks = None;
+                self.change_svg = None;
                 self.change_diff.update(cx, |d, cx| d.set_files([], cx));
             }
         }
@@ -67,6 +68,7 @@ impl RepoView {
             return;
         }
         self.conflict = None;
+        self.change_svg = None;
         let untracked = self
             .data
             .status
@@ -97,15 +99,17 @@ impl RepoView {
                         })
                         .collect();
                     let ui = UiDiffFile::parse(&patch).unwrap_or_default();
-                    anyhow::Ok((diff, ui))
+                    let svg = super::svg_preview::SvgPreview::load(&repo, &sel.path, sel.staged);
+                    anyhow::Ok((diff, ui, svg))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 if this.selected_change.as_ref() != Some(&wanted) {
                     return;
                 }
-                if let Ok((diff, ui)) = result {
+                if let Ok((diff, ui, svg)) = result {
                     this.change_hunks = Some(diff);
+                    this.change_svg = svg;
                     this.change_diff.update(cx, |d, cx| d.set_files(ui, cx));
                 }
                 cx.notify();
@@ -463,7 +467,10 @@ impl RepoView {
             .flex_1()
             .min_w_0()
             .h_full()
-            .when(!in_conflict, |el| el.children(self.render_hunk_bar(cx)))
+            .when(!in_conflict, |el| {
+                el.children(self.render_hunk_bar(cx))
+                    .children(self.change_svg.as_ref().map(|p| p.render(cx)))
+            })
             .child(
                 div()
                     .flex_1()
