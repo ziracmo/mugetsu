@@ -1476,6 +1476,15 @@ fn command_k_palette_runs_actions_and_switches_repositories(cx: &mut TestAppCont
     cx.run_until_parked();
     assert!(palette(cx).is_none());
     assert_eq!(cx.read(|cx| ws.read(cx).active_index()), 1);
+
+    // ⌘P: the same palette, branches only.
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("secondary-p");
+    vcx.run_until_parked();
+    let p = palette(cx).expect("⌘P opens the palette");
+    let ids = cx.read(|cx| p.read(cx).result_ids());
+    assert!(!ids.is_empty());
+    assert!(ids.iter().all(|id| id.starts_with("branch:")), "{ids:?}");
 }
 
 /// main: base - one - two - three, each on its own file.

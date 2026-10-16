@@ -127,10 +127,11 @@ fn chip(
         .border_1()
         .text_xs();
     let base = if head {
-        // The checked-out branch: solid accent, white, glowing edge.
+        // The checked-out branch: solid accent, black text (white is
+        // unreadable on the lighter accents), glowing edge.
         base.border_color(theme::alpha(gpui_kit::white(), 0.55))
             .bg(theme::accent())
-            .text_color(gpui_kit::white())
+            .text_color(gpui_kit::black())
             .font_weight(gpui_kit::FontWeight::BOLD)
             .shadow_md()
     } else {

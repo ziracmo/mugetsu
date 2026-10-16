@@ -22,7 +22,7 @@ use gpui_kit::{
 use mugetsu_git::Repo;
 
 use crate::i18n::tr;
-use crate::palette::{Palette, PaletteEvent, TogglePalette};
+use crate::palette::{Palette, PaletteEvent, SearchBranches, TogglePalette};
 use crate::repo_view::{RepoEvent, RepoView};
 use crate::session::{RepoSet, Session};
 use crate::theme;
@@ -316,15 +316,21 @@ impl Workspace {
         }
     }
 
-    /// ⌘K: shows the command palette, or closes it.
-    pub fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// ⌘K: shows the command palette, or closes it. ⌘P (`branches_only`):
+    /// the same, narrowed to the branches.
+    pub fn toggle_palette(
+        &mut self,
+        branches_only: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some((palette, _)) = &self.palette {
             palette.update(cx, |p, cx| p.dismiss(cx));
             return;
         }
         self.palette_return = window.focused(cx);
         let entries = crate::palette::entries(self, window, cx);
-        let palette = cx.new(|cx| Palette::new(entries, window, cx));
+        let palette = cx.new(|cx| Palette::new(entries, branches_only, window, cx));
         let sub = cx.subscribe_in(
             &palette,
             window,
@@ -781,9 +787,12 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &CloseTab, _, cx| this.close(this.active, cx)))
             .on_action(cx.listener(|this, _: &FetchAll, _, cx| this.fetch_all(cx)))
             .on_action(cx.listener(|this, _: &ReloadApp, _, cx| this.reload_app(cx)))
-            .on_action(
-                cx.listener(|this, _: &TogglePalette, window, cx| this.toggle_palette(window, cx)),
-            )
+            .on_action(cx.listener(|this, _: &TogglePalette, window, cx| {
+                this.toggle_palette(false, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SearchBranches, window, cx| {
+                this.toggle_palette(true, window, cx)
+            }))
             .on_action(
                 cx.listener(|this, _: &NextTab, window, cx| this.step_switcher(true, window, cx)),
             )

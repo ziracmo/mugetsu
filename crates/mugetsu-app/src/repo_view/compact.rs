@@ -26,6 +26,10 @@ use crate::{fmt, theme};
 const PREVIEW: usize = 12;
 /// Walks stop counting past this many commits.
 const CAP: usize = 999;
+/// Avatars drawn on a row.
+const AUTHORS: usize = 3;
+/// The trunk's authors are taken from its most recent commits only.
+const TRUNK_AUTHORS_WINDOW: usize = 50;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchSummary {
@@ -44,6 +48,33 @@ pub struct BranchSummary {
     pub commits: Vec<usize>,
     /// Committer time of the tip.
     pub time: i64,
+    /// Who wrote the branch's own commits (email, name), most commits first,
+    /// at most `AUTHORS`; `more_authors` counts the others.
+    pub authors: Vec<(String, String)>,
+    pub more_authors: usize,
+}
+
+/// Distinct authors of `rows` (by email), most commits first, ties by the
+/// most recent one.
+fn authors(history: &History, rows: &[usize]) -> (Vec<(String, String)>, usize) {
+    let mut seen: Vec<(String, String, usize)> = Vec::new();
+    for &r in rows {
+        let c = &history.commits[r];
+        let key = c.email.trim().to_lowercase();
+        match seen.iter_mut().find(|(e, _, _)| *e == key) {
+            Some(entry) => entry.2 += 1,
+            None => seen.push((key, c.author.clone(), 1)),
+        }
+    }
+    // Stable: equal counts keep their first (newest) appearance order.
+    seen.sort_by_key(|a| std::cmp::Reverse(a.2));
+    let more = seen.len().saturating_sub(AUTHORS);
+    let top = seen
+        .into_iter()
+        .take(AUTHORS)
+        .map(|(e, n, _)| (e, n))
+        .collect();
+    (top, more)
 }
 
 /// The trunk tip: the remote's main / master, else a local one, else HEAD.
@@ -134,6 +165,8 @@ pub fn summarize(history: &History, refs: &RefsSnapshot) -> Vec<BranchSummary> {
             } else {
                 walk(history, b.target, &trunk_rows, CAP)
             };
+            let window = if is_trunk { TRUNK_AUTHORS_WINDOW } else { CAP };
+            let (authors, more_authors) = authors(history, &commits[..commits.len().min(window)]);
             BranchSummary {
                 name: b.name.clone(),
                 tip: b.target,
@@ -153,6 +186,8 @@ pub fn summarize(history: &History, refs: &RefsSnapshot) -> Vec<BranchSummary> {
                     .get(&b.target)
                     .map(|&r| history.commits[r].time)
                     .unwrap_or_default(),
+                authors,
+                more_authors,
             }
         })
         // A remote branch with nothing of its own is noise.
@@ -247,6 +282,7 @@ impl RepoView {
             let remote = b.remote;
             let title = b.name.clone();
             let delay = i.min(14) as f32 * 28.;
+            let faces = author_faces(&b.authors, b.more_authors, cx);
             h_flex()
                 .id(SharedString::from(format!("compact-{}", b.name)))
                 .test_support()
@@ -308,6 +344,7 @@ impl RepoView {
                             )
                         }),
                 )
+                .child(faces)
                 .child(
                     // How much the branch carries, relative to the biggest one.
                     div()
@@ -400,6 +437,34 @@ impl RepoView {
             .children(items)
             .into_any_element()
     }
+}
+
+/// Up to three overlapping author pictures, plus “+n” for the others.
+fn author_faces(authors: &[(String, String)], more: usize, cx: &mut gpui_kit::App) -> AnyElement {
+    const SIZE: f32 = 20.;
+    h_flex()
+        .w(px(84.))
+        .flex_none()
+        .justify_end()
+        .children(authors.iter().enumerate().map(|(i, (email, name))| {
+            div()
+                .flex_none()
+                .rounded_full()
+                .border_2()
+                .border_color(theme::panel())
+                .when(i > 0, |s| s.ml(px(-7.)))
+                .child(crate::avatars::avatar(email, name, SIZE, cx))
+        }))
+        .when(more > 0, |s| {
+            s.child(
+                div()
+                    .pl_1()
+                    .text_xs()
+                    .text_color(theme::muted())
+                    .child(format!("+{more}")),
+            )
+        })
+        .into_any_element()
 }
 
 /// Hover card: the branch's own commits.
@@ -506,5 +571,29 @@ mod tests {
         let shown: Vec<(&str, usize)> = rows.iter().map(|r| (r.name.as_str(), r.count)).collect();
         assert_eq!(shown, [("topic", 2), ("main", 3), ("old", 0)]);
         assert_eq!(rows[0].commits, vec![0, 1]);
+    }
+
+    #[test]
+    fn lists_at_most_three_authors_most_commits_first() {
+        let by = |n: u8, who: &str| Commit {
+            author: who.to_uppercase(),
+            email: format!("{who}@x.dev"),
+            ..commit(n, if n > 1 { &[0] } else { &[] })
+        };
+        let commits = vec![
+            by(6, "ann"),
+            by(5, "bob"),
+            by(4, "cid"),
+            by(3, "bob"),
+            by(2, "dan"),
+            by(1, "cid"),
+        ];
+        let index = commits.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+        let history = History { commits, index };
+        let (top, more) = authors(&history, &[0, 1, 2, 3, 4, 5]);
+        let emails: Vec<&str> = top.iter().map(|(e, _)| e.as_str()).collect();
+        assert_eq!(emails, ["bob@x.dev", "cid@x.dev", "ann@x.dev"]);
+        assert_eq!(top[0].1, "BOB");
+        assert_eq!(more, 1);
     }
 }
