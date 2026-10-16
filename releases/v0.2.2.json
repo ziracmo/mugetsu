@@ -1,0 +1,24 @@
+{
+  "version": "0.2.2",
+  "date": "2026-10-16",
+  "title": "Folded merges, a redesigned conflict resolver and clearer errors",
+  "summary": "Merged branches fold away in the history, the conflict resolver gets drag and drop and conflict navigation, AI review opens in the terminal of your choice or in Claude Desktop, and git errors read like sentences.",
+  "features": [
+    { "id": "fold-merges", "title": "Fold merged branches", "body": "A merge hides the commits its other parents bring in until you click the arrow next to it. Commits with a ref or HEAD always show, and selecting a hidden commit unfolds it.", "scene": "graph", "highlight": true },
+    { "id": "ai-review", "title": "AI review in your terminal or Claude Desktop", "body": "Settings › AI lets you pick where the review opens: Terminal, iTerm2, Ghostty, WezTerm, kitty, Alacritty, Windows Terminal, PowerShell, cmd, or a new Claude Code session in Claude Desktop with the prompt and folder prefilled. It now works on Windows too." },
+    { "id": "rebase-onto", "title": "Rebase onto a commit", "body": "The commit menu gets a plain rebase next to the interactive one, and a finished rebase scrolls the history to the rebased branch.", "scene": "graph" },
+    { "id": "remote-reset", "title": "Reset a stale local branch", "body": "Double-clicking a remote branch whose local copy points elsewhere offers to reset it, or just check it out.", "scene": "graph" },
+    { "id": "force-delete", "title": "Force delete unmerged branches", "body": "Deleting an unmerged branch offers a Force delete button in its toast, behind a confirmation." },
+    { "id": "branch-palette", "title": "⌘P for branches", "body": "⌘P (Ctrl+P on Windows) opens the command palette narrowed to the branches.", "scene": "search" }
+  ],
+  "improvements": [
+    { "id": "conflict-resolution", "title": "Redesigned conflict resolver", "body": "Each conflict has its own bar (take a side, both, neither, undo). Blocks and lines drag into the result, ⌥↑/⌥↓ or F7 jump between conflicts, ⌥←/⌥→ take a side, and an overview ruler shows where each one sits.", "scene": "diff", "highlight": true },
+    { "id": "error-toasts", "title": "Readable error toasts", "body": "Git errors show as a title and a sentence, without the error:/fatal: prefixes and noisy hints." },
+    { "id": "compact-history", "title": "Authors in the compact view", "body": "Compact history rows show up to three author avatars, with +n for the others.", "scene": "graph" },
+    { "id": "current-branch-chip", "title": "Readable current-branch chip", "body": "The checked-out branch's chip uses dark text on the accent colour.", "scene": "accent" }
+  ],
+  "fixes": [
+    { "id": "sidebar-fold", "title": "Sidebar sections fold reliably", "body": "A click that moved a few pixels started a reorder and swallowed the click; headers now fold and unfold every time.", "scene": "sidebar" },
+    { "id": "interactive-rebase", "title": "Interactive rebase onto a non-ancestor", "body": "Rebasing interactively onto a commit that is not an ancestor of HEAD now replays the branch onto it instead of failing." }
+  ]
+}
