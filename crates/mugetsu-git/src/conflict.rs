@@ -480,22 +480,50 @@ impl Repo {
         self.run_sequencer(&["rebase", rev])
     }
 
-    /// Rebases `branch` onto `onto`, then switches back to the branch that
-    /// was checked out. `Ok(false)`: stopped on conflicts, with `branch`
-    /// checked out.
+    /// Rebases `branch` onto `onto`. `Ok(false)`: stopped on conflicts,
+    /// with `branch` checked out for the resolver.
+    ///
+    /// Another branch than HEAD is rebased in a scratch worktree, so the
+    /// checkout (and its uncommitted changes) is left alone. Only when that
+    /// hits conflicts is it redone here, if the working tree is clean, then
+    /// the previous branch is switched back.
     pub fn rebase_branch(&self, branch: &str, onto: &str) -> anyhow::Result<bool> {
         let previous = self
             .git()
             .run(["symbolic-ref", "--quiet", "--short", "HEAD"])
             .ok()
             .map(|s| s.trim().to_string());
-        if !self.run_sequencer(&["rebase", onto, branch])? {
-            return Ok(false);
+        if previous.as_deref() == Some(branch) {
+            return self.rebase(onto);
         }
-        if let Some(previous) = previous.filter(|p| p != branch) {
-            self.git().run(["switch", &previous])?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let scratch = std::env::temp_dir().join(format!("mugetsu-rebase-{stamp}"));
+        let path = scratch.to_string_lossy().to_string();
+        self.git()
+            .run(["worktree", "add", "--quiet", &path, branch])?;
+        let rebased = self
+            .git()
+            .run(["-C", &path, "-c", "core.editor=true", "rebase", onto]);
+        if rebased.is_err() {
+            let _ = self.git().run(["-C", &path, "rebase", "--abort"]);
         }
-        Ok(true)
+        let _ = self.git().run(["worktree", "remove", "--force", &path]);
+        let _ = std::fs::remove_dir_all(&scratch);
+        match rebased {
+            Ok(_) => Ok(true),
+            Err(e) if self.is_dirty()? => Err(e),
+            Err(_) => {
+                if !self.run_sequencer(&["rebase", onto, branch])? {
+                    return Ok(false);
+                }
+                if let Some(previous) = previous {
+                    self.git().run(["switch", &previous])?;
+                }
+                Ok(true)
+            }
+        }
     }
 }
 

@@ -113,9 +113,13 @@ fn checkout_on_double_click(
             }
         })
         .when_some(drag, |s, drag| {
-            s.on_drag(drag, |drag, _, _, cx| {
+            s.on_drag(drag, |drag, offset, _, cx| {
                 cx.stop_propagation();
-                gpui_kit::AppContext::new(cx, |_| drag.clone())
+                let drag = BranchDrag {
+                    offset,
+                    ..drag.clone()
+                };
+                gpui_kit::AppContext::new(cx, |_| drag)
             })
         })
         .drag_over::<BranchDrag>({
@@ -130,10 +134,25 @@ fn checkout_on_double_click(
             }
         })
         .on_drop(move |drag: &BranchDrag, window, cx| {
+            cx.stop_propagation();
             let (branch, onto) = (drag.name.clone(), onto.clone());
             let _ = drop_view.update(cx, |this, cx| this.drop_branch(branch, onto, window, cx));
         })
         .into_any_element()
+}
+
+/// What a branch dropped on a history row is rebased onto.
+fn drop_target(labels: &[RefLabel], commit: gix::ObjectId) -> String {
+    let named = |remote: bool| {
+        labels.iter().find_map(|l| match l {
+            RefLabel::Branch { name, .. } if !remote => Some(name.clone()),
+            RefLabel::Remote(name) if remote => Some(name.clone()),
+            _ => None,
+        })
+    };
+    named(false)
+        .or_else(|| named(true))
+        .unwrap_or_else(|| commit.to_hex_with_len(8).to_string())
 }
 
 fn chip(
@@ -252,6 +271,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                         name: name.clone(),
                         color,
                         head: *head,
+                        offset: Default::default(),
                     }),
                     ctx,
                 );
@@ -493,6 +513,24 @@ impl RepoView {
                             .text_sm()
                             .cursor_pointer()
                             .hover(|s| s.bg(theme::raised()))
+                            // A dragged branch chip lights up the whole row it
+                            // would land on; dropped off its chips, it goes onto
+                            // the row's first ref (or the commit itself).
+                            .drag_over::<BranchDrag>(|s, _, _, _| {
+                                s.bg(theme::alpha(theme::accent(), 0.24))
+                                    .border_y_1()
+                                    .border_color(theme::alpha(theme::accent(), 0.8))
+                            })
+                            .on_drop({
+                                let view = chip_ctx.view.clone();
+                                let onto = drop_target(&ref_labels, id);
+                                move |drag: &BranchDrag, window, cx| {
+                                    let (branch, onto) = (drag.name.clone(), onto.clone());
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.drop_branch(branch, onto, window, cx)
+                                    });
+                                }
+                            })
                             .when(is_hit && !is_selected, |s| {
                                 s.bg(theme::alpha(theme::amber(), 0.08))
                             })

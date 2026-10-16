@@ -23,6 +23,8 @@ pub(super) struct BranchDrag {
     pub name: String,
     pub color: Hsla,
     pub head: bool,
+    /// Where the chip was grabbed, from its top-left corner.
+    pub offset: Point<Pixels>,
 }
 
 impl Render for BranchDrag {
@@ -49,17 +51,21 @@ impl Render for BranchDrag {
             })
             .child(Icon::new(Lucide::GitBranch).xsmall())
             .child(self.name.clone());
-        // Picked up, it struggles a little: a quick jitter on both axes.
-        div().p(px(4.)).child(chip.with_animation(
-            "branch-drag-shake",
-            Animation::new(Duration::from_millis(520)).repeat(),
-            |el, t| {
-                let a = t * std::f32::consts::TAU;
-                let x = 2.6 * (3. * a).sin() * (0.6 + 0.4 * a.cos().abs());
-                let y = 1.1 * (2. * a + 0.7).sin();
-                el.ml(px(x)).mt(px(y))
-            },
-        ))
+        // Carried below-right of the pointer, so the chip or row it is over
+        // stays visible. Picked up, it struggles a little: a quick jitter.
+        div()
+            .pl(self.offset.x + px(16.))
+            .pt(self.offset.y + px(14.))
+            .child(chip.with_animation(
+                "branch-drag-shake",
+                Animation::new(Duration::from_millis(520)).repeat(),
+                |el, t| {
+                    let a = t * std::f32::consts::TAU;
+                    let x = 2.6 * (3. * a).sin() * (0.6 + 0.4 * a.cos().abs());
+                    let y = 1.1 * (2. * a + 0.7).sin();
+                    el.ml(px(x)).mt(px(y))
+                },
+            ))
     }
 }
 
