@@ -14,6 +14,7 @@ mod particles;
 mod pr_panel;
 mod pr_tip;
 mod pr_view;
+mod pulse;
 mod rebase;
 mod restack;
 mod search;
@@ -236,6 +237,8 @@ pub struct RepoView {
     dead_worktrees: Arc<Vec<DeadWorktree>>,
     dead_key: Option<u64>,
     _dead_scan: Task<()>,
+    /// Commits per day over the last month (sidebar foot).
+    pulse: pulse::Pulse,
     /// Diffs PR listings into system notifications.
     pr_watcher: crate::notify::Watcher,
 
@@ -411,6 +414,7 @@ impl RepoView {
             dead_worktrees: Arc::default(),
             dead_key: None,
             _dead_scan: Task::ready(()),
+            pulse: Default::default(),
             pr_watcher: Default::default(),
             focused: false,
             fetching: false,
@@ -647,6 +651,7 @@ impl RepoView {
         }
         self.refresh_prs(true, cx);
         self.scan_dead_worktrees(cx);
+        self.scan_pulse(cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
             let upstream = self
                 .data

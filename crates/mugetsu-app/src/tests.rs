@@ -1060,6 +1060,30 @@ fn new_commits_shimmer_and_worktree_branches_open_their_tab(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn sidebar_pulse_counts_todays_commits_across_branches(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    settle(cx, &view);
+    let mut days = cx.read(|cx| view.read(cx).pulse_days());
+    for _ in 0..200 {
+        if !days.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        cx.run_until_parked();
+        days = cx.read(|cx| view.read(cx).pulse_days());
+    }
+    assert_eq!(days.len(), 30);
+    // c1, c2, f1, the merge and topic's commit, all made just now.
+    assert_eq!(days.iter().sum::<u32>(), 5, "{days:?}");
+    assert_eq!(*days.last().unwrap(), 5);
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+}
+
+#[gpui_kit::test]
 fn finished_worktrees_are_listed_with_their_size(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
