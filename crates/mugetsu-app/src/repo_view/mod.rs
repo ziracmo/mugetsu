@@ -13,6 +13,7 @@ mod history;
 pub(crate) mod links;
 mod menus;
 mod multi;
+mod nav;
 mod particles;
 mod pr_panel;
 mod pr_tip;
@@ -81,7 +82,9 @@ gpui_kit::actions!(
         NextConflict,
         PrevConflict,
         TakeOurs,
-        TakeTheirs
+        TakeTheirs,
+        GoBack,
+        GoForward
     ]
 );
 
@@ -135,6 +138,25 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("ctrl-a", StageAll, Some("Changes")),
         KeyBinding::new("secondary-s", StashChanges, Some("Changes")),
         KeyBinding::new("ctrl-s", StashChanges, Some("Changes")),
+        // Back / forward, as in browsers and editors (the mouse side buttons too).
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-["
+            } else {
+                "ctrl-alt-left"
+            },
+            GoBack,
+            Some("Repo"),
+        ),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-]"
+            } else {
+                "ctrl-alt-right"
+            },
+            GoForward,
+            Some("Repo"),
+        ),
     ]);
 }
 
@@ -321,6 +343,8 @@ pub struct RepoView {
     pending_rebase: Option<drag_rebase::PendingRebase>,
     /// Stats view (computed on demand, kept per tab).
     stats: stats_panel::StatsState,
+    /// Where back / forward lead.
+    nav: nav::NavHistory,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -491,6 +515,7 @@ impl RepoView {
             slashed: None,
             pending_rebase: None,
             stats: Default::default(),
+            nav: Default::default(),
             _settings: cx.observe_global::<crate::settings::Revision>(|this, cx| {
                 let order = crate::settings::get().commit_order;
                 if order != this.commit_order {
@@ -698,6 +723,9 @@ impl RepoView {
                 .and_then(|b| b.upstream.clone());
             self.lookup_pr(&head, upstream.as_deref(), false, cx);
         }
+        // What a reload re-selected is no step back.
+        let place = self.place();
+        self.nav.settle(place);
     }
 
     /// Looks for finished worktrees (and their size) in the background when
@@ -783,6 +811,11 @@ impl RepoView {
                     this.commit_message = message.into();
                     this.commit_files = files.len();
                     this.commit_diff.update(cx, |d, cx| d.set_files(files, cx));
+                    // A file restored by back / forward before the diff was there.
+                    if let Some(path) = this.commit_file.clone() {
+                        this.commit_diff
+                            .update(cx, |d, cx| d.scroll_to_file(&path, cx));
+                    }
                 }
                 cx.notify();
             });
@@ -1671,6 +1704,7 @@ impl Render for RepoView {
             self.adopt_shared_layout(window, cx);
         }
         self.ensure_stats(cx);
+        self.track_place();
         // Keep keyboard shortcuts working in the Changes view (⌘A, ⌘S…).
         if self.focused
             && self.mode == Mode::Changes
@@ -1865,6 +1899,16 @@ impl Render for RepoView {
             .on_action(cx.listener(|this, _: &ShowHistory, _, cx| this.set_mode(Mode::History, cx)))
             .on_action(cx.listener(|this, _: &ShowChanges, _, cx| this.set_mode(Mode::Changes, cx)))
             .on_action(cx.listener(|this, _: &ShowStats, _, cx| this.set_mode(Mode::Stats, cx)))
+            .on_action(cx.listener(|this, _: &GoBack, _, cx| this.navigate(true, cx)))
+            .on_action(cx.listener(|this, _: &GoForward, _, cx| this.navigate(false, cx)))
+            .on_mouse_down(
+                gpui_kit::MouseButton::Navigate(gpui_kit::NavigationDirection::Back),
+                cx.listener(|this, _, _, cx| this.navigate(true, cx)),
+            )
+            .on_mouse_down(
+                gpui_kit::MouseButton::Navigate(gpui_kit::NavigationDirection::Forward),
+                cx.listener(|this, _, _, cx| this.navigate(false, cx)),
+            )
             .child(self.render_toolbar(cx))
             .children(self.render_rebase_popover(cx))
             .child(

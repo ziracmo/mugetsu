@@ -1194,6 +1194,22 @@ pub fn entries(ws: &Workspace, window: &Window, cx: &App) -> Vec<Entry> {
                 "statistics authors auteurs",
             ),
             a(
+                "go-back",
+                tr("Précédent", "Back"),
+                Lucide::ArrowLeft,
+                Box::new(repo::GoBack),
+                r,
+                "back retour previous précédent navigation",
+            ),
+            a(
+                "go-forward",
+                tr("Suivant", "Forward"),
+                Lucide::ArrowRight,
+                Box::new(repo::GoForward),
+                r,
+                "forward avancer next suivant navigation",
+            ),
+            a(
                 "reveal-head",
                 tr("Aller à HEAD", "Reveal HEAD"),
                 Lucide::Crosshair,
