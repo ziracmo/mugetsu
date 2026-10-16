@@ -1,0 +1,12 @@
+{
+  "version": "0.3.0",
+  "date": "2026-10-16",
+  "title": "Clean up dead worktrees",
+  "summary": "Mugetsu now spots linked worktrees you no longer need, shows how much space they take and removes them in one click.",
+  "features": [
+    { "id": "dead-worktrees", "title": "Spot and remove dead worktrees", "body": "A linked worktree is dead when its folder is gone, its branch or remote branch was deleted, or its work is merged into the default branch. The sidebar marks them with their size, and a header button removes them all after a confirmation.", "scene": "sidebar", "highlight": true },
+    { "id": "worktree-menu", "title": "Worktree menu", "body": "Every linked worktree gets a menu to open it, remove it or copy its path.", "scene": "sidebar" }
+  ],
+  "improvements": [],
+  "fixes": []
+}
