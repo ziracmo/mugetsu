@@ -24,6 +24,7 @@ mod session;
 mod settings;
 mod settings_view;
 mod theme;
+mod toast;
 mod welcome;
 mod workspace;
 

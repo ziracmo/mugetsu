@@ -191,7 +191,7 @@ impl RepoView {
                         "Stack restackée : {n} branche(s) poussée(s).",
                         "Stack restacked: {n} branch(es) pushed."
                     )),
-                    Err(e) => Notification::error(trf!("Restack : {e:#}", "Restack: {e:#}")),
+                    Err(e) => crate::toast::error(tr("Restack : échec", "Restack failed"), e, None),
                 };
                 window.push_notification(note, cx);
                 let phase = match result {
