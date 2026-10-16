@@ -1173,6 +1173,8 @@ fn deleting_a_remote_branch_can_delete_its_local_copy_too(cx: &mut TestAppContex
             v.request_delete_remote_branch("origin".into(), "feature".into(), window, cx)
         })
     });
+    // The dialog slides in first, as in the reset dialog test.
+    std::thread::sleep(Duration::from_millis(500));
     ui_step(cx, handle, &|window, cx| window.click("confirm-option", cx));
     ui_step(cx, handle, &|window, cx| window.click("confirm-ok", cx));
     settle(cx, &view);
