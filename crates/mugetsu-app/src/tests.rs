@@ -1152,6 +1152,8 @@ fn settings_sections_and_ai_tool_presets(cx: &mut TestAppContext) {
         window.render_frame(cx);
         window.click("ai-tool-codex", cx);
         window.render_frame(cx);
+        window.click("ai-terminal-system", cx);
+        window.render_frame(cx);
     })
     .unwrap();
     cx.run_until_parked();
@@ -1159,6 +1161,7 @@ fn settings_sections_and_ai_tool_presets(cx: &mut TestAppContext) {
     let s = crate::settings::get();
     assert_eq!(s.ai_tool, AiTool::Codex);
     assert_eq!(Some(s.ai_command.as_str()), AiTool::Codex.preset());
+    assert_eq!(s.ai_terminal, crate::settings::AiTerminal::System);
 }
 
 #[gpui_kit::test]

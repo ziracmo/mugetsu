@@ -85,6 +85,9 @@ pub struct Settings {
     pub ai_tool: AiTool,
     /// Shell command run in a terminal for that review; see [`crate::ai_review`].
     pub ai_command: String,
+    /// Where that command runs; see [`crate::ai_review::terminals`].
+    #[serde(deserialize_with = "or_default")]
+    pub ai_terminal: AiTerminal,
     /// System notifications about pull requests (all off by default).
     pub notifications: Notifications,
     /// GitLab personal access token (else `GITLAB_TOKEN` or the `glab` login).
@@ -146,6 +149,54 @@ impl AiTool {
     }
 }
 
+/// A value from a newer version, unknown here, reads as the default instead
+/// of failing the whole file.
+fn or_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+/// Where a PR's "Review with AI" runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiTerminal {
+    /// Terminal.app, Windows Terminal (else PowerShell), or the Linux default;
+    /// also what an unknown saved value falls back to.
+    #[default]
+    System,
+    Iterm,
+    Ghostty,
+    Wezterm,
+    Kitty,
+    Alacritty,
+    Powershell,
+    Cmd,
+    /// The Claude desktop app, as a new Claude Code session.
+    Desktop,
+}
+
+impl AiTerminal {
+    pub fn label(self) -> &'static str {
+        match self {
+            AiTerminal::System if cfg!(target_os = "macos") => "Terminal",
+            AiTerminal::System if cfg!(windows) => "Windows Terminal",
+            AiTerminal::System => crate::i18n::tr("Terminal par défaut", "Default terminal"),
+            AiTerminal::Iterm => "iTerm2",
+            AiTerminal::Ghostty => "Ghostty",
+            AiTerminal::Wezterm => "WezTerm",
+            AiTerminal::Kitty => "kitty",
+            AiTerminal::Alacritty => "Alacritty",
+            AiTerminal::Powershell => "PowerShell",
+            AiTerminal::Cmd => "cmd",
+            AiTerminal::Desktop => "Claude Desktop",
+        }
+    }
+}
+
 /// PRs tab quick filter, shared by every repository.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -182,6 +233,7 @@ impl Default for Settings {
             history_compact: false,
             ai_tool: AiTool::Claude,
             ai_command: AiTool::Claude.preset().unwrap_or_default().to_string(),
+            ai_terminal: AiTerminal::System,
             notifications: Notifications::default(),
             gitlab_token: String::new(),
             gitlab_hosts: Vec::new(),
@@ -356,5 +408,8 @@ mod tests {
         assert_eq!(s.commit_order, CommitSort::Topological);
         assert_eq!(s.sections().len(), 5);
         assert!(!s.notifications.any(), "notifications start switched off");
+        assert_eq!(s.ai_terminal, AiTerminal::System);
+        let s: Settings = serde_json::from_str(r#"{"ai_terminal":"hyper"}"#).unwrap();
+        assert_eq!(s.ai_terminal, AiTerminal::System, "unknown terminal");
     }
 }
