@@ -30,7 +30,14 @@ use crate::workspace::Workspace;
 
 gpui_kit::actions!(
     palette,
-    [TogglePalette, SelectPrev, SelectNext, Confirm, Dismiss]
+    [
+        TogglePalette,
+        SearchBranches,
+        SelectPrev,
+        SelectNext,
+        Confirm,
+        Dismiss
+    ]
 );
 
 const CONTEXT: &str = "CommandPalette";
@@ -43,6 +50,7 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-k", TogglePalette, Some("Workspace")),
         KeyBinding::new("secondary-k", Dismiss, list),
+        KeyBinding::new("secondary-p", SearchBranches, Some("Workspace")),
         KeyBinding::new("up", SelectPrev, field),
         KeyBinding::new("down", SelectNext, field),
         KeyBinding::new("ctrl-p", SelectPrev, field),
@@ -338,13 +346,30 @@ impl EventEmitter<PaletteEvent> for Palette {}
 static OPENINGS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 impl Palette {
-    pub fn new(entries: Vec<Entry>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(tr(
+    /// `branches_only`: ⌘P, the palette narrowed to the branches.
+    pub fn new(
+        entries: Vec<Entry>,
+        branches_only: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let entries: Vec<Entry> = if branches_only {
+            entries
+                .into_iter()
+                .filter(|e| e.kind == Kind::Branch)
+                .collect()
+        } else {
+            entries
+        };
+        let placeholder = if branches_only {
+            tr("Rechercher une branche…", "Search branches…")
+        } else {
+            tr(
                 "Rechercher une action, un dépôt, une branche…",
                 "Search actions, repositories, branches…",
-            ))
-        });
+            )
+        };
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         let sub = cx.subscribe(&input, |this, _, ev: &InputEvent, cx| {
             if matches!(ev, InputEvent::Change) {
                 this.refilter(cx);
