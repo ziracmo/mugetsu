@@ -1,0 +1,13 @@
+{
+  "version": "0.2.1",
+  "date": "2026-10-16",
+  "title": "Windows fixes",
+  "summary": "Git commands no longer open a console window on Windows, and the app shows its icon there.",
+  "features": [],
+  "improvements": [
+    { "id": "windows-icon", "title": "Mugetsu icon on Windows", "body": "The app, its taskbar entry and the installer now show the Mugetsu icon." }
+  ],
+  "fixes": [
+    { "id": "windows-console", "title": "No more console windows on Windows", "body": "Every git, gh or glab command used to flash a terminal window; they now run hidden.", "highlight": true }
+  ]
+}
