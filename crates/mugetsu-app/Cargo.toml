@@ -12,6 +12,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 chrono = "0.4.45"
 dirs = "7.0.0"
+resvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 gix = { version = "0.89", default-features = false }
 gpui-kit = "0.7.3"
 mugetsu-forge = { version = "0.3.0", path = "../mugetsu-forge" }

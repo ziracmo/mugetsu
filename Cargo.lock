@@ -5092,6 +5092,7 @@ dependencies = [
  "mugetsu-forge",
  "mugetsu-git",
  "objc",
+ "resvg 0.46.0",
  "serde",
  "serde_json",
  "smallvec",

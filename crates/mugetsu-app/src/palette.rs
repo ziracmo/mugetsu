@@ -1276,6 +1276,24 @@ pub fn entries(ws: &Workspace, window: &Window, cx: &App) -> Vec<Entry> {
         ),
     ]);
     if has_repo {
+        out.extend([
+            a(
+                "overview",
+                tr("Vue d'ensemble", "Overview"),
+                Lucide::LayoutGrid,
+                Box::new(wsa::ToggleOverview),
+                w,
+                "overview dashboard tableau de bord repos dépôts accueil home",
+            ),
+            a(
+                "recap",
+                tr("Recap de la semaine", "Weekly Recap"),
+                Lucide::Sparkles,
+                Box::new(wsa::OpenRecap),
+                w,
+                "recap semaine week weekly bilan productivité productivity wrapped",
+            ),
+        ]);
         out.push(a(
             "close-tab",
             tr("Fermer l'onglet", "Close Tab"),

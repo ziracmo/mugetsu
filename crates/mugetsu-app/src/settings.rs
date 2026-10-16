@@ -121,6 +121,10 @@ pub struct Settings {
     pub clone_ask: bool,
     /// Clone over HTTPS (`Some(true)`) or SSH; `None` picks SSH when a key exists.
     pub clone_https: Option<bool>,
+    /// Offer the weekly recap on Friday afternoons.
+    pub recap_reminder: bool,
+    /// ISO week the recap was last offered (`2026-W42`).
+    pub recap_offered: String,
 }
 
 /// Which branch deletes skip the confirmation. A local one is then forced
@@ -280,6 +284,8 @@ impl Default for Settings {
             clone_dir: None,
             clone_ask: false,
             clone_https: None,
+            recap_reminder: true,
+            recap_offered: String::new(),
         }
     }
 }

@@ -75,6 +75,7 @@ fn init(cx: &mut TestAppContext) {
         crate::workspace::init(cx);
         crate::repo_view::init(cx);
         crate::palette::init(cx);
+        crate::recap::init(cx);
     });
 }
 
@@ -2117,4 +2118,134 @@ fn file_context_menu_opens_history_and_blame(cx: &mut TestAppContext) {
     });
     ui_step(cx, handle, &|window, cx| window.click("file-close", cx));
     cx.read(|cx| assert_eq!(view.read(cx).mode(), Mode::History));
+}
+
+// ---- Overview and weekly recap ---------------------------------------------
+
+fn open_workspace(
+    cx: &mut TestAppContext,
+    repos: Vec<std::path::PathBuf>,
+) -> (AnyWindowHandle, Entity<Workspace>) {
+    let session = session_of(repos, 0);
+    let (handle, ws) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| Workspace::new(session, false, window, cx))
+        })
+        .unwrap()
+    });
+    for tab in cx.read(|cx| ws.read(cx).tabs()) {
+        settle(cx, &tab);
+    }
+    (handle, ws)
+}
+
+#[gpui_kit::test]
+fn overview_cards_lead_to_what_needs_doing(cx: &mut TestAppContext) {
+    init(cx);
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    fixture(a.path());
+    fixture(b.path());
+    std::fs::write(b.path().join("draft.txt"), "wip\n").unwrap();
+    let (handle, ws) = open_workspace(cx, vec![a.path().to_path_buf(), b.path().to_path_buf()]);
+    let tabs = cx.read(|cx| ws.read(cx).tabs());
+    let card = cx.read(|cx| tabs[1].read(cx).card());
+    assert_eq!(card.signals(), [crate::overview::Signal::Dirty(1)]);
+    assert!(cx.read(|cx| tabs[0].read(cx).card().signals().is_empty()));
+
+    ui_step(cx, handle, &|window, cx| {
+        window.click("overview-toggle", cx)
+    });
+    assert!(cx.read(|cx| ws.read(cx).overview_shown()));
+    let name = cx.read(|cx| tabs[1].read(cx).name());
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("overview").is_some());
+        assert!(
+            window
+                .try_find(gpui_kit::SharedString::from(format!(
+                    "overview-card-{name}"
+                )))
+                .is_some()
+        );
+    })
+    .unwrap();
+
+    // The second card's first signal: its tab, on the Changes view.
+    ui_step(cx, handle, &|window, cx| {
+        window.click("overview-signal-1-0", cx)
+    });
+    assert!(!cx.read(|cx| ws.read(cx).overview_shown()));
+    assert_eq!(cx.read(|cx| ws.read(cx).active_index()), 1);
+    assert_eq!(cx.read(|cx| tabs[1].read(cx).mode()), Mode::Changes);
+
+    // ⇧⌘O comes back to it, a tab click leaves it.
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-shift-o"
+    } else {
+        "ctrl-shift-o"
+    });
+    vcx.run_until_parked();
+    assert!(cx.read(|cx| ws.read(cx).overview_shown()));
+    let first = cx.read(|cx| tabs[0].read(cx).name());
+    ui_step(cx, handle, &|window, cx| {
+        window.click(gpui_kit::SharedString::from(format!("tab-{first}")), cx)
+    });
+    assert!(!cx.read(|cx| ws.read(cx).overview_shown()));
+    assert_eq!(cx.read(|cx| ws.read(cx).active_index()), 0);
+}
+
+#[gpui_kit::test]
+fn weekly_recap_counts_my_commits_and_steps_through_slides(cx: &mut TestAppContext) {
+    init(cx);
+    let a = tempfile::tempdir().unwrap();
+    fixture(a.path());
+    let (handle, ws) = open_workspace(cx, vec![a.path().to_path_buf()]);
+    ui_step(cx, handle, &|window, cx| {
+        ws.update(cx, |ws, cx| ws.open_recap(window, cx))
+    });
+    let recap = cx.read(|cx| ws.read(cx).recap()).expect("recap shown");
+    let mut computed = None;
+    for _ in 0..200 {
+        cx.run_until_parked();
+        computed = cx.read(|cx| recap.read(cx).computed());
+        if computed.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let computed = computed.expect("recap loaded");
+    // c1, c2, f1 and "topic work" (merges left out), all by the repo's user.
+    assert_eq!(computed.mine.week.commits, 4);
+    assert_eq!(computed.team.week.commits, 4);
+    assert_eq!(computed.team.week.people.len(), 1);
+
+    let (slide, count, team) = cx.read(|cx| recap.read(cx).position());
+    assert_eq!((slide, team), (0, false));
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("right right");
+    vcx.run_until_parked();
+    assert_eq!(cx.read(|cx| recap.read(cx).position().0), 2);
+    vcx.simulate_keystrokes("tab");
+    vcx.run_until_parked();
+    assert!(
+        cx.read(|cx| recap.read(cx).position().2),
+        "tab switches to the team"
+    );
+    for _ in 0..count {
+        vcx.simulate_keystrokes("right");
+    }
+    vcx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("recap-export").is_some(),
+            "last slide exports"
+        );
+    })
+    .unwrap();
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    assert!(cx.read(|cx| ws.read(cx).recap()).is_none());
 }

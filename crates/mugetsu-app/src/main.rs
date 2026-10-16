@@ -16,8 +16,10 @@ mod graph_view;
 mod model;
 mod notify;
 mod open_repo;
+mod overview;
 mod palette;
 mod pr;
+mod recap;
 mod repo_icon;
 mod repo_view;
 mod session;
@@ -118,6 +120,7 @@ fn main() {
             repo_view::init(cx);
             app_menu::init(cx);
             palette::init(cx);
+            recap::init(cx);
             let main =
                 open_workspace_window(session, true, cx).expect("failed to open the main window");
             cx.set_global(app_menu::MainWorkspace(main.0, main.1.clone()));
