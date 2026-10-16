@@ -125,6 +125,10 @@ pub fn set(cx: &mut App) {
             MenuItem::action(tr("Historique", "History"), repo::ShowHistory),
             MenuItem::action("Stats", repo::ShowStats),
             MenuItem::action(tr("Aller à HEAD", "Reveal HEAD"), repo::RevealHead),
+            MenuItem::separator(),
+            MenuItem::action(tr("Précédent", "Back"), repo::GoBack),
+            MenuItem::action(tr("Suivant", "Forward"), repo::GoForward),
+            MenuItem::separator(),
             MenuItem::action(
                 tr("Rechercher des commits", "Search Commits"),
                 repo::SearchCommits,

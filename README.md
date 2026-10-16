@@ -126,6 +126,7 @@ On Windows, use Ctrl instead of ⌘.
 | Reveal HEAD | ⌘0 (or F) |
 | Compact history | ⇧⌘K |
 | Previous / next commit | ↑ ↓ (or k j) |
+| Back / forward (view, commit, file) | ⌘[ / ⌘] (Ctrl+Alt+← / → on Windows), or the mouse side buttons |
 | Open repository / New tab / Close tab | ⌘O / ⌘T / ⌘W |
 | New window | ⇧⌘N |
 | Switch tab | ⌃Tab / ⌃⇧Tab |

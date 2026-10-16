@@ -2249,3 +2249,81 @@ fn weekly_recap_counts_my_commits_and_steps_through_slides(cx: &mut TestAppConte
     vcx.run_until_parked();
     assert!(cx.read(|cx| ws.read(cx).recap()).is_none());
 }
+
+#[gpui_kit::test]
+fn side_buttons_and_shortcuts_go_back_and_forward(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let (head, other) = cx.read(|cx| {
+        let v = view.read(cx);
+        let head = v.data().refs.head.unwrap();
+        let other = v
+            .data()
+            .history
+            .commits
+            .iter()
+            .map(|c| c.id)
+            .find(|id| *id != head);
+        (head, other.unwrap())
+    });
+    let step = |cx: &mut TestAppContext,
+                f: &dyn Fn(&mut RepoView, &mut gpui_kit::Context<RepoView>)| {
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |v, cx| f(v, cx));
+            window.render_frame(cx);
+        })
+        .unwrap();
+    };
+    step(cx, &|_, _| {});
+    step(cx, &|v, cx| v.select_commit(other, true, cx));
+    step(cx, &|v, cx| v.set_mode(Mode::Stats, cx));
+    assert!(cx.read(|cx| !view.read(cx).can_navigate(false)));
+
+    // The mouse's back button, anywhere over the tab (here a stats button).
+    cx.update_window(handle, |_, window, cx| {
+        let position = window
+            .find(gpui_kit::ElementId::Name("stats-period-30".into()))
+            .bounds()
+            .center();
+        window.dispatch_event(
+            gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                button: gpui_kit::MouseButton::Navigate(gpui_kit::NavigationDirection::Back),
+                position,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.read(|cx| {
+        assert_eq!(view.read(cx).mode(), Mode::History);
+        assert_eq!(view.read(cx).selected_commit(), Some(other));
+    });
+
+    // Then the keyboard: back to HEAD, forward twice to the stats.
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| window.focus(&v.history_focus_handle(), cx));
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let (back, forward) = if cfg!(target_os = "macos") {
+        ("cmd-[", "cmd-]")
+    } else {
+        ("ctrl-alt-left", "ctrl-alt-right")
+    };
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes(back);
+    vcx.run_until_parked();
+    assert_eq!(cx.read(|cx| view.read(cx).selected_commit()), Some(head));
+    assert!(cx.read(|cx| !view.read(cx).can_navigate(true)));
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle, cx);
+    vcx.simulate_keystrokes(forward);
+    vcx.simulate_keystrokes(forward);
+    vcx.run_until_parked();
+    assert_eq!(cx.read(|cx| view.read(cx).mode()), Mode::Stats);
+}
