@@ -1250,31 +1250,7 @@ impl RepoView {
                         cx.notify();
                     }
                     Err(e) => {
-                        let force = (!force && crate::toast::is_unmerged_branch(&e)).then(|| {
-                            let view = cx.entity().downgrade();
-                            let name = name.clone();
-                            let action: crate::toast::Action = (
-                                tr("Forcer la suppression…", "Force delete…").into(),
-                                std::rc::Rc::new(move |window, cx| {
-                                    let name = name.clone();
-                                    let _ = view.update(cx, |this, cx| {
-                                        this.confirm_force_delete(name, window, cx)
-                                    });
-                                }),
-                            );
-                            action
-                        });
-                        window.push_notification(
-                            crate::toast::error(
-                                trf!(
-                                    "Impossible de supprimer « {name} »",
-                                    "Couldn't delete '{name}'"
-                                ),
-                                &e,
-                                force,
-                            ),
-                            cx,
-                        );
+                        this.delete_failed(name, force, &e, window, cx);
                         this.reload(cx);
                     }
                 }
@@ -1290,6 +1266,40 @@ impl RepoView {
             }
         });
         cx.notify();
+    }
+
+    /// Toasts a failed branch delete; an unmerged refusal offers to force it.
+    fn delete_failed(
+        &mut self,
+        name: String,
+        force: bool,
+        e: &anyhow::Error,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let force = (!force && crate::toast::is_unmerged_branch(e)).then(|| {
+            let view = cx.entity().downgrade();
+            let name = name.clone();
+            let action: crate::toast::Action = (
+                tr("Forcer la suppression…", "Force delete…").into(),
+                std::rc::Rc::new(move |window, cx| {
+                    let name = name.clone();
+                    let _ = view.update(cx, |this, cx| this.confirm_force_delete(name, window, cx));
+                }),
+            );
+            action
+        });
+        window.push_notification(
+            crate::toast::error(
+                trf!(
+                    "Impossible de supprimer « {name} »",
+                    "Couldn't delete '{name}'"
+                ),
+                e,
+                force,
+            ),
+            cx,
+        );
     }
 
     /// Asks before `git branch -D`: the branch's unmerged commits are lost.
@@ -1420,15 +1430,43 @@ impl RepoView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let force = crate::settings::get().force_delete.local;
+        // Both in one operation: the local delete starts once the remote one is done.
+        let deleted_local = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let outcome = deleted_local.clone();
         self.run_op_then(
             tr("Supprimer", "Delete"),
-            move |r| r.delete_remote_branch(&remote, &branch),
-            move |_, window, cx| {
+            move |r| {
+                r.delete_remote_branch(&remote, &branch)?;
                 if let Some(local) = local {
-                    let force = crate::settings::get().force_delete.local;
-                    cx.defer_in(window, move |this, window, cx| {
-                        this.delete_branch(local, force, window, cx)
-                    });
+                    let result = r.delete_branch(&local, force);
+                    *outcome.lock().unwrap() = Some((local, result));
+                }
+                Ok(())
+            },
+            move |this, window, cx| {
+                let Some((name, result)) = deleted_local.lock().unwrap().take() else {
+                    return;
+                };
+                match result {
+                    Ok(()) => {
+                        this.celebrate_seq += 1;
+                        let seq = this.celebrate_seq;
+                        this.slashed = Some((name, seq));
+                        cx.spawn(async move |this, cx| {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(750))
+                                .await;
+                            let _ = this.update(cx, |this, cx| {
+                                if this.slashed.as_ref().is_some_and(|(_, s)| *s == seq) {
+                                    this.slashed = None;
+                                    cx.notify();
+                                }
+                            });
+                        })
+                        .detach();
+                    }
+                    Err(e) => this.delete_failed(name, force, &e, window, cx),
                 }
             },
             window,
