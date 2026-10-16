@@ -768,10 +768,9 @@ fn double_clicking_a_remote_branch_offers_to_reset_its_local_copy(cx: &mut TestA
     .unwrap();
     std::thread::sleep(Duration::from_millis(500));
     ui_step(cx, handle, &|window, cx| window.click("reset-ok", cx));
-    for _ in 0..50 {
-        std::thread::sleep(Duration::from_millis(20));
-        settle(cx, &view);
-    }
+    // The sheet plays its send-off before resetting.
+    cx.executor().advance_clock(Duration::from_millis(500));
+    settle(cx, &view);
     assert_eq!(
         git(dir.path(), &["branch", "--show-current"]).trim(),
         "topic"
