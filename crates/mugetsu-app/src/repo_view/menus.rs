@@ -338,7 +338,7 @@ pub fn local_branch_menu(menu: PopupMenu, ctx: &MenuContext, b: &BranchMenu) -> 
                     )
                     .into(),
                     tr("Supprimer", "Delete"),
-                    move |this, window, cx| this.delete_branch(name.clone(), window, cx),
+                    move |this, window, cx| this.delete_branch(name.clone(), false, window, cx),
                     window,
                     cx,
                 );
@@ -801,9 +801,7 @@ impl RepoView {
             if let Err(e) = result {
                 let _ = this.update_in(cx, |_, window, cx| {
                     window.push_notification(
-                        gpui_kit::component::notification::Notification::error(format!(
-                            "Patch : {e:#}"
-                        )),
+                        crate::toast::error(tr("Patch : échec", "Patch failed"), &e, None),
                         cx,
                     )
                 });

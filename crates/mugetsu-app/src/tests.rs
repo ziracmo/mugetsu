@@ -1026,7 +1026,9 @@ fn deleting_a_branch_slashes_its_chip(cx: &mut TestAppContext) {
     fixture(dir.path());
     let (handle, view) = open_repo_view(cx, dir.path());
     cx.update_window(handle, |_, window, cx| {
-        view.update(cx, |v, cx| v.delete_branch("feature".into(), window, cx));
+        view.update(cx, |v, cx| {
+            v.delete_branch("feature".into(), false, window, cx)
+        });
     })
     .unwrap();
     settle(cx, &view);
@@ -1034,6 +1036,27 @@ fn deleting_a_branch_slashes_its_chip(cx: &mut TestAppContext) {
     cx.read(|cx| assert_eq!(view.read(cx).slashed_branch().as_deref(), Some("feature")));
     cx.update_window(handle, |_, window, cx| window.render_frame(cx))
         .unwrap();
+}
+
+#[gpui_kit::test]
+fn an_unmerged_branch_is_only_deleted_when_forced(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let delete = |force, cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |v, cx| {
+                v.delete_branch("topic".into(), force, window, cx)
+            });
+        })
+        .unwrap();
+        settle(cx, &view);
+    };
+    delete(false, cx);
+    assert!(git(dir.path(), &["branch", "--list", "topic"]).contains("topic"));
+    delete(true, cx);
+    assert!(!git(dir.path(), &["branch", "--list", "topic"]).contains("topic"));
 }
 
 #[gpui_kit::test]

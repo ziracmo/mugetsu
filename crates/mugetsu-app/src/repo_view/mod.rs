@@ -932,10 +932,7 @@ impl RepoView {
                         cx,
                     ),
                     Err(e) => window.push_notification(
-                        gpui_kit::component::notification::Notification::error(trf!(
-                            "{label} : {e:#}",
-                            "{label}: {e:#}"
-                        )),
+                        crate::toast::error(trf!("{label} : échec", "{label} failed"), &e, None),
                         cx,
                     ),
                 }
@@ -1149,8 +1146,15 @@ impl RepoView {
     }
 
     /// Deletes a local branch; on success its chip is slashed in two, then the
-    /// view reloads (the chip goes away).
-    pub fn delete_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// view reloads (the chip goes away). `force` deletes it even unmerged; an
+    /// unmerged refusal offers that in its toast, behind a confirmation.
+    pub fn delete_branch(
+        &mut self,
+        name: String,
+        force: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.busy.is_some() {
             return;
         }
@@ -1159,7 +1163,7 @@ impl RepoView {
         let branch = name.clone();
         self._op = cx.spawn_in(window, async move |this, cx| {
             let result = cx
-                .background_spawn(async move { repo.delete_branch(&branch, false) })
+                .background_spawn(async move { repo.delete_branch(&branch, force) })
                 .await;
             let ok = result.is_ok();
             let _ = this.update_in(cx, |this, window, cx| {
@@ -1171,11 +1175,29 @@ impl RepoView {
                         cx.notify();
                     }
                     Err(e) => {
+                        let force = (!force && crate::toast::is_unmerged_branch(&e)).then(|| {
+                            let view = cx.entity().downgrade();
+                            let name = name.clone();
+                            let action: crate::toast::Action = (
+                                tr("Forcer la suppression…", "Force delete…").into(),
+                                std::rc::Rc::new(move |window, cx| {
+                                    let name = name.clone();
+                                    let _ = view.update(cx, |this, cx| {
+                                        this.confirm_force_delete(name, window, cx)
+                                    });
+                                }),
+                            );
+                            action
+                        });
                         window.push_notification(
-                            gpui_kit::component::notification::Notification::error(trf!(
-                                "Supprimer : {e:#}",
-                                "Delete: {e:#}"
-                            )),
+                            crate::toast::error(
+                                trf!(
+                                    "Impossible de supprimer « {name} »",
+                                    "Couldn't delete '{name}'"
+                                ),
+                                &e,
+                                force,
+                            ),
                             cx,
                         );
                         this.reload(cx);
@@ -1193,6 +1215,30 @@ impl RepoView {
             }
         });
         cx.notify();
+    }
+
+    /// Asks before `git branch -D`: the branch's unmerged commits are lost.
+    pub fn confirm_force_delete(
+        &mut self,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm(
+            trf!(
+                "Forcer la suppression de « {name} » ?",
+                "Force delete '{name}'?"
+            ),
+            tr(
+                "La branche n'est pas mergée : ses commits qui ne sont sur aucune autre branche seront perdus.",
+                "The branch isn't merged: its commits that are on no other branch will be lost.",
+            )
+            .into(),
+            tr("Forcer la suppression", "Force delete"),
+            move |this, window, cx| this.delete_branch(name.clone(), true, window, cx),
+            window,
+            cx,
+        );
     }
 
     #[cfg(test)]

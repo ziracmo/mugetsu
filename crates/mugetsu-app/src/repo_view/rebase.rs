@@ -735,7 +735,7 @@ impl RepoView {
                 .await;
             let _ = this.update_in(cx, |this, window, cx| match plan {
                 Err(e) => window.push_notification(
-                    Notification::error(trf!("Rebase : {e:#}", "Rebase: {e:#}")),
+                    crate::toast::error(tr("Rebase : échec", "Rebase failed"), &e, None),
                     cx,
                 ),
                 Ok(commits) if commits.is_empty() => window.push_notification(
