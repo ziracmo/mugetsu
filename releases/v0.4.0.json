@@ -1,0 +1,27 @@
+{
+  "version": "0.4.0",
+  "date": "2026-10-19",
+  "title": "Workspace overview, clone from your forges, multi-branch actions and drag rebase",
+  "summary": "A workspace overview shows what needs doing across every open repository, with an animated weekly recap. ⌘O clones straight from GitHub, GitLab and Bitbucket, branches can be picked several at a time, a branch chip drags onto another to rebase it, and every file gets Blame and File history.",
+  "features": [
+    { "id": "workspace-overview", "title": "Workspace overview", "body": "The grid icon left of the tabs (⇧⌘O) shows a card per open repository with what needs doing first: conflicts, failing CI or changes requested on your PRs, reviews waiting, commits to pull or push, uncommitted files, gone branches, finished worktrees. Below, one to-do list across repositories and your pull requests. Click a signal to jump there.", "scene": "sidebar", "highlight": true },
+    { "id": "weekly-recap", "title": "Animated weekly recap", "body": "Slides of your week or your team's: commits per day, lines, rhythm, hot files, podium or merged PRs, each against last week. The summary exports as an image, and a toast offers it on Friday afternoons." },
+    { "id": "clone", "title": "Clone from GitHub, GitLab and Bitbucket", "body": "⌘O lists the repositories of your connected accounts next to the local ones, and a pasted URL becomes a clone row. The clone runs with an animated progress view and opens in a new tab. Settings › Repositories sets the workspace folder and SSH or HTTPS.", "highlight": true },
+    { "id": "drag-rebase", "title": "Drag a branch to rebase it", "body": "Drag a branch chip onto another branch or any history row to rebase it there. Branches other than HEAD are rebased off to the side, so it works with uncommitted changes and never touches your checkout.", "scene": "graph", "highlight": true },
+    { "id": "multi-select-branches", "title": "Act on several branches at once", "body": "⌘/Ctrl-click picks branches in the sidebar or the history, shift-click picks a range. Then delete or rebase them all together.", "scene": "sidebar" },
+    { "id": "blame-history", "title": "Blame and File history", "body": "Right-click a file: Blame shows who last changed each line, age-shaded, and File history lists every commit that touched it, following renames.", "scene": "diff" },
+    { "id": "back-forward", "title": "Back and forward", "body": "Each tab remembers where you were (view, commit, file, PR). Mouse side buttons, ⌘[ / ⌘] or Ctrl+Alt+← / → step back and forward." },
+    { "id": "svg-diff", "title": "SVG preview in diffs", "body": "Changed SVG files render before and after above their text diff.", "scene": "diff" },
+    { "id": "sidebar-pulse", "title": "Sidebar pulse", "body": "A small graph at the foot of the sidebar shows commits per day over the last 30 days.", "scene": "sidebar" }
+  ],
+  "improvements": [
+    { "id": "compact-history", "title": "Compact view filters", "body": "Filter branches by author and sort them by date or size.", "scene": "graph" },
+    { "id": "commit-details-layout", "title": "Commit details below or beside", "body": "A toolbar button moves the commit details panel to the right of the history; the choice is saved." },
+    { "id": "branch-delete", "title": "Faster branch deletes", "body": "A setting skips the question, and deleting a remote branch can delete its local copy in the same operation." },
+    { "id": "pr-hover", "title": "PR hover card", "body": "The loading reveal is now a liquid gradient flowing around the card's border.", "scene": "pr" },
+    { "id": "opening", "title": "Opening title", "body": "The eclipse holds the finished title for half a second before fading.", "scene": "eclipse" }
+  ],
+  "fixes": [
+    { "id": "open-repository-enter", "title": "Enter in Open Repository", "body": "Enter in the repository picker was swallowed; it now confirms." }
+  ]
+}
