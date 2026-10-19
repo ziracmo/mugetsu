@@ -54,6 +54,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: scripts/bundle-macos.sh --universal
       - run: scripts/dmg-macos.sh dist/Mugetsu.dmg
+      # On pull requests, photograph the mounted DMG's Finder window so layout changes can be checked.
+      - name: Screenshot the DMG window
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          hdiutil attach dist/Mugetsu.dmg
+          open /Volumes/Mugetsu
+          sleep 6
+          mkdir -p preview && screencapture -x preview/dmg-window.png
+          hdiutil detach /Volumes/Mugetsu || true
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: dmg-preview
+          path: preview
       - uses: actions/upload-artifact@v4
         with:
           name: macos
