@@ -726,6 +726,54 @@ fn dropping_a_branch_chip_on_another_rebases_it_after_asking(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn rebasing_the_checkout_over_changes_asks_to_stash_or_discard_them(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    git(dir.path(), &["switch", "-q", "topic"]);
+    let t = dir.path().join("t.txt");
+    std::fs::write(&t, "mine\n").unwrap();
+    let (handle, view) = open_repo_view(cx, dir.path());
+    let drop_topic_on_main = |window: &mut gpui_kit::Window, cx: &mut gpui_kit::App| {
+        let from = window.find("chip-topic").bounds().center();
+        let to = window.find("chip-main").bounds().center();
+        window.drag(from, to, cx);
+    };
+    // Stashed, rebased, reapplied.
+    ui_step(cx, handle, &drop_topic_on_main);
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("drag-rebase").is_none())
+    });
+    ui_step(cx, handle, &|window, cx| {
+        window.click("rebase-changes-stash", cx)
+    });
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["rev-parse", "topic~1"]),
+        git(dir.path(), &["rev-parse", "main"])
+    );
+    assert_eq!(std::fs::read_to_string(&t).unwrap(), "mine\n");
+    assert!(git(dir.path(), &["stash", "list"]).is_empty());
+
+    // Discarded.
+    git(dir.path(), &["reset", "-q", "--hard", "main~1"]);
+    commit_file(dir.path(), "t.txt", "t\n", "topic work");
+    std::fs::write(&t, "mine\n").unwrap();
+    view.update(cx, |v, cx| v.reload(cx));
+    settle(cx, &view);
+    ui_step(cx, handle, &drop_topic_on_main);
+    ui_step(cx, handle, &|window, cx| {
+        window.click("rebase-changes-discard", cx)
+    });
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["rev-parse", "topic~1"]),
+        git(dir.path(), &["rev-parse", "main"])
+    );
+    assert_eq!(std::fs::read_to_string(&t).unwrap(), "t\n");
+}
+
+#[gpui_kit::test]
 fn dropping_a_branch_chip_on_a_row_rebases_it_without_touching_the_checkout(
     cx: &mut TestAppContext,
 ) {
@@ -1991,7 +2039,9 @@ fn stopped_interactive_rebase_opens_the_resolver(cx: &mut TestAppContext) {
         .collect();
     ui_step(cx, handle, &|window, cx| {
         let (base, steps) = (base.clone(), swapped.clone());
-        view.update(cx, |v, cx| v.run_rebase(base, steps, window, cx))
+        view.update(cx, |v, cx| {
+            v.run_rebase(base, steps, mugetsu_git::LocalChanges::Stash, window, cx)
+        })
     });
     settle(cx, &view);
     cx.read(|cx| {

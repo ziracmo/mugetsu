@@ -2,7 +2,7 @@
 
 use anyhow::bail;
 
-use crate::Repo;
+use crate::{LocalChanges, Repo};
 
 /// What a batch delete did: the branches deleted, and those git refused with
 /// its reason (`unmerged` set when only `-D` would delete it).
@@ -33,11 +33,38 @@ impl Repo {
     }
 
     /// Rebases each branch onto `onto`, then puts HEAD back. All or nothing:
-    /// on a conflict every branch goes back to where it was.
-    pub fn rebase_branches(&self, onto: &str, names: &[String]) -> anyhow::Result<()> {
-        if self.is_dirty()? {
+    /// on a conflict every branch goes back to where it was. Uncommitted
+    /// changes are refused with [`LocalChanges::Keep`]; stashed ones are
+    /// reapplied at the end ([`StashConflict`] if that conflicts).
+    ///
+    /// [`StashConflict`]: crate::StashConflict
+    pub fn rebase_branches(
+        &self,
+        onto: &str,
+        names: &[String],
+        changes: LocalChanges,
+    ) -> anyhow::Result<()> {
+        let dirty = self.has_tracked_changes()?;
+        if dirty && changes == LocalChanges::Keep {
             bail!("commit or stash your changes first");
         }
+        self.discard_for(changes)?;
+        let stashed = dirty && changes == LocalChanges::Stash;
+        if stashed {
+            self.stash_push(Some(&format!("Mugetsu: rebase onto {onto}")))?;
+        }
+        let result = self.rebase_each(onto, names);
+        if stashed {
+            let popped = self.git().run(["stash", "pop"]);
+            if popped.is_err() && !self.conflicted_paths()?.is_empty() {
+                return result.and(Err(crate::StashConflict.into()));
+            }
+            popped?;
+        }
+        result
+    }
+
+    fn rebase_each(&self, onto: &str, names: &[String]) -> anyhow::Result<()> {
         let onto_sha = self.rev(onto)?;
         let head = match self.git().run(["symbolic-ref", "--quiet", "HEAD"]) {
             Ok(r) => r.trim().to_string(),

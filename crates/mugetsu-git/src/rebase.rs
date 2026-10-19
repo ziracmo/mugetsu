@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context as _, bail};
 
-use crate::Repo;
+use crate::{LocalChanges, Repo};
 
 /// What happens to one commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -176,11 +176,17 @@ impl Repo {
     }
 
     /// Rebases the commits after `base` following `steps` (oldest first).
-    /// Uncommitted changes are stashed and reapplied (`--autostash`).
+    /// Uncommitted changes are handled as in [`Repo::rebase`].
     /// `Ok(false)`: stopped on conflicts, finished with
     /// [`Repo::continue_operation`] like any other rebase.
-    pub fn rebase_interactive(&self, base: &str, steps: &[RebaseStep]) -> anyhow::Result<bool> {
+    pub fn rebase_interactive(
+        &self,
+        base: &str,
+        steps: &[RebaseStep],
+        changes: LocalChanges,
+    ) -> anyhow::Result<bool> {
         let commits = self.rebase_plan(base)?;
+        self.discard_for(changes)?;
         let (mut lines, messages) = todo(&commits, steps)?;
         let dir = self.git_dir().map(|d| d.join("mugetsu-rebase"))?;
         // Messages of an earlier run stay until now: its `exec` lines read
@@ -206,7 +212,11 @@ impl Repo {
             [
                 "rebase",
                 "-i",
-                "--autostash",
+                if changes == LocalChanges::Stash {
+                    "--autostash"
+                } else {
+                    "--no-autostash"
+                },
                 "--empty=drop",
                 "--no-autosquash",
                 base,
@@ -219,7 +229,7 @@ impl Repo {
         match result {
             Ok(_) => {
                 let _ = std::fs::remove_dir_all(&dir);
-                Ok(true)
+                self.check_autostash(true)
             }
             Err(_) if !self.conflicted_paths()?.is_empty() => Ok(false),
             Err(e) => {

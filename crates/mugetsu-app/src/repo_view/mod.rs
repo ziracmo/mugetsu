@@ -11,6 +11,7 @@ pub(crate) mod file_view;
 pub(crate) mod forms;
 mod history;
 pub(crate) mod links;
+mod local_changes;
 mod menus;
 mod multi;
 mod nav;
@@ -1073,6 +1074,22 @@ impl RepoView {
                 this.flash_op(label, result.is_ok(), cx);
                 match result {
                     Ok(()) => on_success(this, window, cx),
+                    // Done, but the stashed changes conflict on top: the
+                    // resolver takes over, they are still in the stash.
+                    Err(e) if e.is::<mugetsu_git::StashConflict>() => {
+                        on_success(this, window, cx);
+                        window.push_notification(
+                            gpui_kit::component::notification::Notification::warning(trf!(
+                                "{label} effectué, mais vos changements mis de côté sont en \
+                                 conflit : {conflicts} fichier(s) à résoudre. Ils restent \
+                                 aussi dans le stash.",
+                                "{label} done, but your stashed changes conflict: \
+                                 {conflicts} file(s) to resolve. They are also kept in the \
+                                 stash."
+                            )),
+                            cx,
+                        )
+                    }
                     // Stopped on conflicts: the resolver takes over.
                     Err(_) if conflicts > 0 => window.push_notification(
                         gpui_kit::component::notification::Notification::warning(trf!(

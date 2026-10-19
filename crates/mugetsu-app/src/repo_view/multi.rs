@@ -228,14 +228,22 @@ impl RepoView {
             .clone()
             .filter(|h| !picked.contains(h))
             .unwrap_or_default();
-        self.prompt(
-            trf!("Rebaser {n} branche(s) sur…", "Rebase {n} branch(es) onto…"),
-            tr("Branche ou révision cible", "Target branch or revision"),
-            initial,
-            tr("Rebaser", "Rebase"),
-            move |this, onto, window, cx| {
-                let names: Vec<String> = picked.iter().filter(|b| **b != onto).cloned().collect();
-                this.rebase_picked(onto, names, window, cx);
+        // Asked first, so the prompt's answer runs the rebase straight away.
+        self.with_local_changes(
+            move |this, changes, window, cx| {
+                this.prompt(
+                    trf!("Rebaser {n} branche(s) sur…", "Rebase {n} branch(es) onto…"),
+                    tr("Branche ou révision cible", "Target branch or revision"),
+                    initial,
+                    tr("Rebaser", "Rebase"),
+                    move |this, onto, window, cx| {
+                        let names: Vec<String> =
+                            picked.iter().filter(|b| **b != onto).cloned().collect();
+                        this.rebase_picked(onto, names, changes, window, cx);
+                    },
+                    window,
+                    cx,
+                );
             },
             window,
             cx,
@@ -246,6 +254,7 @@ impl RepoView {
         &mut self,
         onto: String,
         names: Vec<String>,
+        changes: mugetsu_git::LocalChanges,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -254,7 +263,7 @@ impl RepoView {
         }
         self.run_op_then(
             "Rebase",
-            move |r| r.rebase_branches(&onto, &names),
+            move |r| r.rebase_branches(&onto, &names, changes),
             |this, _, cx| this.clear_picks(cx),
             window,
             cx,
