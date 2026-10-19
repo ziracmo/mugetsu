@@ -54,6 +54,21 @@ fn lookup<'a>(list: &'a [(String, String)], key: &str) -> &'a str {
         .unwrap_or_default()
 }
 
+/// How far a stack lags behind, read from the remote-tracking refs (no fetch).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StackDrift {
+    /// Commits of `remote/trunk` the bottom branch does not have.
+    pub behind: usize,
+    /// Branches that no longer sit on their parent's tip (or on the trunk).
+    pub stale: Vec<String>,
+}
+
+impl StackDrift {
+    pub fn needs_restack(&self) -> bool {
+        !self.stale.is_empty()
+    }
+}
+
 impl Repo {
     pub(crate) fn rev(&self, rev: &str) -> anyhow::Result<String> {
         Ok(self
@@ -73,6 +88,41 @@ impl Repo {
         self.git()
             .run(["merge-base", "--is-ancestor", a, b])
             .is_ok()
+    }
+
+    /// Whether the stack, as pushed on `remote`, still sits on `remote/trunk`
+    /// and each branch on its parent. Branches missing on the remote are skipped.
+    pub fn stack_drift(
+        &self,
+        remote: &str,
+        trunk: &str,
+        links: &[StackLink],
+    ) -> anyhow::Result<StackDrift> {
+        let onto = format!("{remote}/{trunk}");
+        self.rev(&onto)?;
+        let mut drift = StackDrift::default();
+        for link in links {
+            let tip = format!("{remote}/{}", link.branch);
+            if self.rev(&tip).is_err() {
+                continue;
+            }
+            let base = match &link.parent {
+                None => onto.clone(),
+                Some(p) => format!("{remote}/{p}"),
+            };
+            if link.parent.is_none() {
+                drift.behind = self
+                    .git()
+                    .run(["rev-list", "--count", &format!("{tip}..{onto}")])?
+                    .trim()
+                    .parse()
+                    .unwrap_or(0);
+            }
+            if self.rev(&base).is_ok() && !self.is_ancestor(&base, &tip) {
+                drift.stale.push(link.branch.clone());
+            }
+        }
+        Ok(drift)
     }
 
     /// Fetches `remote`, then brings every local branch of the stack level

@@ -325,6 +325,9 @@ pub struct RepoView {
     stack_seq: usize,
     /// Restack running or just finished (stack view card).
     restack: Option<restack::RestackRun>,
+    /// Lag of the shown stack behind its remote trunk (its branches, bottom first).
+    stack_drift: Option<(Vec<String>, mugetsu_git::StackDrift)>,
+    _drift: Task<()>,
     /// GitHub login of the user.
     pr_me: Option<String>,
     sidebar_tab: SidebarTab,
@@ -499,6 +502,8 @@ impl RepoView {
             stack_focus: None,
             stack_seq: 0,
             restack: None,
+            stack_drift: None,
+            _drift: Task::ready(()),
             pr_me: None,
             sidebar_tab: if crate::settings::get().shared_layout
                 && crate::settings::get().sidebar_prs
@@ -711,6 +716,7 @@ impl RepoView {
             self.run_search(cx);
         }
         self.refresh_prs(true, cx);
+        self.scan_stack_drift(cx);
         self.scan_dead_worktrees(cx);
         self.scan_pulse(cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
@@ -897,6 +903,7 @@ impl RepoView {
                     this.prs.set_bulk(mugetsu_forge::by_branch(&prs.list), now);
                     this.pr_list = Arc::new(prs.list);
                     this.pr_me = prs.me;
+                    this.scan_stack_drift(cx);
                     cx.notify();
                 });
             }
@@ -1650,6 +1657,7 @@ impl RepoView {
     #[cfg(test)]
     pub fn set_pr_list(&mut self, prs: Vec<mugetsu_forge::PullRequest>, cx: &mut Context<Self>) {
         self.pr_list = Arc::new(prs);
+        self.scan_stack_drift(cx);
         cx.notify();
     }
 

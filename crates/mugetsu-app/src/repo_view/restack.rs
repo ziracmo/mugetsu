@@ -86,6 +86,41 @@ impl RepoView {
             .filter(|r| stack.iter().any(|p| r.branches.contains(&p.head)))
     }
 
+    /// The shown stack's lag behind its remote trunk, once read.
+    fn drift_of(&self, stack: &[PullRequest]) -> Option<&mugetsu_git::StackDrift> {
+        let (_, links) = links(stack);
+        self.stack_drift
+            .as_ref()
+            .filter(|(branches, _)| branches.iter().eq(links.iter().map(|l| &l.branch)))
+            .map(|(_, d)| d)
+    }
+
+    /// Reads, from the remote-tracking refs, whether the shown stack still
+    /// sits on its remote trunk (refreshed on every reload, so after fetches).
+    pub(super) fn scan_stack_drift(&mut self, cx: &mut Context<Self>) {
+        let stack = self
+            .stack_focus
+            .as_deref()
+            .and_then(|head| self.stack_of(head));
+        let (Some(stack), Some(remote)) = (stack, super::sidebar::default_remote(&self.data.refs))
+        else {
+            self.stack_drift = None;
+            return;
+        };
+        let (trunk, links) = links(&stack);
+        let branches: Vec<String> = links.iter().map(|l| l.branch.clone()).collect();
+        let repo = self.repo.clone();
+        self._drift = cx.spawn(async move |this, cx| {
+            let drift = cx
+                .background_spawn(async move { repo.stack_drift(&remote, &trunk, &links) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.stack_drift = drift.ok().map(|d| (branches, d));
+                cx.notify();
+            });
+        });
+    }
+
     /// Asks, then restacks the stack holding `head` (its force-push rewrites
     /// the PRs on GitHub).
     pub fn confirm_restack(&mut self, head: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -224,9 +259,14 @@ impl RepoView {
         use gpui_kit::component::Disableable as _;
         use gpui_kit::component::button::{Button, ButtonVariants as _};
         let head = stack.first().map(|p| p.head.clone()).unwrap_or_default();
-        Button::new("stack-restack")
-            .small()
-            .ghost()
+        let stale = self.drift_of(stack).is_some_and(|d| d.needs_restack());
+        let button = Button::new("stack-restack").small();
+        let button = if stale {
+            button.primary()
+        } else {
+            button.ghost()
+        };
+        button
             .icon(Icon::new(Lucide::RefreshCw))
             .label(tr("Restacker", "Restack"))
             .disabled(self.busy.is_some() || self.data.refs.remotes.is_empty())
@@ -238,6 +278,88 @@ impl RepoView {
                 this.confirm_restack(head.clone(), window, cx)
             }))
             .into_any_element()
+    }
+
+    /// Warning shown when the stack no longer sits on its remote trunk, with
+    /// a button to restack it.
+    pub(super) fn drift_banner(
+        &self,
+        stack: &[PullRequest],
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        use gpui_kit::component::Disableable as _;
+        use gpui_kit::component::button::{Button, ButtonVariants as _};
+        let drift = self.drift_of(stack).filter(|d| d.needs_restack())?;
+        let remote = super::sidebar::default_remote(&self.data.refs)?;
+        let (trunk, _) = links(stack);
+        let head = stack.first().map(|p| p.head.clone())?;
+        let title = match drift.behind {
+            0 => trf!(
+                "La stack n'est plus alignée sur {remote}/{trunk}",
+                "The stack is out of sync with {remote}/{trunk}"
+            ),
+            n => trf!(
+                "La stack a {n} commit(s) de retard sur {remote}/{trunk}",
+                "The stack is {n} commit(s) behind {remote}/{trunk}"
+            ),
+        };
+        let detail = trf!(
+            "À restacker : {}",
+            "Needs a restack: {}",
+            drift.stale.join(", ")
+        );
+        let color = theme::amber();
+        Some(
+            h_flex()
+                .id("stack-drift")
+                .test_support()
+                .w_full()
+                .gap_3()
+                .p_3()
+                .rounded_xl()
+                .border_1()
+                .border_color(theme::alpha(color, 0.45))
+                .bg(theme::alpha(color, 0.08))
+                .child(Icon::new(Lucide::TriangleAlert).small().text_color(color))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .text_color(theme::alpha(gpui_kit::white(), 0.93))
+                                .truncate()
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(theme::alpha(gpui_kit::white(), 0.55))
+                                .truncate()
+                                .child(detail),
+                        ),
+                )
+                .child(
+                    Button::new("stack-drift-restack")
+                        .small()
+                        .primary()
+                        .icon(Icon::new(Lucide::RefreshCw))
+                        .label(tr("Restacker", "Restack"))
+                        .disabled(self.busy.is_some())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.confirm_restack(head.clone(), window, cx)
+                        })),
+                )
+                .with_animation(
+                    ("stack-drift-in", self.stack_seq),
+                    Animation::new(Duration::from_millis(320))
+                        .with_easing(gpui_kit::ease_out_quint()),
+                    |el, t| el.opacity(t).top(px(-6. * (1. - t))),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Progress card: a bar, then one chip per branch, bottom first.

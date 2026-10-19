@@ -135,6 +135,7 @@ impl RepoView {
         self.stack_focus = Some(head);
         self.celebrate_seq += 1;
         self.stack_seq = self.celebrate_seq;
+        self.scan_stack_drift(cx);
         self.set_mode(super::Mode::Stack, cx);
     }
 
@@ -217,7 +218,10 @@ impl RepoView {
                     .pb_8()
                     .gap_5()
                     .child(self.stack_header(&stack, ready, seq, cx))
-                    .children(self.restack_of(&stack).map(|r| self.restack_card(r)))
+                    .children(match self.restack_of(&stack) {
+                        Some(r) => Some(self.restack_card(r)),
+                        None => self.drift_banner(&stack, cx),
+                    })
                     .child(next_step(&stack, seq))
                     .child(self.stack_feed(&stack, blocker, seq, cx)),
             )
