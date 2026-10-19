@@ -16,10 +16,10 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    Animation, AnimationExt as _, AppContext as _, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, PathPromptOptions, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, div,
-    prelude::FluentBuilder as _, px,
+    Animation, AnimationExt as _, AppContext as _, Bounds, Context, DragMoveEvent, Entity,
+    EntityId, InteractiveElement as _, IntoElement, MouseButton, MouseUpEvent, ParentElement as _,
+    PathPromptOptions, Pixels, Point, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, Window, div, point, prelude::FluentBuilder as _, px,
 };
 use mugetsu_git::Repo;
 
@@ -66,6 +66,32 @@ struct Tab {
     _sub: Subscription,
 }
 
+/// A tab being dragged: dropped on another tab it takes its place, dropped
+/// outside the window it opens in a new one.
+#[derive(Clone)]
+struct DraggedTab {
+    workspace: EntityId,
+    index: usize,
+    name: SharedString,
+}
+
+impl Render for DraggedTab {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_1()
+            .rounded_lg()
+            .text_sm()
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .bg(theme::popover())
+            .text_color(gpui_kit::white())
+            .border_1()
+            .border_color(theme::alpha(theme::accent(), 0.6))
+            .shadow_lg()
+            .child(self.name.clone())
+    }
+}
+
 pub struct Workspace {
     tabs: Vec<Tab>,
     active: usize,
@@ -96,6 +122,8 @@ pub struct Workspace {
     recap: Option<(Entity<Recap>, Subscription)>,
     /// Friday reminder waiting for the next frame (needs the window).
     recap_due: bool,
+    /// Index of the tab being dragged, to tell where it is released.
+    tab_drag: Option<usize>,
 }
 
 /// Height of the title bar holding the tabs.
@@ -139,6 +167,7 @@ impl Workspace {
             overview: false,
             recap: None,
             recap_due: false,
+            tab_drag: None,
         };
         if persist && !cfg!(test) && !crate::settings::get().intro_seen {
             crate::settings::remember(|s| s.intro_seen = true);
@@ -307,6 +336,67 @@ impl Workspace {
         self.sync_focus(cx);
         self.save(cx);
         cx.notify();
+    }
+
+    /// Tab drag and drop: puts tab `from` at `to`, the active tab staying active.
+    pub fn move_tab(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from >= self.tabs.len() || to >= self.tabs.len() {
+            return;
+        }
+        // A click that moved a few pixels starts a drag and swallows the
+        // click: dropped on itself, the tab is activated.
+        if from == to {
+            self.activate(to, cx);
+            return;
+        }
+        let active = self.tabs[self.active].view.entity_id();
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        self.active = self
+            .tabs
+            .iter()
+            .position(|t| t.view.entity_id() == active)
+            .unwrap_or(to);
+        self.save(cx);
+        cx.notify();
+    }
+
+    /// A tab dropped outside the window: its repository opens in a new window
+    /// under the pointer (`position`, relative to this window) and leaves this
+    /// one. The last tab stays.
+    pub fn detach(
+        &mut self,
+        index: usize,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tabs.len() < 2 || index >= self.tabs.len() {
+            return;
+        }
+        let root = self.tabs[index].view.read(cx).repo().root().to_path_buf();
+        let bounds = window.bounds();
+        // The pointer lands on the new window's tab bar.
+        let origin = bounds.origin + position - point(px(160.), px(TITLE_HEIGHT / 2.));
+        self.close(index, cx);
+        cx.defer(move |cx| {
+            crate::app_menu::new_window_with(vec![root], Some(Bounds::new(origin, bounds.size)), cx)
+        });
+    }
+
+    /// Mouse released outside the window: detaches the tab being dragged.
+    fn release_outside(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.tab_drag.take() else {
+            return;
+        };
+        if !Bounds::new(Point::default(), window.viewport_size()).contains(&event.position) {
+            self.detach(index, event.position, window, cx);
+        }
     }
 
     /// The tab drawn and focused, if any (none while the overview shows).
@@ -903,6 +993,22 @@ impl Workspace {
                 Tooltip::new(tip).build(window, cx)
             })
             .on_click(cx.listener(move |this, _, _, cx| this.activate(index, cx)))
+            // Keeps the title bar from moving the window: the tab drags instead.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_drag(
+                DraggedTab {
+                    workspace: cx.entity_id(),
+                    index,
+                    name: name.clone().into(),
+                },
+                |tab, _, _, cx| cx.new(|_| tab.clone()),
+            )
+            .drag_over::<DraggedTab>(|s, _, _, _| s.bg(theme::alpha(theme::accent(), 0.18)))
+            .on_drop(cx.listener(move |this, tab: &DraggedTab, _, cx| {
+                if tab.workspace == cx.entity_id() {
+                    this.move_tab(tab.index, index, cx);
+                }
+            }))
             .context_menu(move |menu, _, _| icon_menu(menu, root.clone()))
     }
 }
@@ -967,6 +1073,13 @@ impl Render for Workspace {
                 cx.listener(|this, _: &OpenRepository, window, cx| this.prompt_open(window, cx)),
             )
             .on_action(cx.listener(|this, _: &CloseTab, _, cx| this.close(this.active, cx)))
+            .on_drag_move(cx.listener(|this, ev: &DragMoveEvent<DraggedTab>, _, cx| {
+                let tab = ev.drag(cx);
+                this.tab_drag = (tab.workspace == cx.entity_id()).then_some(tab.index);
+            }))
+            // Released inside: a drop on a tab, or nothing.
+            .capture_any_mouse_up(cx.listener(|this, _, _, _| this.tab_drag = None))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::release_outside))
             .on_action(cx.listener(|this, _: &FetchAll, _, cx| this.fetch_all(cx)))
             .on_action(cx.listener(|this, _: &ReloadApp, _, cx| this.reload_app(cx)))
             .on_action(cx.listener(|this, _: &ToggleOverview, _, cx| this.toggle_overview(cx)))

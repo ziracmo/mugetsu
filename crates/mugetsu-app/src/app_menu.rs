@@ -43,15 +43,25 @@ fn open_recent(action: &OpenRecent, cx: &mut App) {
 /// File > New Window: a second repository window starting empty; its tabs
 /// are not saved (the first window keeps the session).
 pub(crate) fn new_window(cx: &mut App) {
+    new_window_with(Vec::new(), None, cx);
+}
+
+/// A second repository window on `repos` (a tab dragged out of a window),
+/// at `bounds` or centred.
+pub(crate) fn new_window_with(
+    repos: Vec<std::path::PathBuf>,
+    bounds: Option<gpui_kit::Bounds<gpui_kit::Pixels>>,
+    cx: &mut App,
+) {
     let session = crate::session::Session::new(
         vec![crate::session::RepoSet {
             name: tr("Fenêtre", "Window").into(),
-            repos: Vec::new(),
+            repos,
             active: 0,
         }],
         0,
     );
-    let _ = crate::open_workspace_window(session, false, cx);
+    let _ = crate::open_workspace_window(session, false, bounds, cx);
 }
 
 pub fn init(cx: &mut App) {
