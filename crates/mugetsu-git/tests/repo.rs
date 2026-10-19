@@ -424,6 +424,25 @@ fn restack_rebases_each_branch_on_its_parent_and_pushes() {
 }
 
 #[test]
+fn stack_drift_spots_a_stack_behind_its_trunk() {
+    let (_dir, _origin, clone_path) = stack_fixture();
+    let clone = Repo::open(&clone_path).unwrap();
+    let drift = clone.stack_drift("origin", "main", &links()).unwrap();
+    assert_eq!(drift.behind, 1);
+    assert_eq!(drift.stale, ["a"]);
+    assert!(drift.needs_restack());
+
+    let plan = clone.restack_prepare("origin", "main", links()).unwrap();
+    for i in 0..plan.len() {
+        clone.restack_step(&plan, i).unwrap();
+    }
+    clone.restack_push(&plan).unwrap();
+    clone.git().run(["fetch", "--quiet", "origin"]).unwrap();
+    let drift = clone.stack_drift("origin", "main", &links()).unwrap();
+    assert_eq!(drift, Default::default());
+}
+
+#[test]
 fn restack_conflict_puts_everything_back() {
     let (_dir, origin, clone_path) = stack_fixture();
     // main now conflicts with a.

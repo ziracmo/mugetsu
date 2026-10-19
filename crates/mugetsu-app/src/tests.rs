@@ -1367,6 +1367,61 @@ fn notifications_settings_start_switched_off(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_stack_behind_its_remote_trunk_offers_a_restack(cx: &mut TestAppContext) {
+    use mugetsu_forge::{PrState, PullRequest};
+    init(cx);
+    let origin = tempfile::tempdir().unwrap();
+    fixture(origin.path());
+    let clones = tempfile::tempdir().unwrap();
+    git(
+        clones.path(),
+        &["clone", "-q", origin.path().to_str().unwrap(), "clone"],
+    );
+    let (handle, view) = open_repo_view(cx, &clones.path().join("clone"));
+    let pr = |n: u64, head: &str, base: &str| PullRequest {
+        number: n,
+        title: format!("PR {n}"),
+        url: String::new(),
+        state: PrState::Open,
+        status: None,
+        head: head.into(),
+        base: base.into(),
+        same_repo: true,
+        author: "me".into(),
+        requested_reviewers: vec![],
+        updated_at: String::new(),
+        merged_at: None,
+    };
+    // topic forked from main before the merge: main has moved on.
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_pr_list(vec![pr(1, "topic", "main"), pr(2, "feature", "topic")], cx);
+            v.open_stack("topic".into(), cx);
+        })
+    });
+    let mut shown = false;
+    for _ in 0..200 {
+        cx.run_until_parked();
+        shown = cx
+            .update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.try_find("stack-drift").is_some()
+            })
+            .unwrap();
+        if shown {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(shown, "the drift banner never showed");
+    cx.update_window(handle, |_, window, cx| {
+        assert!(window.try_find("stack-drift-restack").is_some());
+        window.click("stack-drift-restack", cx);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn clicking_a_stack_shows_its_progress(cx: &mut TestAppContext) {
     use mugetsu_forge::{PrState, PullRequest};
     init(cx);

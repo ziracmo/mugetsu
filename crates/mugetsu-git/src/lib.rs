@@ -38,7 +38,7 @@ pub use ops::{LocalChanges, PushOptions, ResetMode};
 pub use rebase::{RebaseAction, RebaseCommit, RebaseStep};
 pub use recap::{Activity, Me, TimeSpan, Week};
 pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};
-pub use restack::{Restack, StackLink};
+pub use restack::{Restack, StackDrift, StackLink};
 pub use stats::{FileHeat, Person, RepoStats};
 pub use status::{Change, FileStatus, Status};
 pub use worktrees::{DeadReason, DeadWorktree};
