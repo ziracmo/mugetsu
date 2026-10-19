@@ -25,6 +25,7 @@ mod repo_view;
 mod session;
 mod settings;
 mod settings_view;
+mod tab_ghost;
 mod theme;
 mod toast;
 mod welcome;
@@ -64,15 +65,19 @@ fn inherit_shell_path() {
 struct OpenWorkspaces(Vec<gpui_kit::WindowId>);
 impl gpui_kit::Global for OpenWorkspaces {}
 
-/// Opens a repository window on `session`; only the first one (`persist`)
-/// saves its tabs and workspaces.
+/// Opens a repository window on `session`, at `bounds` or centred; only the
+/// first one (`persist`) saves its tabs and workspaces.
 pub fn open_workspace_window(
     session: Session,
     persist: bool,
+    bounds: Option<gpui_kit::Bounds<gpui_kit::Pixels>>,
     cx: &mut gpui_kit::App,
 ) -> anyhow::Result<(gpui_kit::AnyWindowHandle, gpui_kit::Entity<Workspace>)> {
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::centered(size(px(1440.), px(900.)), cx)),
+        window_bounds: Some(match bounds {
+            Some(bounds) => WindowBounds::Windowed(bounds),
+            None => WindowBounds::centered(size(px(1440.), px(900.)), cx),
+        }),
         window_min_size: Some(size(px(960.), px(600.))),
         app_id: Some("dev.mugetsu".into()),
         // Glass look: the translucent theme lets the blurred desktop through.
@@ -121,8 +126,8 @@ fn main() {
             app_menu::init(cx);
             palette::init(cx);
             recap::init(cx);
-            let main =
-                open_workspace_window(session, true, cx).expect("failed to open the main window");
+            let main = open_workspace_window(session, true, None, cx)
+                .expect("failed to open the main window");
             cx.set_global(app_menu::MainWorkspace(main.0, main.1.clone()));
             cx.activate(true);
         });

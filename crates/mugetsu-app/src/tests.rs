@@ -1103,6 +1103,69 @@ fn control_tab_shows_a_switcher_until_released(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn tabs_reorder_by_drag_and_detach_out_of_the_window(cx: &mut TestAppContext) {
+    init(cx);
+    let (a, b, c) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    for d in [&a, &b, &c] {
+        fixture(d.path());
+    }
+    let session = session_of(
+        vec![
+            a.path().to_path_buf(),
+            b.path().to_path_buf(),
+            c.path().to_path_buf(),
+        ],
+        1,
+    );
+    let (handle, ws) = cx.update(|cx| {
+        gpui_kit::open_window(options(), cx, |window, cx| {
+            cx.new(|cx| Workspace::new(session, false, window, cx))
+        })
+        .unwrap()
+    });
+    cx.run_until_parked();
+    let name = |p: &Path| format!("tab-{}", p.file_name().unwrap().to_string_lossy());
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap();
+    let order = |cx: &TestAppContext| {
+        cx.read(|cx| {
+            let ws = ws.read(cx);
+            let roots: Vec<_> = ws.tab_roots(cx).iter().map(|p| canon(p)).collect();
+            (roots, ws.active_index())
+        })
+    };
+
+    // C dropped on A takes its place; B stays the active tab.
+    let (from, to) = (name(c.path()), name(a.path()));
+    cx.update_window(handle, |_, window, cx| {
+        let from = window.find(from.clone()).bounds().center();
+        let to = window.find(to.clone()).bounds().center();
+        window.drag(from, to, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        order(cx),
+        (vec![canon(c.path()), canon(a.path()), canon(b.path())], 2)
+    );
+
+    // A released above the window opens in a new one.
+    let windows = cx.update(|cx| cx.windows().len());
+    let from = name(a.path());
+    cx.update_window(handle, |_, window, cx| {
+        let from = window.find(from.clone()).bounds().center();
+        window.drag(from, gpui_kit::point(from.x, px(-120.)), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(order(cx).0, vec![canon(c.path()), canon(b.path())]);
+    assert_eq!(cx.update(|cx| cx.windows().len()), windows + 1);
+}
+
+#[gpui_kit::test]
 fn new_commits_shimmer_and_worktree_branches_open_their_tab(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
