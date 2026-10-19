@@ -5082,7 +5082,7 @@ dependencies = [
 
 [[package]]
 name = "mugetsu-app"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5104,7 +5104,7 @@ dependencies = [
 
 [[package]]
 name = "mugetsu-forge"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -5115,7 +5115,7 @@ dependencies = [
 
 [[package]]
 name = "mugetsu-git"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "gix",

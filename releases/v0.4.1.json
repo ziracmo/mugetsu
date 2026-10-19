@@ -1,0 +1,13 @@
+{
+  "version": "0.4.1",
+  "date": "2026-10-19",
+  "title": "Drag tabs, restack stacks that fell behind",
+  "summary": "Tabs drag to reorder or out into a new window, the stack view tells you when a stack has fallen behind its trunk and restacks it, and a PR's menu copies its link.",
+  "features": [
+    { "id": "tab-drag", "title": "Drag tabs", "body": "Drag a tab to reorder it, or out of the window to open it in a new one, with a preview of the window it will open.", "scene": "sidebar", "highlight": true },
+    { "id": "restack", "title": "Restack a stack that fell behind", "body": "The stack view checks whether a stack still sits on the remote trunk and each branch on its parent. When not, a banner says how far behind it is, with a Restack button.", "scene": "pr", "highlight": true },
+    { "id": "pr-copy-link", "title": "Copy a PR's link", "body": "A PR's right-click menu copies its link.", "scene": "pr" }
+  ],
+  "improvements": [],
+  "fixes": []
+}
