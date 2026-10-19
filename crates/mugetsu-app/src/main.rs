@@ -25,6 +25,7 @@ mod repo_view;
 mod session;
 mod settings;
 mod settings_view;
+mod tab_ghost;
 mod theme;
 mod toast;
 mod welcome;
