@@ -10,8 +10,9 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{Icon, Sizable as _, h_flex};
 use gpui_kit::{
-    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, div, prelude::FluentBuilder as _, px,
+    AnyElement, ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement as _,
+    SharedString, StatefulInteractiveElement as _, Styled as _, div, prelude::FluentBuilder as _,
+    px,
 };
 use mugetsu_forge::{PrState, PullRequest};
 
@@ -342,7 +343,7 @@ impl RepoView {
                 }
             }))
             .context_menu(move |m, _, _| {
-                let url = open_url.clone();
+                let (url, link) = (open_url.clone(), open_url.clone());
                 let (show_view, show_head) = (view.clone(), show_head.clone());
                 let (review_pr, root) = (review_pr.clone(), root.clone());
                 let tool = crate::settings::get().ai_tool;
@@ -359,6 +360,13 @@ impl RepoView {
                         PopupMenuItem::new(trf!("Ouvrir sur {forge_name}", "Open on {forge_name}"))
                             .icon(Icon::new(Lucide::ExternalLink))
                             .on_click(move |_, _, cx| cx.open_url(&url)),
+                    )
+                    .item(
+                        PopupMenuItem::new(tr("Copier le lien", "Copy link"))
+                            .icon(Icon::new(Lucide::Link))
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(link.clone()))
+                            }),
                     )
                     .separator()
                     .item(
