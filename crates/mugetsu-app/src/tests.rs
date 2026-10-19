@@ -758,7 +758,7 @@ fn merged_branch_is_folded_until_its_arrow_is_clicked(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
-    git(dir.path(), &["branch", "-q", "-D", "feature"]);
+    // The merged branch's ref still exists: it folds all the same.
     let (handle, view) = open_repo_view(cx, dir.path());
     let shown = |cx: &TestAppContext| {
         cx.read(|cx| {

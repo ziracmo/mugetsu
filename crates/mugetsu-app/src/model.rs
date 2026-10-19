@@ -30,7 +30,7 @@ impl RepoData {
         let refs = repo.refs()?;
         let history = repo.history(&refs.tips(), crate::settings::get().commit_order.into())?;
         let decorations = refs.decorations();
-        let folded = Self::fold(&history, &decorations, refs.head, expanded);
+        let folded = Self::fold(&history, refs.head, expanded);
         let status = repo.status()?;
         let operation = repo.operation().unwrap_or_default();
         let gitlab_hosts = crate::settings::get().gitlab_hosts;
@@ -53,26 +53,18 @@ impl RepoData {
         }))
     }
 
-    /// Folds merged branches; commits carrying a ref or HEAD always show.
-    pub fn fold(
-        history: &History,
-        decorations: &HashMap<ObjectId, Vec<RefLabel>>,
-        head: Option<ObjectId>,
-        expanded: &HashSet<ObjectId>,
-    ) -> Folded {
-        let pinned: HashSet<ObjectId> = decorations.keys().copied().chain(head).collect();
+    /// Folds merged branches; HEAD always shows. A merged branch whose ref still
+    /// exists folds too (pinning refs would leave its merge with nothing to fold);
+    /// selecting the ref unfolds it.
+    pub fn fold(history: &History, head: Option<ObjectId>, expanded: &HashSet<ObjectId>) -> Folded {
+        let pinned: HashSet<ObjectId> = head.into_iter().collect();
         Folded::new(history, &pinned, expanded)
     }
 
     /// Folds again after a merge was expanded or folded.
     pub fn refold(&self, expanded: &HashSet<ObjectId>) -> Self {
         Self {
-            folded: Arc::new(Self::fold(
-                &self.history,
-                &self.decorations,
-                self.refs.head,
-                expanded,
-            )),
+            folded: Arc::new(Self::fold(&self.history, self.refs.head, expanded)),
             ..self.clone()
         }
     }

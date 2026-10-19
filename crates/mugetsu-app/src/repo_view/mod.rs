@@ -1241,7 +1241,8 @@ impl RepoView {
         // Optimistic: show the new HEAD right away; the reload after git
         // finishes (or fails) brings back the real state.
         if let Some(next) = self.data.with_checkout(&local, track.as_deref()) {
-            self.data = Arc::new(next);
+            // Refolded: the new HEAD may sit in a folded merged branch.
+            self.data = Arc::new(next.refold(&self.expanded_merges));
         }
         self.celebrate_seq += 1;
         let seq = self.celebrate_seq;
