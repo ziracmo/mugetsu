@@ -1,0 +1,11 @@
+{
+  "version": "0.4.2",
+  "date": "2026-10-19",
+  "title": "A proper install window on macOS",
+  "summary": "Opening Mugetsu.dmg now shows a laid-out install window: an eclipse background with an arrow guiding Mugetsu into Applications.",
+  "features": [],
+  "improvements": [
+    { "id": "dmg-window", "title": "Eclipse install window", "body": "The macOS disk image opens on a dark eclipse background, Retina-sharp, with Mugetsu on the left, Applications on the right and an orbit arrow showing where to drag it.", "scene": "eclipse", "highlight": true }
+  ],
+  "fixes": []
+}
