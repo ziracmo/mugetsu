@@ -136,7 +136,10 @@ On Windows, use Ctrl instead of ⌘.
 | Reload the app (replays the opening eclipse) | ⌃⇧R |
 | Settings | ⌘, |
 
-In Changes, ⌘A stages everything and ⌘S stashes.
+In Changes, ⌘A stages everything and ⌘S stashes. On the selected file: Space or ↩ stages / unstages it, ⌘⌫
+discards its changes (after a confirmation), ⌘↓ opens it, ⌥⌘R reveals it in the Finder, ⇧⌘C copies its path,
+↑ ↓ (or k j) move through the files and ⌘F filters both lists. Its right-click menu lists the same actions with
+their keys, plus Ignore, Blame and File history.
 
 ## Build from source
 

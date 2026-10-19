@@ -483,3 +483,135 @@ fn batch_rebase_moves_every_branch_or_none() {
     assert_eq!(parent("two"), main);
     assert_eq!(repo.refs().unwrap().head_branch.as_deref(), Some("main"));
 }
+
+/// Sorted (path, index, worktree) of the repository's status.
+fn status_set(status: &mugetsu_git::Status) -> Vec<(String, Change, Change)> {
+    let mut v: Vec<_> = status
+        .files
+        .iter()
+        .map(|f| (f.path.clone(), f.index, f.worktree))
+        .collect();
+    v.sort_by(|a, b| a.0.cmp(&b.0));
+    v
+}
+
+/// The optimistic predictions the Changes view shows match what git does.
+#[test]
+fn predicted_moves_match_git() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    commit_file(p, "b.txt", "b\n", "c3");
+    commit_file(p, "c.txt", "c\n", "c4");
+    commit_file(p, "d.txt", "d\n", "c5");
+    commit_file(p, "r.txt", "rename me\n", "c6");
+    // a: modified; b: deleted; c: staged, then modified again; d: staged
+    // modification, then deleted; new: untracked; added: staged new file,
+    // modified again; gone: staged new file, then deleted; r → moved.txt: renamed.
+    std::fs::write(p.join("a.txt"), "changed\n").unwrap();
+    std::fs::remove_file(p.join("b.txt")).unwrap();
+    std::fs::write(p.join("c.txt"), "c2\n").unwrap();
+    git(p, &["add", "c.txt"]);
+    std::fs::write(p.join("c.txt"), "c3\n").unwrap();
+    std::fs::write(p.join("d.txt"), "d2\n").unwrap();
+    git(p, &["add", "d.txt"]);
+    std::fs::remove_file(p.join("d.txt")).unwrap();
+    std::fs::write(p.join("new.txt"), "new\n").unwrap();
+    std::fs::write(p.join("added.txt"), "added\n").unwrap();
+    git(p, &["add", "added.txt"]);
+    std::fs::write(p.join("added.txt"), "added again\n").unwrap();
+    std::fs::write(p.join("gone.txt"), "gone\n").unwrap();
+    git(p, &["add", "gone.txt"]);
+    std::fs::remove_file(p.join("gone.txt")).unwrap();
+    git(p, &["mv", "r.txt", "moved.txt"]);
+
+    let all = [
+        "a.txt",
+        "b.txt",
+        "c.txt",
+        "d.txt",
+        "new.txt",
+        "added.txt",
+        "gone.txt",
+        "moved.txt",
+    ];
+    let before = repo.status().unwrap();
+
+    let mut predicted = before.clone();
+    predicted.stage_paths(&all);
+    repo.stage(&all).unwrap();
+    let staged = repo.status().unwrap();
+    assert_eq!(status_set(&predicted), status_set(&staged), "stage");
+
+    // What the staged list holds, with the sources of renames.
+    let listed: Vec<String> = staged
+        .staged()
+        .flat_map(|f| std::iter::once(f.path.clone()).chain(f.orig_path.clone()))
+        .collect();
+    let listed: Vec<&str> = listed.iter().map(String::as_str).collect();
+    let mut predicted = staged.clone();
+    predicted.unstage_paths(&listed);
+    repo.unstage(&listed).unwrap();
+    let unstaged = repo.status().unwrap();
+    assert_eq!(status_set(&predicted), status_set(&unstaged), "unstage");
+
+    // Back to the mixed state, then unstage only what was staged there.
+    git(
+        p,
+        &["add", "c.txt", "d.txt", "added.txt", "moved.txt", "r.txt"],
+    );
+    let mixed = repo.status().unwrap();
+    let mut predicted = mixed.clone();
+    // The rename without its source: the source stays a staged deletion.
+    predicted.unstage_paths(&["c.txt", "d.txt", "added.txt", "moved.txt"]);
+    repo.unstage(&["c.txt", "d.txt", "added.txt", "moved.txt"])
+        .unwrap();
+    assert_eq!(
+        status_set(&predicted),
+        status_set(&repo.status().unwrap()),
+        "unstage mixed"
+    );
+
+    let current = repo.status().unwrap();
+    let mut predicted = current.clone();
+    predicted.discard_paths(&all);
+    let (untracked, tracked): (Vec<_>, Vec<_>) = current
+        .unstaged()
+        .partition(|f| f.worktree == Change::Untracked);
+    let paths = |v: &[&mugetsu_git::FileStatus]| -> Vec<String> {
+        v.iter().map(|f| f.path.clone()).collect()
+    };
+    let (untracked, tracked) = (paths(&untracked), paths(&tracked));
+    repo.discard(&tracked.iter().map(String::as_str).collect::<Vec<_>>())
+        .unwrap();
+    repo.remove_untracked(&untracked.iter().map(String::as_str).collect::<Vec<_>>())
+        .unwrap();
+    assert_eq!(
+        status_set(&predicted),
+        status_set(&repo.status().unwrap()),
+        "discard"
+    );
+    assert!(!p.join("new.txt").exists());
+}
+
+#[test]
+fn ignore_appends_an_escaped_line() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    std::fs::write(p.join(".gitignore"), "target").unwrap();
+    std::fs::write(p.join("odd #1 [x].log"), "x").unwrap();
+    std::fs::write(p.join("keep.log"), "x").unwrap();
+    repo.ignore(&mugetsu_git::ignore_literal("odd #1 [x].log"))
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(p.join(".gitignore")).unwrap(),
+        "target\n/odd \\#1 \\[x].log\n"
+    );
+    let untracked: Vec<_> = repo
+        .status()
+        .unwrap()
+        .files
+        .into_iter()
+        .map(|f| f.path)
+        .collect();
+    assert_eq!(untracked, [".gitignore", "keep.log"]);
+}

@@ -80,6 +80,102 @@ impl Status {
         self.files.iter().filter(|f| f.is_unstaged())
     }
 
+    /// What `git add` of `paths` leaves, predicted without running git, so
+    /// the UI can move the files right away.
+    pub fn stage_paths(&mut self, paths: &[&str]) {
+        let mut gone = Vec::new();
+        for (i, f) in self.files.iter_mut().enumerate() {
+            if !paths.contains(&f.path.as_str()) || !f.is_unstaged() {
+                continue;
+            }
+            match (f.index, f.worktree) {
+                (_, Change::Conflicted) => continue,
+                (_, Change::Untracked) => f.index = Change::Added,
+                // Added, then deleted before it was committed: nothing left.
+                (Change::Added, Change::Deleted) => gone.push(i),
+                (Change::Unmodified, w) => f.index = w,
+                (_, Change::Deleted) => f.index = Change::Deleted,
+                _ => {}
+            }
+            f.worktree = Change::Unmodified;
+        }
+        self.remove(gone);
+    }
+
+    /// What `git restore --staged` of `paths` leaves (see [`Self::stage_paths`]).
+    pub fn unstage_paths(&mut self, paths: &[&str]) {
+        let mut gone = Vec::new();
+        let mut deleted = Vec::new();
+        for (i, f) in self.files.iter_mut().enumerate() {
+            if !paths.contains(&f.path.as_str()) || !f.is_staged() {
+                continue;
+            }
+            match (f.index, f.worktree) {
+                // Never existed outside the index.
+                (Change::Added | Change::Renamed | Change::Copied, Change::Deleted) => gone.push(i),
+                (Change::Added | Change::Renamed | Change::Copied, _) => {
+                    // A rename splits back into a deleted and an untracked file.
+                    if f.index == Change::Renamed {
+                        deleted.extend(f.orig_path.take());
+                    }
+                    f.index = Change::Untracked;
+                    f.worktree = Change::Untracked;
+                }
+                (staged, Change::Unmodified) => {
+                    f.worktree = staged;
+                    f.index = Change::Unmodified;
+                }
+                _ => f.index = Change::Unmodified,
+            }
+        }
+        self.remove(gone);
+        // The rename's source is gone from the index: unstaged too, it is
+        // a deletion of the worktree, else a staged one.
+        for path in deleted {
+            let (index, worktree) = if paths.contains(&path.as_str()) {
+                (Change::Unmodified, Change::Deleted)
+            } else {
+                (Change::Deleted, Change::Unmodified)
+            };
+            match self.files.iter_mut().find(|f| f.path == path) {
+                Some(f) => (f.index, f.worktree) = (index, worktree),
+                None => self.files.push(FileStatus {
+                    path,
+                    orig_path: None,
+                    index,
+                    worktree,
+                }),
+            }
+        }
+    }
+
+    /// What discarding the worktree changes of `paths` leaves: tracked files
+    /// back to their staged state, untracked ones deleted.
+    pub fn discard_paths(&mut self, paths: &[&str]) {
+        let mut gone = Vec::new();
+        for (i, f) in self.files.iter_mut().enumerate() {
+            if !paths.contains(&f.path.as_str())
+                || !f.is_unstaged()
+                || f.worktree == Change::Conflicted
+            {
+                continue;
+            }
+            if f.worktree == Change::Untracked || f.index == Change::Unmodified {
+                gone.push(i);
+            } else {
+                f.worktree = Change::Unmodified;
+            }
+        }
+        self.remove(gone);
+    }
+
+    fn remove(&mut self, mut indices: Vec<usize>) {
+        indices.sort_unstable();
+        for i in indices.into_iter().rev() {
+            self.files.remove(i);
+        }
+    }
+
     /// Parses `git status --porcelain=v2 --branch -z` output.
     pub fn parse(raw: &str) -> Self {
         let mut status = Status::default();

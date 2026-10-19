@@ -3,21 +3,23 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::diff::{Diff, DiffFile as UiDiffFile};
-use gpui_kit::component::input::Textarea;
+use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::{
-    AnyElement, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    AnyElement, App, AppContext as _, Context, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use mugetsu_git::{Change, FileStatus};
 
+use super::staging::StageOp;
 use super::{
-    NextConflict, PrevConflict, RepoView, SelectedChange, StageAll, StashChanges, TakeOurs,
-    TakeTheirs,
+    CopyChangePath, DiscardChange, NextChange, NextConflict, OpenChange, PrevChange, PrevConflict,
+    RepoView, RevealChange, SelectedChange, StageAll, StashChanges, TakeOurs, TakeTheirs,
+    ToggleStage,
 };
 use crate::i18n::tr;
 use crate::theme;
@@ -131,7 +133,6 @@ impl RepoView {
             .path
             .rsplit_once('/')
             .map_or(("", f.path.as_str()), |(d, n)| (d, n));
-        let path = f.path.clone();
         let (view, root) = (cx.entity().downgrade(), self.repo.root().to_path_buf());
         // Blame reads the file at HEAD: it must exist there and here.
         let fresh = |c: Change| {
@@ -144,11 +145,19 @@ impl RepoView {
                     | Change::Copied
             )
         };
-        let menu = super::menus::FileMenu {
-            path: f.path.clone(),
-            rev: None,
-            blamable: !fresh(f.index) && !fresh(f.worktree),
+        let menu = super::menus::ChangeMenu {
+            file: super::menus::FileMenu {
+                path: f.path.clone(),
+                rev: None,
+                blamable: !fresh(f.index) && !fresh(f.worktree),
+            },
+            staged,
+            conflicted: change == Change::Conflicted,
+            untracked: f.worktree == Change::Untracked,
+            // Deleted on disk, from either list.
+            exists: f.worktree != Change::Deleted && f.index != Change::Deleted,
         };
+        let focus = self.change_list_focus.clone();
         let id = SharedString::from(format!(
             "{}:{}",
             if staged { "staged" } else { "unstaged" },
@@ -208,47 +217,24 @@ impl RepoView {
                             tr("Ajouter à l'index", "Stage")
                         })
                         .on_click(cx.listener({
-                            let path = path.clone();
-                            move |this, _, window, cx| {
-                                let path = path.clone();
-                                this.run_op(
-                                    if staged { "Unstage" } else { "Stage" },
-                                    move |r| {
-                                        if staged {
-                                            r.unstage(&[&path])
-                                        } else {
-                                            r.stage(&[&path])
-                                        }
-                                    },
-                                    window,
-                                    cx,
-                                );
-                            }
+                            let sel = sel.clone();
+                            move |this, _, window, cx| this.toggle_stage(&sel, window, cx)
                         })),
                 )
             })
             .on_click(
                 cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
-                    if ev.click_count() >= 2 && change != Change::Conflicted {
-                        let path = path.clone();
-                        this.run_op(
-                            "Stage",
-                            move |r| {
-                                if staged {
-                                    r.unstage(&[&path])
-                                } else {
-                                    r.stage(&[&path])
-                                }
-                            },
-                            window,
-                            cx,
-                        );
+                    this.change_list_focus.focus(window, cx);
+                    if ev.click_count() >= 2 {
+                        this.toggle_stage(&sel, window, cx);
                     } else {
                         this.load_change(sel.clone(), cx);
                     }
                 }),
             )
-            .context_menu(move |m, _, _| super::menus::file_menu(m, &view, &root, &menu))
+            .context_menu(move |m, window, cx| {
+                super::menus::change_menu(m, &view, &root, &focus, &menu, window, cx)
+            })
             .into_any_element()
     }
 
@@ -326,25 +312,89 @@ impl RepoView {
         .map(|e| e.into_any_element())
     }
 
+    /// Conflicted, unstaged and staged files, as the filter field leaves them.
+    fn change_lists(&self, cx: &App) -> [Vec<FileStatus>; 3] {
+        let filter = self.change_filter.read(cx).value().to_lowercase();
+        let terms: Vec<&str> = filter.split_whitespace().collect();
+        let shown = |f: &&FileStatus| {
+            let path = f.path.to_lowercase();
+            terms.iter().all(|t| path.contains(t))
+        };
+        let status = &self.data.status;
+        [
+            status
+                .files
+                .iter()
+                .filter(|f| f.index == Change::Conflicted)
+                .filter(shown)
+                .cloned()
+                .collect(),
+            status
+                .unstaged()
+                .filter(|f| f.index != Change::Conflicted)
+                .filter(shown)
+                .cloned()
+                .collect(),
+            status.staged().filter(shown).cloned().collect(),
+        ]
+    }
+
+    fn filtering(&self, cx: &App) -> bool {
+        !self.change_filter.read(cx).value().trim().is_empty()
+    }
+
+    /// Selects the next (or previous) shown file, conflicts, unstaged, then staged.
+    fn step_change(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let [conflicted, unstaged, staged] = self.change_lists(cx);
+        let rows: Vec<SelectedChange> = conflicted
+            .iter()
+            .chain(&unstaged)
+            .map(|f| (f, false))
+            .chain(staged.iter().map(|f| (f, true)))
+            .map(|(f, staged)| SelectedChange {
+                path: f.path.clone(),
+                staged,
+            })
+            .collect();
+        let at = self
+            .selected_change
+            .as_ref()
+            .and_then(|s| rows.iter().position(|r| r == s));
+        let next = match at {
+            Some(i) if forward => (i + 1).min(rows.len() - 1),
+            Some(i) => i.saturating_sub(1),
+            None if forward => 0,
+            None => rows.len().saturating_sub(1),
+        };
+        if let Some(sel) = rows.get(next).cloned()
+            && Some(next) != at
+        {
+            self.load_change(sel, cx);
+        }
+    }
+
+    /// Runs `f` on the selected file of the Changes view.
+    fn on_selected(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, SelectedChange, &mut Window, &mut Context<Self>),
+    ) {
+        if let Some(sel) = self.selected_change.clone() {
+            f(self, sel, window, cx);
+        }
+    }
+
     pub(super) fn render_changes(
         &self,
         _window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let status = self.data.status.clone();
-        let conflicted: Vec<_> = status
-            .files
-            .iter()
-            .filter(|f| f.index == Change::Conflicted)
-            .cloned()
-            .collect();
-        let unstaged: Vec<_> = status
-            .unstaged()
-            .filter(|f| f.index != Change::Conflicted)
-            .cloned()
-            .collect();
-        let staged: Vec<_> = status.staged().cloned().collect();
-        let can_commit = (!staged.is_empty() || self.amend) && self.busy.is_none();
+        let [conflicted, unstaged, staged] = self.change_lists(cx);
+        let filtering = self.filtering(cx);
+        let can_commit =
+            (self.data.status.staged().next().is_some() || self.amend) && self.busy.is_none();
+        let staged_total = self.data.status.staged().count();
         let unstaged_rows: Vec<_> = unstaged
             .iter()
             .map(|f| self.file_row(f, false, cx))
@@ -355,13 +405,41 @@ impl RepoView {
             .map(|f| self.file_row(f, false, cx))
             .collect();
 
-        let left = v_flex()
-            .w(px(380.))
-            .flex_none()
-            .h_full()
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .children(self.render_operation_banner(cx))
+        let lists = v_flex()
+            .id("change-lists")
+            .key_context("ChangeList")
+            .track_focus(&self.change_list_focus)
+            .flex_1()
+            .min_h_0()
+            .on_action(cx.listener(|this, _: &ToggleStage, window, cx| {
+                this.on_selected(window, cx, |this, sel, window, cx| {
+                    this.toggle_stage(&sel, window, cx)
+                })
+            }))
+            .on_action(cx.listener(|this, _: &DiscardChange, window, cx| {
+                this.on_selected(window, cx, |this, sel, window, cx| {
+                    if !sel.staged {
+                        this.confirm_discard(sel.path, window, cx)
+                    }
+                })
+            }))
+            .on_action(cx.listener(|this, _: &OpenChange, window, cx| {
+                this.on_selected(window, cx, |this, sel, _, cx| {
+                    this.open_change(&sel.path, cx)
+                })
+            }))
+            .on_action(cx.listener(|this, _: &RevealChange, window, cx| {
+                this.on_selected(window, cx, |this, sel, _, cx| {
+                    this.reveal_change(&sel.path, cx)
+                })
+            }))
+            .on_action(cx.listener(|this, _: &CopyChangePath, window, cx| {
+                this.on_selected(window, cx, |this, sel, _, cx| {
+                    this.copy_change_path(&sel.path, cx)
+                })
+            }))
+            .on_action(cx.listener(|this, _: &NextChange, _, cx| this.step_change(true, cx)))
+            .on_action(cx.listener(|this, _: &PrevChange, _, cx| this.step_change(false, cx)))
             .when(!conflicted.is_empty(), |el| {
                 el.child(self.list_header(tr("Conflits", "Conflicts"), conflicted.len(), None, cx))
                     .child(
@@ -377,12 +455,23 @@ impl RepoView {
                 tr("Non indexés", "Unstaged"),
                 unstaged.len(),
                 (!unstaged.is_empty()).then(|| {
+                    // Filtered: only the files shown.
+                    let paths: Vec<String> = unstaged.iter().map(|f| f.path.clone()).collect();
                     Button::new("stage-all")
                         .xsmall()
                         .ghost()
-                        .label(tr("Tout indexer", "Stage all"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.run_op("Stage all", |r| r.stage_all(), window, cx)
+                        .label(if filtering {
+                            tr("Indexer ceux-ci", "Stage shown")
+                        } else {
+                            tr("Tout indexer", "Stage all")
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            let op = if filtering {
+                                StageOp::Stage(paths.clone())
+                            } else {
+                                StageOp::StageAll
+                            };
+                            this.queue_stage(op, window, cx)
                         }))
                         .into_any_element()
                 }),
@@ -404,17 +493,14 @@ impl RepoView {
                     Button::new("unstage-all")
                         .xsmall()
                         .ghost()
-                        .label(tr("Tout retirer", "Unstage all"))
+                        .label(if filtering {
+                            tr("Retirer ceux-ci", "Unstage shown")
+                        } else {
+                            tr("Tout retirer", "Unstage all")
+                        })
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            let paths = paths.clone();
-                            this.run_op(
-                                "Unstage all",
-                                move |r| {
-                                    r.unstage(&paths.iter().map(String::as_str).collect::<Vec<_>>())
-                                },
-                                window,
-                                cx,
-                            )
+                            let op = this.unstage_op(paths.clone());
+                            this.queue_stage(op, window, cx)
                         }))
                         .into_any_element()
                 }),
@@ -427,55 +513,77 @@ impl RepoView {
                     .min_h_0()
                     .overflow_y_scroll()
                     .children(staged_rows),
+            );
+        let commit_box = v_flex()
+            .flex_none()
+            .p_3()
+            .gap_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .bg(theme::panel())
+            .child(
+                div()
+                    .id("commit-message")
+                    .test_support()
+                    .child(Textarea::new(&self.message)),
             )
             .child(
-                v_flex()
-                    .flex_none()
-                    .p_3()
+                h_flex()
                     .gap_2()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .bg(theme::panel())
                     .child(
-                        div()
-                            .id("commit-message")
-                            .test_support()
-                            .child(Textarea::new(&self.message)),
+                        Checkbox::new("amend")
+                            .label("Amend")
+                            .checked(self.amend)
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.amend = *checked;
+                                cx.notify();
+                            })),
                     )
+                    .child(div().flex_1())
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Checkbox::new("amend")
-                                    .label("Amend")
-                                    .checked(self.amend)
-                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                        this.amend = *checked;
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(div().flex_1())
-                            .child(
-                                Button::new("commit")
-                                    .primary()
-                                    .small()
-                                    .icon(Icon::new(Lucide::GitCommitHorizontal))
-                                    .label(if staged.is_empty() {
-                                        "Commit".to_string()
-                                    } else {
-                                        trf!(
-                                            "Commit {} fichier(s)",
-                                            "Commit {} file(s)",
-                                            staged.len()
-                                        )
-                                    })
-                                    .disabled(!can_commit)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.commit(false, window, cx)
-                                    })),
+                        Button::new("commit")
+                            .primary()
+                            .small()
+                            .icon(Icon::new(Lucide::GitCommitHorizontal))
+                            .label(if staged_total == 0 {
+                                "Commit".to_string()
+                            } else {
+                                trf!("Commit {} fichier(s)", "Commit {} file(s)", staged_total)
+                            })
+                            .disabled(!can_commit)
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.commit(false, window, cx)),
                             ),
                     ),
             );
+        let left = v_flex()
+            .w(px(380.))
+            .flex_none()
+            .h_full()
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .children(self.render_operation_banner(cx))
+            .child(
+                div()
+                    .flex_none()
+                    .px_2()
+                    .py_1p5()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        Input::new(&self.change_filter)
+                            .id("change-filter")
+                            .small()
+                            .cleanable(true)
+                            .prefix(
+                                Icon::new(Lucide::Search)
+                                    .xsmall()
+                                    .text_color(theme::muted()),
+                            ),
+                    ),
+            )
+            .child(lists)
+            .child(commit_box);
 
         let in_conflict = self.conflict.as_ref().is_some_and(|c| {
             self.selected_change
@@ -526,7 +634,7 @@ impl RepoView {
             .min_h_0()
             .on_action(cx.listener(|this, _: &StageAll, window, cx| {
                 if this.data.status.unstaged().next().is_some() {
-                    this.run_op("Stage all", |r| r.stage_all(), window, cx)
+                    this.queue_stage(StageOp::StageAll, window, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &StashChanges, window, cx| this.stash(window, cx)))
