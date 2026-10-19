@@ -207,8 +207,15 @@ fn keyboard_moves_through_history(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
     let (handle, view) = open_repo_view(cx, dir.path());
-    let second = cx.read(|cx| view.read(cx).data().history.commits[1].id);
-    let first = cx.read(|cx| view.read(cx).data().history.commits[0].id);
+    // Shown rows: the merged `feature` commit may sit folded between them.
+    let shown = |cx: &TestAppContext, ix: usize| {
+        cx.read(|cx| {
+            let data = view.read(cx).data();
+            data.history.commits[data.folded.history_row(ix)].id
+        })
+    };
+    let first = shown(cx, 0);
+    let second = shown(cx, 1);
     cx.update(|cx| view.update(cx, |v, cx| v.select_commit(first, true, cx)));
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
@@ -758,7 +765,7 @@ fn merged_branch_is_folded_until_its_arrow_is_clicked(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
-    git(dir.path(), &["branch", "-q", "-D", "feature"]);
+    // The merged branch's ref still exists: it folds all the same.
     let (handle, view) = open_repo_view(cx, dir.path());
     let shown = |cx: &TestAppContext| {
         cx.read(|cx| {
