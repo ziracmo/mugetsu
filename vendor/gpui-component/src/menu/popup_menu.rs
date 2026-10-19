@@ -1129,7 +1129,7 @@ impl PopupMenu {
         action: Option<Box<dyn Action>>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<Kbd> {
+    ) -> Option<AnyElement> {
         let action = action?;
 
         // Each handle names a dispatch path GPUI can resolve in the previously
@@ -1151,11 +1151,16 @@ impl PopupMenu {
         .flatten()
         .find_map(|handle| Kbd::binding_for_action_in(action.as_ref(), handle, window))
         .or_else(|| Kbd::global_binding_for_action(action.as_ref(), window))
-        .map(|this| {
-            this.p_0()
-                .flex_nowrap()
-                .border_0()
-                .bg(gpui::transparent_white())
+        .map(|kbd| {
+            // Mugetsu: the keys take the row's text colour, dimmed, so they
+            // stay readable on the highlighted (accent) row too.
+            let stroke = kbd.keystroke().unparse();
+            div()
+                .debug_selector(move || format!("kbd:{stroke}"))
+                .flex_none()
+                .opacity(0.6)
+                .child(kbd.appearance(false))
+                .into_any_element()
         })
     }
 
