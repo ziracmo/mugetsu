@@ -293,6 +293,13 @@ impl Repo {
             .map(drop)
     }
 
+    /// Applies a stash and keeps it.
+    pub fn stash_apply(&self, index: usize) -> anyhow::Result<()> {
+        self.git()
+            .run(["stash", "apply", &format!("stash@{{{index}}}")])
+            .map(drop)
+    }
+
     pub fn stash_drop(&self, index: usize) -> anyhow::Result<()> {
         self.git()
             .run(["stash", "drop", &format!("stash@{{{index}}}")])

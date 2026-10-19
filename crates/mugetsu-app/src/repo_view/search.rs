@@ -24,7 +24,7 @@ use crate::theme;
 pub fn label_name(label: &RefLabel) -> Option<&str> {
     match label {
         RefLabel::Branch { name, .. } | RefLabel::Remote(name) | RefLabel::Tag(name) => Some(name),
-        RefLabel::DetachedHead => None,
+        RefLabel::Stash(_) | RefLabel::DetachedHead => None,
     }
 }
 
