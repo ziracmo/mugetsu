@@ -1,0 +1,17 @@
+{
+  "version": "0.5.0",
+  "date": "2026-10-19",
+  "title": "A faster Changes view, stashes in the graph and safer rebases",
+  "summary": "Staging feels instant, stashes show up in the history with their own menu, every rebase offers to stash or discard your changes first, and merged branches fold even when their ref is still there.",
+  "features": [
+    { "id": "changes", "title": "Instant Changes view", "body": "Files move between Unstaged and Staged on the click while git catches up behind, rolling back if it fails. Discard asks first, the right-click menu shows each shortcut and offers Ignore, and a filter field narrows both lists.", "scene": "diff", "highlight": true },
+    { "id": "stash-chip", "title": "Stashes in the history", "body": "Stash commits get a stash@{n} chip like branches and tags, with apply, pop and delete in their right-click menu.", "scene": "graph", "highlight": true },
+    { "id": "rebase-dirty", "title": "Rebase with uncommitted changes", "body": "Every rebase now asks what to do with uncommitted changes: stash and reapply after, discard, or cancel. A stash that conflicts on reapply is reported, with the conflicts left to resolve.", "scene": "graph" }
+  ],
+  "improvements": [
+    { "id": "menu-shortcuts", "title": "Readable menu shortcuts", "body": "Shortcut hints stay readable on the highlighted menu row." }
+  ],
+  "fixes": [
+    { "id": "fold-merges", "title": "Fold merged branches that still exist", "body": "A merged branch whose ref was not deleted left its merge with nothing to fold. Only HEAD is pinned visible now; selecting the ref unfolds it.", "scene": "graph" }
+  ]
+}
