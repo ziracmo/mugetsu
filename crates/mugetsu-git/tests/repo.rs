@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use mugetsu_git::{Change, LineKind, Repo};
+use mugetsu_git::{Change, LineKind, LocalChanges, Repo};
 
 fn git(dir: &Path, args: &[&str]) {
     let status = Command::new("git")
@@ -543,7 +543,7 @@ fn rebase_conflict_reports_progress_and_aborts() {
     use mugetsu_git::Operation;
     let (_dir, repo) = conflicting();
     let before = repo.git().run(["rev-parse", "HEAD"]).unwrap();
-    assert!(!repo.rebase("topic").unwrap());
+    assert!(!repo.rebase("topic", LocalChanges::Keep).unwrap());
     let state = repo.operation().unwrap().unwrap();
     assert_eq!(state.op, Operation::Rebase);
     assert!(state.theirs.ends_with("main a"), "{state:?}");
@@ -554,13 +554,59 @@ fn rebase_conflict_reports_progress_and_aborts() {
 }
 
 #[test]
+fn rebase_with_changes_stashes_or_discards_them() {
+    let (dir, repo, base) = linear();
+    let p = dir.path();
+    git(p, &["switch", "-q", "-c", "side", &base]);
+    commit_file(p, "side.txt", "s\n", "side");
+    let dirty = |c: &str| std::fs::write(p.join("side.txt"), c).unwrap();
+    let read = || std::fs::read_to_string(p.join("side.txt")).unwrap();
+
+    dirty("mine\n");
+    assert!(repo.rebase("main", LocalChanges::Keep).is_err());
+    assert_eq!(read(), "mine\n");
+
+    assert!(repo.rebase("main", LocalChanges::Stash).unwrap());
+    assert_eq!(rev(p, "side~1"), rev(p, "main"));
+    assert_eq!(read(), "mine\n");
+    assert!(repo.git().run(["stash", "list"]).unwrap().is_empty());
+
+    git(p, &["reset", "-q", "--hard", &base]);
+    commit_file(p, "side.txt", "s\n", "side");
+    dirty("thrown away\n");
+    assert!(repo.rebase("main", LocalChanges::Discard).unwrap());
+    assert_eq!(rev(p, "side~1"), rev(p, "main"));
+    assert_eq!(read(), "s\n");
+}
+
+#[test]
+fn rebase_reports_stashed_changes_that_conflict() {
+    let (dir, repo, base) = linear();
+    let p = dir.path();
+    commit_file(p, "base.txt", "main\n", "main base");
+    git(p, &["switch", "-q", "-c", "side", &base]);
+    commit_file(p, "side.txt", "s\n", "side");
+    // main changed base.txt since base; so do the uncommitted changes.
+    std::fs::write(p.join("base.txt"), "mine\n").unwrap();
+    let err = repo.rebase("main", LocalChanges::Stash).unwrap_err();
+    assert!(err.is::<mugetsu_git::StashConflict>(), "{err:#}");
+    assert_eq!(rev(p, "side~1"), rev(p, "main"));
+    assert!(!repo.conflicted_paths().unwrap().is_empty());
+    assert_eq!(repo.operation().unwrap(), None);
+    assert!(!repo.git().run(["stash", "list"]).unwrap().is_empty());
+}
+
+#[test]
 fn rebase_branch_moves_another_branch_and_keeps_head() {
     let (dir, repo, base) = linear();
     let p = dir.path();
     git(p, &["switch", "-q", "-c", "side", &base]);
     commit_file(p, "side.txt", "s\n", "side");
     git(p, &["switch", "-q", "main"]);
-    assert!(repo.rebase_branch("side", "main").unwrap());
+    assert!(
+        repo.rebase_branch("side", "main", LocalChanges::Keep)
+            .unwrap()
+    );
     assert_eq!(rev(p, "side~1"), rev(p, "main"));
     let head = repo.git().run(["branch", "--show-current"]).unwrap();
     assert_eq!(head.trim(), "main");
@@ -574,7 +620,10 @@ fn rebase_branch_leaves_uncommitted_changes_alone() {
     commit_file(p, "side.txt", "s\n", "side");
     git(p, &["switch", "-q", "main"]);
     std::fs::write(p.join("one.txt"), "dirty\n").unwrap();
-    assert!(repo.rebase_branch("side", "main").unwrap());
+    assert!(
+        repo.rebase_branch("side", "main", LocalChanges::Keep)
+            .unwrap()
+    );
     assert_eq!(rev(p, "side~1"), rev(p, "main"));
     assert_eq!(
         std::fs::read_to_string(p.join("one.txt")).unwrap(),
@@ -591,7 +640,11 @@ fn rebase_branch_conflicts_stop_on_the_branch() {
     git(p, &["switch", "-q", "-c", "side", &base]);
     commit_file(p, "one.txt", "side\n", "side one");
     git(p, &["switch", "-q", "main"]);
-    assert!(!repo.rebase_branch("side", "main").unwrap());
+    assert!(
+        !repo
+            .rebase_branch("side", "main", LocalChanges::Keep)
+            .unwrap()
+    );
     assert!(!repo.conflicted_paths().unwrap().is_empty());
 }
 
@@ -668,6 +721,7 @@ fn interactive_rebase_reorders_squashes_rewords_and_drops() {
                 step(0, A::Pick, None),
                 step(1, A::Squash, None),
             ],
+            LocalChanges::Stash,
         )
         .unwrap();
     assert!(outcome, "finished");
@@ -695,6 +749,7 @@ fn interactive_rebase_reorders_squashes_rewords_and_drops() {
                     message: None,
                 },
             ],
+            LocalChanges::Stash,
         )
         .unwrap();
     assert!(outcome, "finished");
@@ -731,7 +786,9 @@ fn interactive_rebase_stops_on_conflicts_then_aborts_or_continues() {
         },
     ];
     assert!(
-        !repo.rebase_interactive(&base, &swapped).unwrap(),
+        !repo
+            .rebase_interactive(&base, &swapped, LocalChanges::Stash)
+            .unwrap(),
         "stopped"
     );
     let state = repo.operation().unwrap().unwrap();
@@ -743,7 +800,9 @@ fn interactive_rebase_stops_on_conflicts_then_aborts_or_continues() {
 
     // Resolve each stop by taking the commit's side, then continue.
     assert!(
-        !repo.rebase_interactive(&base, &swapped).unwrap(),
+        !repo
+            .rebase_interactive(&base, &swapped, LocalChanges::Stash)
+            .unwrap(),
         "stopped"
     );
     std::fs::write(p.join("a.txt"), "two\n").unwrap();
@@ -799,7 +858,11 @@ fn interactive_rebase_onto_a_diverged_branch() {
             message: None,
         })
         .collect();
-    assert!(repo.rebase_interactive("main", &steps).unwrap(), "finished");
+    assert!(
+        repo.rebase_interactive("main", &steps, LocalChanges::Stash)
+            .unwrap(),
+        "finished"
+    );
     assert_eq!(subjects(p), ["base", "one", "two", "three", "t2", "t1"]);
 }
 

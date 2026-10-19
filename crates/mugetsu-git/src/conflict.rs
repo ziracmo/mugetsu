@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::Repo;
+use crate::{LocalChanges, Repo};
 
 /// The operation that left the repository with conflicts (or mid-way).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -431,7 +431,12 @@ impl Repo {
             Operation::CherryPick => &["cherry-pick", "--continue"],
             Operation::Revert => &["revert", "--continue"],
         };
-        self.run_sequencer(args)
+        let done = self.run_sequencer(args)?;
+        // The last step of a rebase reapplies its autostash.
+        if op == Operation::Rebase {
+            return self.check_autostash(done);
+        }
+        Ok(done)
     }
 
     /// Drops the commit being applied and goes on.
@@ -442,7 +447,11 @@ impl Repo {
             Operation::CherryPick => &["cherry-pick", "--skip"],
             Operation::Revert => &["revert", "--skip"],
         };
-        self.run_sequencer(args)
+        let done = self.run_sequencer(args)?;
+        if op == Operation::Rebase {
+            return self.check_autostash(done);
+        }
+        Ok(done)
     }
 
     /// Back to the state before the operation started. Without an operation
@@ -476,8 +485,20 @@ impl Repo {
     }
 
     /// Rebases HEAD onto `rev`. `Ok(false)`: stopped on conflicts.
-    pub fn rebase(&self, rev: &str) -> anyhow::Result<bool> {
-        self.run_sequencer(&["rebase", rev])
+    ///
+    /// With [`LocalChanges::Stash`], uncommitted changes are stashed and
+    /// reapplied once the rebase is done (`--autostash`, so also after a stop
+    /// on conflicts is continued); [`StashConflict`] if that conflicts.
+    ///
+    /// [`StashConflict`]: crate::StashConflict
+    pub fn rebase(&self, rev: &str, changes: LocalChanges) -> anyhow::Result<bool> {
+        self.discard_for(changes)?;
+        let done = if changes == LocalChanges::Stash {
+            self.run_sequencer(&["rebase", "--autostash", rev])?
+        } else {
+            self.run_sequencer(&["rebase", rev])?
+        };
+        self.check_autostash(done)
     }
 
     /// Rebases `branch` onto `onto`. `Ok(false)`: stopped on conflicts,
@@ -486,15 +507,21 @@ impl Repo {
     /// Another branch than HEAD is rebased in a scratch worktree, so the
     /// checkout (and its uncommitted changes) is left alone. Only when that
     /// hits conflicts is it redone here, if the working tree is clean, then
-    /// the previous branch is switched back.
-    pub fn rebase_branch(&self, branch: &str, onto: &str) -> anyhow::Result<bool> {
+    /// the previous branch is switched back. `changes` only applies to the
+    /// checked-out branch, see [`Repo::rebase`].
+    pub fn rebase_branch(
+        &self,
+        branch: &str,
+        onto: &str,
+        changes: LocalChanges,
+    ) -> anyhow::Result<bool> {
         let previous = self
             .git()
             .run(["symbolic-ref", "--quiet", "--short", "HEAD"])
             .ok()
             .map(|s| s.trim().to_string());
         if previous.as_deref() == Some(branch) {
-            return self.rebase(onto);
+            return self.rebase(onto, changes);
         }
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

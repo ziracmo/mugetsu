@@ -19,7 +19,7 @@ use gpui_kit::{
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
-use mugetsu_git::{RebaseAction, RebaseCommit, RebaseStep};
+use mugetsu_git::{LocalChanges, RebaseAction, RebaseCommit, RebaseStep};
 
 use super::RepoView;
 use crate::i18n::tr;
@@ -722,8 +722,23 @@ impl Render for RebaseForm {
 }
 
 impl RepoView {
-    /// Loads the commits after `base` on HEAD, then opens the rebase sheet.
+    /// Asks about uncommitted changes, loads the commits after `base` on
+    /// HEAD, then opens the rebase sheet.
     pub fn open_rebase(&mut self, base: ObjectId, window: &mut Window, cx: &mut Context<Self>) {
+        self.with_local_changes(
+            move |this, changes, window, cx| this.plan_rebase(base, changes, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    fn plan_rebase(
+        &mut self,
+        base: ObjectId,
+        changes: LocalChanges,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(branch) = self.data.refs.head_branch.clone() else {
             return;
         };
@@ -742,7 +757,7 @@ impl RepoView {
                     Notification::info(tr("Rien à rebaser", "Nothing to rebase")),
                     cx,
                 ),
-                Ok(commits) => this.show_rebase_sheet(branch, base, commits, window, cx),
+                Ok(commits) => this.show_rebase_sheet(branch, base, commits, changes, window, cx),
             });
         })
         .detach();
@@ -753,6 +768,7 @@ impl RepoView {
         branch: String,
         base: ObjectId,
         commits: Vec<RebaseCommit>,
+        changes: LocalChanges,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -794,7 +810,9 @@ impl RepoView {
                     }
                     let steps = f.steps(cx);
                     let base = base.clone();
-                    let _ = view.update(cx, |this, cx| this.run_rebase(base, steps, window, cx));
+                    let _ = view.update(cx, |this, cx| {
+                        this.run_rebase(base, steps, changes, window, cx)
+                    });
                     true
                 })
         });
@@ -806,13 +824,14 @@ impl RepoView {
         &mut self,
         base: String,
         steps: Vec<RebaseStep>,
+        changes: LocalChanges,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.run_op_then(
             "Rebase",
             move |r| {
-                if r.rebase_interactive(&base, &steps)? {
+                if r.rebase_interactive(&base, &steps, changes)? {
                     Ok(())
                 } else {
                     anyhow::bail!("stopped on conflicts")

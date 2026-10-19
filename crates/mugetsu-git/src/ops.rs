@@ -13,6 +13,20 @@ pub enum LocalChanges {
     Discard,
 }
 
+/// The operation went through, but reapplying the stashed changes on top
+/// conflicted: the conflicts are in the working tree, the changes are kept
+/// in the stash.
+#[derive(Debug)]
+pub struct StashConflict;
+
+impl std::fmt::Display for StashConflict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the stashed changes conflict: they are kept in the stash")
+    }
+}
+
+impl std::error::Error for StashConflict {}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PushOptions {
     pub set_upstream: bool,
@@ -137,6 +151,32 @@ impl Repo {
             })?;
         }
         Ok(())
+    }
+
+    /// Uncommitted changes to tracked files: what gets in the way of a rebase.
+    pub fn has_tracked_changes(&self) -> anyhow::Result<bool> {
+        Ok(!self
+            .git()
+            .run(["status", "--porcelain", "--untracked-files=no"])?
+            .trim()
+            .is_empty())
+    }
+
+    /// Throws tracked changes away for [`LocalChanges::Discard`].
+    pub(crate) fn discard_for(&self, changes: LocalChanges) -> anyhow::Result<()> {
+        if changes == LocalChanges::Discard {
+            self.git().run(["reset", "--hard", "--quiet"])?;
+        }
+        Ok(())
+    }
+
+    /// After a rebase that stashed the changes and reapplied them
+    /// (`--autostash`): conflicts left once it is done come from them.
+    pub(crate) fn check_autostash(&self, done: bool) -> anyhow::Result<bool> {
+        if done && !self.conflicted_paths()?.is_empty() {
+            return Err(StashConflict.into());
+        }
+        Ok(done)
     }
 
     /// Moves `branch` onto `target` (e.g. its upstream). For the checked-out

@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use mugetsu_git::{Change, PushOptions, Repo, ResetMode};
+use mugetsu_git::{Change, LocalChanges, PushOptions, Repo, ResetMode};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -460,14 +460,25 @@ fn batch_rebase_moves_every_branch_or_none() {
         .map(|b| git(p, &["rev-parse", b]))
         .collect();
     let all = ["one", "two", "clash"].map(String::from).to_vec();
-    assert!(repo.rebase_branches("main", &all).is_err());
+    assert!(
+        repo.rebase_branches("main", &all, LocalChanges::Keep)
+            .is_err()
+    );
     assert_eq!(git(p, &["rev-parse", "one"]), tips[0]);
     assert_eq!(git(p, &["rev-parse", "two"]), tips[1]);
     assert_eq!(repo.refs().unwrap().head_branch.as_deref(), Some("main"));
     assert!(repo.conflicted_paths().unwrap().is_empty());
 
+    // Uncommitted changes: refused, unless stashed (and reapplied after).
+    std::fs::write(p.join("a.txt"), "dirty\n").unwrap();
     let names = ["one", "two"].map(String::from).to_vec();
-    repo.rebase_branches("main", &names).unwrap();
+    assert!(
+        repo.rebase_branches("main", &names, LocalChanges::Keep)
+            .is_err()
+    );
+    repo.rebase_branches("main", &names, LocalChanges::Stash)
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(p.join("a.txt")).unwrap(), "dirty\n");
     assert_eq!(parent("one"), main);
     assert_eq!(parent("two"), main);
     assert_eq!(repo.refs().unwrap().head_branch.as_deref(), Some("main"));

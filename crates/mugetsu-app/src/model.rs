@@ -142,6 +142,15 @@ impl RepoData {
     pub fn uncommitted(&self) -> usize {
         self.status.files.len()
     }
+
+    /// Changed tracked files: what a rebase can't run over.
+    pub fn tracked_changes(&self) -> usize {
+        self.status
+            .files
+            .iter()
+            .filter(|f| f.worktree != Change::Untracked)
+            .count()
+    }
 }
 
 #[cfg(test)]

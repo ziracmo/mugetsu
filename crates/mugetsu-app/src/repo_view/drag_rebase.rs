@@ -12,6 +12,7 @@ use gpui_kit::{
     ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement as _, Styled as _,
     Window, anchored, deferred, div, point, prelude::FluentBuilder as _, px,
 };
+use mugetsu_git::LocalChanges;
 
 use super::RepoView;
 use crate::i18n::tr;
@@ -89,6 +90,19 @@ impl RepoView {
         if branch == onto {
             return;
         }
+        // The checked-out branch with changes in the way: the question about
+        // them stands in for the confirmation.
+        let head = self.data.refs.head_branch.as_deref() == Some(branch.as_str());
+        if head && self.data.tracked_changes() > 0 {
+            self.with_local_changes(
+                move |this, changes, window, cx| {
+                    this.rebase_branch_onto(branch, onto, changes, window, cx)
+                },
+                window,
+                cx,
+            );
+            return;
+        }
         if crate::settings::get().confirm_drag_rebase {
             self.pending_rebase = Some(PendingRebase {
                 branch,
@@ -98,7 +112,7 @@ impl RepoView {
             });
             cx.notify();
         } else {
-            self.rebase_branch_onto(branch, onto, window, cx);
+            self.rebase_branch_onto(branch, onto, LocalChanges::Keep, window, cx);
         }
     }
 
@@ -106,13 +120,14 @@ impl RepoView {
         &mut self,
         branch: String,
         onto: String,
+        changes: LocalChanges,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.run_op_then(
             "Rebase",
             move |r| {
-                r.rebase_branch(&branch, &onto)
+                r.rebase_branch(&branch, &onto, changes)
                     .and_then(super::conflicts::stopped_on_conflicts)
             },
             |this, _, _| this.rebased(),
@@ -132,7 +147,7 @@ impl RepoView {
         if p.dont_ask {
             crate::settings::update(cx, |s| s.confirm_drag_rebase = false);
         }
-        self.rebase_branch_onto(p.branch, p.onto, window, cx);
+        self.rebase_branch_onto(p.branch, p.onto, LocalChanges::Keep, window, cx);
     }
 
     /// The confirmation popover, next to where the chip was dropped.
