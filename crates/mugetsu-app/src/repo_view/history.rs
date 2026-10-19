@@ -294,6 +294,15 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 false,
             )
             .into_any_element(),
+            RefLabel::Stash(index) => chip(
+                format!("stash@{{{index}}}"),
+                theme::magenta(),
+                Lucide::Archive,
+                false,
+                None,
+                false,
+            )
+            .into_any_element(),
             RefLabel::DetachedHead => chip(
                 "HEAD".into(),
                 theme::magenta(),

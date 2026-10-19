@@ -224,6 +224,31 @@ fn stashes_push_pop_drop_and_clear() {
 }
 
 #[test]
+fn stash_apply_keeps_it_and_decorates_its_commit() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    std::fs::write(p.join("a.txt"), "stashed\n").unwrap();
+    repo.stash_push(Some("wip")).unwrap();
+    let refs = repo.refs().unwrap();
+    let id = refs.stashes[0].id;
+    assert_eq!(
+        refs.decorations().get(&id),
+        Some(&vec![mugetsu_git::RefLabel::Stash(0)])
+    );
+
+    repo.stash_apply(0).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(p.join("a.txt")).unwrap(),
+        "stashed\n"
+    );
+    assert_eq!(
+        repo.refs().unwrap().stashes.len(),
+        1,
+        "apply keeps the stash"
+    );
+}
+
+#[test]
 fn worktrees_and_remotes() {
     let (dir, repo) = fixture();
     let wt_dir = tempfile::tempdir().unwrap();

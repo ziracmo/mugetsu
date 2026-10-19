@@ -908,6 +908,7 @@ impl RepoView {
 
     fn stash_rows(&self, query: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let entity = cx.entity().downgrade();
+        let ctx = self.menu_context(cx);
         self.data
             .refs
             .stashes
@@ -916,6 +917,7 @@ impl RepoView {
             .map(|s| {
                 let id = SharedString::from(format!("stash:{}", s.index));
                 let (entity, target, row_id) = (entity.clone(), s.id, id.clone());
+                let (menu_ctx, index) = (ctx.clone(), s.index);
                 render_row(Row {
                     view: entity.clone(),
                     quiet: self.menu_open,
@@ -934,7 +936,9 @@ impl RepoView {
                             this.select_commit(target, true, cx);
                         });
                     }),
-                    menu: None,
+                    menu: Some(Rc::new(move |m, _, _| {
+                        menus::stash_menu(m, &menu_ctx, index)
+                    })),
                 })
             })
             .collect()

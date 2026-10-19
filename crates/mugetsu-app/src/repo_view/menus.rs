@@ -455,6 +455,47 @@ pub fn tag_menu(menu: PopupMenu, ctx: &MenuContext, tag: &str) -> PopupMenu {
         .item(item(tr("Copier le nom du tag", "Copy tag name"), Lucide::Copy).on_click(copy(tag)))
 }
 
+pub fn stash_menu(menu: PopupMenu, ctx: &MenuContext, index: usize) -> PopupMenu {
+    let apply = item(tr("Appliquer", "Apply"), Lucide::ArchiveRestore).on_click(act(
+        &ctx.view,
+        move |this, window, cx| {
+            this.run_op("Stash apply", move |r| r.stash_apply(index), window, cx);
+        },
+    ));
+    let pop = item(
+        tr("Appliquer et supprimer (pop)", "Pop"),
+        Lucide::ArchiveRestore,
+    )
+    .on_click(act(&ctx.view, move |this, window, cx| {
+        this.run_op("Stash pop", move |r| r.stash_pop(index), window, cx);
+    }));
+    let delete = item(tr("Supprimer…", "Delete…"), Lucide::Trash).on_click(act(
+        &ctx.view,
+        move |this, window, cx| {
+            this.confirm(
+                trf!("Supprimer stash@{{{index}}} ?", "Delete stash@{{{index}}}?"),
+                tr(
+                    "Le stash est supprimé définitivement.",
+                    "The stash is deleted for good.",
+                )
+                .into(),
+                tr("Supprimer", "Delete"),
+                move |this, window, cx| {
+                    this.run_op(
+                        tr("Supprimer stash", "Delete stash"),
+                        move |r| r.stash_drop(index),
+                        window,
+                        cx,
+                    );
+                },
+                window,
+                cx,
+            );
+        },
+    ));
+    menu.item(apply).item(pop).separator().item(delete)
+}
+
 /// A file in a list (working-copy changes, a commit's files).
 pub struct FileMenu {
     pub path: String,
@@ -639,6 +680,16 @@ pub fn commit_menu(
                     window,
                     cx,
                     move |m, _, _| tag_menu(m, &ctx, &name),
+                );
+            }
+            RefLabel::Stash(index) => {
+                let (ctx, index) = (ctx.clone(), *index);
+                menu = menu.submenu_with_icon(
+                    Some(Icon::new(Lucide::Archive)),
+                    format!("stash@{{{index}}}"),
+                    window,
+                    cx,
+                    move |m, _, _| stash_menu(m, &ctx, index),
                 );
             }
             RefLabel::DetachedHead => {}

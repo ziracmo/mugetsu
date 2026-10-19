@@ -99,6 +99,9 @@ impl RefsSnapshot {
                 .or_default()
                 .push(RefLabel::Tag(t.name.clone()));
         }
+        for s in &self.stashes {
+            map.entry(s.id).or_default().push(RefLabel::Stash(s.index));
+        }
         if self.head_branch.is_none()
             && let Some(h) = self.head
         {
@@ -164,9 +167,14 @@ impl RefsSnapshot {
 /// Decoration shown next to a commit summary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RefLabel {
-    Branch { name: String, head: bool },
+    Branch {
+        name: String,
+        head: bool,
+    },
     Remote(String),
     Tag(String),
+    /// `stash@{index}`.
+    Stash(usize),
     DetachedHead,
 }
 
