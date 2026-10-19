@@ -2502,3 +2502,183 @@ fn side_buttons_and_shortcuts_go_back_and_forward(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert_eq!(cx.read(|cx| view.read(cx).mode()), Mode::Stats);
 }
+
+/// Opens the Changes view of a fixture with `a.txt` modified and `new.txt` untracked.
+fn changes_view(cx: &mut TestAppContext, dir: &Path) -> (AnyWindowHandle, Entity<RepoView>) {
+    fixture(dir);
+    std::fs::write(dir.join("a.txt"), "changed\n").unwrap();
+    std::fs::write(dir.join("new.txt"), "new\n").unwrap();
+    let (handle, view) = open_repo_view(cx, dir);
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_focused(true, cx);
+            v.set_mode(Mode::Changes, cx);
+        })
+    });
+    settle(cx, &view);
+    ui_step(cx, handle, &|_, _| {});
+    (handle, view)
+}
+
+fn shown_staged(cx: &TestAppContext, view: &Entity<RepoView>) -> Vec<String> {
+    cx.read(|cx| {
+        view.read(cx)
+            .data()
+            .status
+            .staged()
+            .map(|f| f.path.clone())
+            .collect()
+    })
+}
+
+#[gpui_kit::test]
+fn staging_moves_the_file_before_git_runs(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let (handle, view) = changes_view(cx, dir.path());
+    // Moved on the click itself, not after git and a reload.
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("toggle:false:a.txt", cx);
+    })
+    .unwrap();
+    assert_eq!(shown_staged(cx, &view), ["a.txt"]);
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["diff", "--cached", "--name-only"]).trim(),
+        "a.txt"
+    );
+    // Back with a double click on the staged row.
+    ui_step(cx, handle, &|window, cx| {
+        window.double_click("staged:a.txt", cx)
+    });
+    assert!(shown_staged(cx, &view).is_empty());
+    settle(cx, &view);
+    assert!(
+        git(dir.path(), &["diff", "--cached", "--name-only"])
+            .trim()
+            .is_empty()
+    );
+}
+
+#[gpui_kit::test]
+fn a_failed_stage_moves_the_file_back(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let (handle, view) = changes_view(cx, dir.path());
+    // Another git holds the index: `git add` fails.
+    let lock = dir.path().join(".git/index.lock");
+    std::fs::write(&lock, "").unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("toggle:false:a.txt", cx);
+    })
+    .unwrap();
+    assert_eq!(shown_staged(cx, &view), ["a.txt"]);
+    settle(cx, &view);
+    assert!(shown_staged(cx, &view).is_empty(), "rolled back");
+    std::fs::remove_file(lock).unwrap();
+}
+
+#[gpui_kit::test]
+fn keys_stage_and_discard_the_selected_file(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let (handle, view) = changes_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        window.click("unstaged:new.txt", cx)
+    });
+    ui_step(cx, handle, &|window, cx| window.press("space", cx));
+    assert_eq!(shown_staged(cx, &view), ["new.txt"]);
+    settle(cx, &view);
+    // The selection followed the file; ↑ goes back to a.txt, then ⌘⌫ asks first.
+    ui_step(cx, handle, &|window, cx| window.press("up", cx));
+    ui_step(cx, handle, &|window, cx| {
+        window.press("secondary-backspace", cx)
+    });
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "changed\n",
+        "nothing discarded before the confirmation"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    ui_step(cx, handle, &|window, cx| window.click("ok", cx));
+    settle(cx, &view);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "one\ntwo\n"
+    );
+    assert_eq!(
+        git(dir.path(), &["status", "--porcelain"]).trim(),
+        "A  new.txt"
+    );
+}
+
+#[gpui_kit::test]
+fn change_menu_shows_shortcuts_and_ignores(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let (handle, view) = changes_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        window.click("unstaged:new.txt", cx)
+    });
+    ui_step(cx, handle, &|window, cx| {
+        window.right_click("unstaged:new.txt", cx)
+    });
+    ui_step(cx, handle, &|window, _| {
+        let menu = window.within("popup-menu");
+        assert_eq!(menu.find(0usize).label(), Some("Ajouter à l'index"));
+        assert_eq!(
+            menu.find(1usize).label(),
+            Some("Annuler les modifications…")
+        );
+    });
+    ui_step(cx, handle, &|window, cx| window.press("escape", cx));
+    // Ignore › the file itself (the submenu's first entry).
+    ui_step(cx, handle, &|window, cx| {
+        view.update(cx, |v, cx| {
+            v.ignore_change("new.txt".into(), "/new.txt".into(), window, cx)
+        })
+    });
+    assert!(
+        cx.read(|cx| view
+            .read(cx)
+            .data()
+            .status
+            .files
+            .iter()
+            .all(|f| f.path != "new.txt")),
+        "gone from the list right away"
+    );
+    settle(cx, &view);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        "/new.txt\n"
+    );
+}
+
+#[gpui_kit::test]
+fn filter_narrows_both_lists(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let (handle, view) = changes_view(cx, dir.path());
+    git(dir.path(), &["add", "new.txt"]);
+    cx.update(|cx| view.update(cx, |v, cx| v.reload(cx)));
+    settle(cx, &view);
+    ui_step(cx, handle, &|window, cx| window.press("secondary-f", cx));
+    ui_step(cx, handle, &|window, cx| window.input("NEW", cx));
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("staged:new.txt").is_some());
+        assert!(window.try_find("unstaged:a.txt").is_none());
+    });
+    // "Stage shown" leaves what the filter hides.
+    ui_step(cx, handle, &|window, cx| window.click("change-filter", cx));
+    ui_step(cx, handle, &|window, cx| {
+        window.press("secondary-a", cx);
+        window.input("a.t", cx);
+    });
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("unstaged:a.txt").is_some());
+        assert!(window.try_find("staged:new.txt").is_none());
+    });
+}

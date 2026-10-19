@@ -9,7 +9,7 @@ use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{Icon, WindowExt as _};
 use gpui_kit::{
-    App, AppContext as _, ClickEvent, ClipboardItem, Context, WeakEntity, Window,
+    App, AppContext as _, ClickEvent, ClipboardItem, Context, FocusHandle, WeakEntity, Window,
     prelude::FluentBuilder as _,
 };
 use mugetsu_forge::{ForgeRepo, GithubRepo, PullRequest};
@@ -497,6 +497,7 @@ pub fn stash_menu(menu: PopupMenu, ctx: &MenuContext, index: usize) -> PopupMenu
 }
 
 /// A file in a list (working-copy changes, a commit's files).
+#[derive(Clone)]
 pub struct FileMenu {
     pub path: String,
     /// Blame as of this commit; the working copy when `None`.
@@ -510,6 +511,17 @@ pub fn file_menu(
     view: &WeakEntity<RepoView>,
     root: &Path,
     file: &FileMenu,
+) -> PopupMenu {
+    file_menu_with(menu, view, root, file, None)
+}
+
+/// [`file_menu`], with `copy_key` shown on "Copy path".
+fn file_menu_with(
+    menu: PopupMenu,
+    view: &WeakEntity<RepoView>,
+    root: &Path,
+    file: &FileMenu,
+    copy_key: Option<Box<dyn gpui_kit::Action>>,
 ) -> PopupMenu {
     use super::file_view::FileTab;
     let open = |tab: FileTab| {
@@ -531,7 +543,11 @@ pub fn file_menu(
         .on_click(open(FileTab::History)),
     )
     .separator()
-    .item(item(tr("Copier le chemin", "Copy path"), Lucide::Copy).on_click(copy(file.path.clone())))
+    .item(
+        item(tr("Copier le chemin", "Copy path"), Lucide::Copy)
+            .when_some(copy_key, |i, key| i.action(key))
+            .on_click(copy(file.path.clone())),
+    )
     .item(
         item(
             tr("Copier le chemin complet", "Copy full path"),
@@ -539,6 +555,114 @@ pub fn file_menu(
         )
         .on_click(copy(root.join(&file.path).to_string_lossy().into_owned())),
     )
+}
+
+/// A file of the Changes view as shown in its menu.
+#[derive(Clone)]
+pub struct ChangeMenu {
+    pub file: FileMenu,
+    /// Row of the staged list.
+    pub staged: bool,
+    pub conflicted: bool,
+    pub untracked: bool,
+    /// The file is on disk (not deleted).
+    pub exists: bool,
+}
+
+/// Right-click menu of a Changes row, in the spirit of Fork: each entry shows
+/// the key that does the same on the selected file.
+pub fn change_menu(
+    menu: PopupMenu,
+    view: &WeakEntity<RepoView>,
+    root: &Path,
+    focus: &FocusHandle,
+    c: &ChangeMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    use super::{CopyChangePath, DiscardChange, OpenChange, RevealChange, ToggleStage};
+    let path = c.file.path.clone();
+    let sel = super::SelectedChange {
+        path: path.clone(),
+        staged: c.staged,
+    };
+    let toggle = item(
+        if c.staged {
+            tr("Retirer de l'index", "Unstage")
+        } else {
+            tr("Ajouter à l'index", "Stage")
+        },
+        if c.staged {
+            Lucide::Minus
+        } else {
+            Lucide::Plus
+        },
+    )
+    .action(Box::new(ToggleStage))
+    .disabled(c.conflicted)
+    .on_click(act(view, move |this, window, cx| {
+        this.toggle_stage(&sel, window, cx)
+    }));
+    let discard = {
+        let path = path.clone();
+        item(
+            tr("Annuler les modifications…", "Discard changes…"),
+            Lucide::Undo2,
+        )
+        .action(Box::new(DiscardChange))
+        .disabled(c.conflicted)
+        .on_click(act(view, move |this, window, cx| {
+            this.confirm_discard(path.clone(), window, cx)
+        }))
+    };
+    let open = {
+        let path = path.clone();
+        item(tr("Ouvrir", "Open"), Lucide::ExternalLink)
+            .action(Box::new(OpenChange))
+            .disabled(!c.exists)
+            .on_click(act(view, move |this, _, cx| this.open_change(&path, cx)))
+    };
+    let reveal = {
+        let path = path.clone();
+        item(super::staging::reveal_label(), Lucide::FolderOpen)
+            .action(Box::new(RevealChange))
+            .on_click(act(view, move |this, _, cx| this.reveal_change(&path, cx)))
+    };
+    let ignore = c.untracked.then(|| {
+        let (view, path) = (view.clone(), path.clone());
+        move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+            super::staging::ignore_choices(&path).into_iter().fold(
+                menu,
+                |menu, (label, pattern)| {
+                    let path = path.clone();
+                    menu.item(PopupMenuItem::new(label).on_click(act(
+                        &view,
+                        move |this, window, cx| {
+                            this.ignore_change(path.clone(), pattern.clone(), window, cx)
+                        },
+                    )))
+                },
+            )
+        }
+    });
+    let menu = menu
+        .action_context(focus.clone())
+        .item(toggle)
+        .when(!c.staged, |m| m.item(discard))
+        .separator()
+        .item(open)
+        .item(reveal)
+        .when_some(ignore, |m, ignore| {
+            m.separator().submenu_with_icon(
+                Some(Icon::new(Lucide::EyeOff)),
+                tr("Ignorer", "Ignore"),
+                window,
+                cx,
+                ignore,
+            )
+        })
+        .separator();
+    file_menu_with(menu, view, root, &c.file, Some(Box::new(CopyChangePath)))
 }
 
 /// A linked worktree as shown in a menu.

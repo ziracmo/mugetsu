@@ -34,6 +34,25 @@ pub struct PushOptions {
     pub tags: bool,
 }
 
+/// A `.gitignore` line matching exactly `path` (relative to the root), with
+/// the characters git would read as a pattern escaped.
+pub fn ignore_literal(path: &str) -> String {
+    let mut out = String::from("/");
+    for c in path.chars() {
+        if matches!(c, '*' | '?' | '[' | '\\' | '!' | '#') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    // Trailing spaces are dropped unless escaped.
+    let trailing = out.len() - out.trim_end_matches(' ').len();
+    if trailing > 0 {
+        out.truncate(out.len() - trailing);
+        out.push_str(&"\\ ".repeat(trailing));
+    }
+    out
+}
+
 impl Repo {
     pub fn stage(&self, paths: &[&str]) -> anyhow::Result<()> {
         let mut args = vec!["add", "--all", "--"];
@@ -62,6 +81,29 @@ impl Repo {
         let mut args = vec!["restore", "--worktree", "--"];
         args.extend_from_slice(paths);
         self.git().run(args).map(drop)
+    }
+
+    /// Deletes untracked files (irreversible); ignored files are left alone.
+    pub fn remove_untracked(&self, paths: &[&str]) -> anyhow::Result<()> {
+        let mut args = vec!["clean", "-f", "-q", "--"];
+        args.extend_from_slice(paths);
+        self.git().run(args).map(drop)
+    }
+
+    /// Appends `pattern` to the repository's root `.gitignore`.
+    pub fn ignore(&self, pattern: &str) -> anyhow::Result<()> {
+        use std::io::Write as _;
+        let path = self.root().join(".gitignore");
+        let current = std::fs::read(&path).unwrap_or_default();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        if current.last().is_some_and(|b| *b != b'\n') {
+            file.write_all(b"\n")?;
+        }
+        writeln!(file, "{pattern}")?;
+        Ok(())
     }
 
     /// Stages (or unstages with `reverse`) a single hunk of `file`.

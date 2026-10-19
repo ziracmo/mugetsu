@@ -34,7 +34,7 @@ pub use diff::{DiffFile, DiffLine, FileDiff, Hunk, LineKind};
 pub use fold::Folded;
 pub use graph::{Edge, Graph, GraphRow, Lane, Node, Span, layout, layout_with};
 pub use log::{Commit, CommitOrder, History};
-pub use ops::{LocalChanges, PushOptions, ResetMode, StashConflict};
+pub use ops::{LocalChanges, PushOptions, ResetMode, StashConflict, ignore_literal};
 pub use rebase::{RebaseAction, RebaseCommit, RebaseStep};
 pub use recap::{Activity, Me, TimeSpan, Week};
 pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};

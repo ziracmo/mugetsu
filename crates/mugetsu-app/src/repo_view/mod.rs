@@ -26,6 +26,7 @@ mod search;
 mod shimmer;
 mod sidebar;
 mod stack_panel;
+mod staging;
 mod stats_panel;
 mod svg_preview;
 mod toolbar;
@@ -85,7 +86,14 @@ gpui_kit::actions!(
         TakeOurs,
         TakeTheirs,
         GoBack,
-        GoForward
+        GoForward,
+        ToggleStage,
+        DiscardChange,
+        OpenChange,
+        RevealChange,
+        CopyChangePath,
+        NextChange,
+        PrevChange
     ]
 );
 
@@ -139,6 +147,18 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("ctrl-a", StageAll, Some("Changes")),
         KeyBinding::new("secondary-s", StashChanges, Some("Changes")),
         KeyBinding::new("ctrl-s", StashChanges, Some("Changes")),
+        // The file lists (plain keys stay with the filter and the message).
+        KeyBinding::new("enter", ToggleStage, Some("ChangeList")),
+        KeyBinding::new("space", ToggleStage, Some("ChangeList")),
+        KeyBinding::new("delete", DiscardChange, Some("ChangeList")),
+        KeyBinding::new("secondary-backspace", DiscardChange, Some("ChangeList")),
+        KeyBinding::new("secondary-down", OpenChange, Some("ChangeList")),
+        KeyBinding::new("secondary-alt-r", RevealChange, Some("ChangeList")),
+        KeyBinding::new("secondary-shift-c", CopyChangePath, Some("ChangeList")),
+        KeyBinding::new("down", NextChange, Some("ChangeList")),
+        KeyBinding::new("j", NextChange, Some("ChangeList")),
+        KeyBinding::new("up", PrevChange, Some("ChangeList")),
+        KeyBinding::new("k", PrevChange, Some("ChangeList")),
         // Back / forward, as in browsers and editors (the mouse side buttons too).
         KeyBinding::new(
             if cfg!(target_os = "macos") {
@@ -241,6 +261,22 @@ pub struct RepoView {
     conflict: Option<conflicts::ConflictEditor>,
     /// A file was just marked resolved (sequence), for the banner's pill.
     resolved_flash: Option<usize>,
+    /// Stage moves shown before git ran them, oldest (the running one) first.
+    staging: std::collections::VecDeque<staging::StageOp>,
+    staging_running: bool,
+    /// Git writes held until `staging` drains.
+    after_staging: Vec<staging::AfterStaging>,
+    /// Bumped on every stage move: a status read before it is stale.
+    status_epoch: usize,
+    /// `status_epoch` when the running reload began.
+    load_epoch: usize,
+    status_loading: bool,
+    _stage: Task<()>,
+    _status: Task<()>,
+    /// Filters both file lists.
+    change_filter: Entity<InputState>,
+    /// The file lists, where plain keys (space, arrows) act on files.
+    change_list_focus: FocusHandle,
 
     // Commit search (⌘F)
     search_open: bool,
@@ -303,6 +339,7 @@ pub struct RepoView {
     _fetch: Task<()>,
     _op: Task<()>,
     _search: Subscription,
+    _change_filter: Subscription,
     _commit_search: Subscription,
     /// History order the data was loaded with (reloads when the setting changes).
     commit_order: crate::settings::CommitSort,
@@ -376,6 +413,14 @@ impl RepoView {
                 cx.notify();
             }
         });
+        let change_filter = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(tr("Filtrer les fichiers", "Filter files"))
+        });
+        let _change_filter = cx.subscribe(&change_filter, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
         let search_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr(
                 "Rechercher un commit, un auteur ou un SHA",
@@ -444,6 +489,16 @@ impl RepoView {
             amend: false,
             conflict: None,
             resolved_flash: None,
+            staging: Default::default(),
+            staging_running: false,
+            after_staging: Vec::new(),
+            status_epoch: 0,
+            load_epoch: 0,
+            status_loading: false,
+            _stage: Task::ready(()),
+            _status: Task::ready(()),
+            change_filter,
+            change_list_focus: cx.focus_handle(),
             collapsed: crate::settings::get()
                 .collapsed_sections
                 .iter()
@@ -490,6 +545,7 @@ impl RepoView {
             _fetch: Task::ready(()),
             _op: Task::ready(()),
             _search,
+            _change_filter,
             _commit_search,
             commit_order: crate::settings::get().commit_order,
             pr_list: Arc::default(),
@@ -597,7 +653,7 @@ impl RepoView {
 
     #[cfg(test)]
     pub fn is_busy(&self) -> bool {
-        self.busy.is_some()
+        self.busy.is_some() || self.is_staging()
     }
 
     /// Called by the workspace when the tab gains or loses focus.
@@ -629,6 +685,7 @@ impl RepoView {
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.generation += 1;
         let generation = self.generation;
+        self.load_epoch = self.status_epoch;
         self.loading = true;
         let repo = self.repo.clone();
         let expanded = self.expanded_merges.clone();
@@ -651,7 +708,8 @@ impl RepoView {
         cx.notify();
     }
 
-    fn install(&mut self, data: Arc<RepoData>, cx: &mut Context<Self>) {
+    fn install(&mut self, mut data: Arc<RepoData>, cx: &mut Context<Self>) {
+        self.merge_loaded_status(&mut data);
         self.load_error = None;
         let first_load = self.data.history.is_empty();
         let had_conflicts = self.data.conflicted().next().is_some();
@@ -694,25 +752,7 @@ impl RepoView {
         {
             self.conflict = None;
         }
-        if self.mode == Mode::Changes {
-            let still_there = self.selected_change.as_ref().is_some_and(|sel| {
-                self.data.status.files.iter().any(|f| {
-                    f.path == sel.path
-                        && if sel.staged {
-                            f.is_staged()
-                        } else {
-                            f.is_unstaged()
-                        }
-                })
-            });
-            if still_there {
-                let sel = self.selected_change.clone().unwrap();
-                self.load_change(sel, cx);
-            } else {
-                self.selected_change = None;
-                self.select_first_change(cx);
-            }
-        }
+        self.sync_selected_change(cx);
         if self.search_open {
             self.run_search(cx);
         }
@@ -1059,6 +1099,12 @@ impl RepoView {
         if self.busy.is_some() {
             return;
         }
+        if !self.staging.is_empty() {
+            self.after_staging.push(Box::new(move |this, window, cx| {
+                this.run_op_then(label, op, on_success, window, cx)
+            }));
+            return;
+        }
         self.busy = Some(label);
         let repo = self.repo.clone();
         self._op = cx.spawn_in(window, async move |this, cx| {
@@ -1071,6 +1117,7 @@ impl RepoView {
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.busy = None;
+                this.pump_staging(window, cx);
                 this.flash_op(label, result.is_ok(), cx);
                 match result {
                     Ok(()) => on_success(this, window, cx),
@@ -1691,7 +1738,7 @@ impl RepoView {
     /// Where keyboard actions should land: the list of the current view.
     pub fn focus_target(&self) -> FocusHandle {
         match self.mode {
-            Mode::Changes => self.changes_focus.clone(),
+            Mode::Changes => self.change_list_focus.clone(),
             Mode::History => self.history_focus.clone(),
             Mode::Stats | Mode::Stack | Mode::Pr | Mode::File => self.root_focus.clone(),
         }
@@ -1736,7 +1783,7 @@ impl Render for RepoView {
             && self.mode == Mode::Changes
             && (window.focused(cx).is_none() || self.history_focus.is_focused(window))
         {
-            self.changes_focus.focus(window, cx);
+            self.change_list_focus.focus(window, cx);
         }
         // Stats, Stack and PR draw no list: keep keys on the tab.
         if self.focused
@@ -1907,6 +1954,11 @@ impl Render for RepoView {
             }))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &SearchCommits, window, cx| {
+                // In Changes, ⌘F filters the files instead.
+                if this.mode == Mode::Changes {
+                    gpui_kit::Focusable::focus_handle(&this.change_filter, cx).focus(window, cx);
+                    return;
+                }
                 this.set_mode(Mode::History, cx);
                 this.open_search(window, cx)
             }))
