@@ -47,7 +47,7 @@ use gpui_kit::{
     Styled as _, Subscription, Task, UniformListScrollHandle, Window, div,
     prelude::FluentBuilder as _,
 };
-use mugetsu_git::{DeadWorktree, FileDiff, Repo};
+use mugetsu_git::{DeadWorktree, FileDiff, RefLabel, Repo};
 
 use crate::fetch_policy;
 use crate::i18n::tr;
@@ -378,8 +378,9 @@ pub struct RepoView {
     menu_open: bool,
     /// Branch whose push just succeeded (name, sequence), for its chip animation.
     pushed: Option<(String, usize)>,
-    /// Branch just deleted (name, sequence): its chip is slashed before it goes.
-    slashed: Option<(String, usize)>,
+    /// Refs just deleted (branch, remote branch or stash, with a sequence each):
+    /// their chips are slashed before the reload drops them.
+    slashed: Vec<(RefLabel, usize)>,
     /// Branch chip dropped on another: the rebase popover asks first.
     pending_rebase: Option<drag_rebase::PendingRebase>,
     /// Stats view (computed on demand, kept per tab).
@@ -574,7 +575,7 @@ impl RepoView {
             pr_filter: crate::settings::get().pr_filter,
             menu_open: false,
             pushed: None,
-            slashed: None,
+            slashed: Vec::new(),
             pending_rebase: None,
             stats: Default::default(),
             nav: Default::default(),
@@ -1119,6 +1120,7 @@ impl RepoView {
                 this.busy = None;
                 this.pump_staging(window, cx);
                 this.flash_op(label, result.is_ok(), cx);
+                let seq = this.celebrate_seq;
                 match result {
                     Ok(()) => on_success(this, window, cx),
                     // Done, but the stashed changes conflict on top: the
@@ -1150,9 +1152,36 @@ impl RepoView {
                         cx,
                     ),
                 }
-                this.reload(cx);
+                // A slash started by `on_success` reloads once it has played.
+                if !this.slashed.iter().any(|(_, s)| *s > seq) {
+                    this.reload(cx);
+                }
             });
         });
+        cx.notify();
+    }
+
+    /// Slashes the chips of `refs`, just deleted, then reloads so they go away.
+    fn slash(&mut self, refs: Vec<RefLabel>, cx: &mut Context<Self>) {
+        if refs.is_empty() {
+            self.reload(cx);
+            return;
+        }
+        for r in refs {
+            self.celebrate_seq += 1;
+            self.slashed.push((r, self.celebrate_seq));
+        }
+        let last = self.celebrate_seq;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(750))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.slashed.retain(|(_, s)| *s > last);
+                this.reload(cx);
+            });
+        })
+        .detach();
         cx.notify();
     }
 }
@@ -1386,32 +1415,29 @@ impl RepoView {
             let result = cx
                 .background_spawn(async move { repo.delete_branch(&branch, force) })
                 .await;
-            let ok = result.is_ok();
             let _ = this.update_in(cx, |this, window, cx| {
                 this.busy = None;
                 match result {
-                    Ok(()) => {
-                        this.celebrate_seq += 1;
-                        this.slashed = Some((name, this.celebrate_seq));
-                        cx.notify();
-                    }
+                    Ok(()) => this.slash(vec![RefLabel::Branch { name, head: false }], cx),
                     Err(e) => {
                         this.delete_failed(name, force, &e, window, cx);
                         this.reload(cx);
                     }
                 }
             });
-            if ok {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(750))
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    this.slashed = None;
-                    this.reload(cx);
-                });
-            }
         });
         cx.notify();
+    }
+
+    /// Drops `stash@{index}`; on success its chip is slashed like a branch's.
+    pub fn drop_stash(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.run_op_then(
+            tr("Supprimer stash", "Delete stash"),
+            move |r| r.stash_drop(index),
+            move |this, _, cx| this.slash(vec![RefLabel::Stash(index)], cx),
+            window,
+            cx,
+        );
     }
 
     /// Toasts a failed branch delete; an unmerged refusal offers to force it.
@@ -1580,6 +1606,7 @@ impl RepoView {
         // Both in one operation: the local delete starts once the remote one is done.
         let deleted_local = std::sync::Arc::new(std::sync::Mutex::new(None));
         let outcome = deleted_local.clone();
+        let remote_ref = format!("{remote}/{branch}");
         self.run_op_then(
             tr("Supprimer", "Delete"),
             move |r| {
@@ -1591,29 +1618,13 @@ impl RepoView {
                 Ok(())
             },
             move |this, window, cx| {
-                let Some((name, result)) = deleted_local.lock().unwrap().take() else {
-                    return;
-                };
-                match result {
-                    Ok(()) => {
-                        this.celebrate_seq += 1;
-                        let seq = this.celebrate_seq;
-                        this.slashed = Some((name, seq));
-                        cx.spawn(async move |this, cx| {
-                            cx.background_executor()
-                                .timer(std::time::Duration::from_millis(750))
-                                .await;
-                            let _ = this.update(cx, |this, cx| {
-                                if this.slashed.as_ref().is_some_and(|(_, s)| *s == seq) {
-                                    this.slashed = None;
-                                    cx.notify();
-                                }
-                            });
-                        })
-                        .detach();
-                    }
-                    Err(e) => this.delete_failed(name, force, &e, window, cx),
+                let mut gone = vec![RefLabel::Remote(remote_ref)];
+                match deleted_local.lock().unwrap().take() {
+                    Some((name, Ok(()))) => gone.push(RefLabel::Branch { name, head: false }),
+                    Some((name, Err(e))) => this.delete_failed(name, force, &e, window, cx),
+                    None => {}
                 }
+                this.slash(gone, cx);
             },
             window,
             cx,
@@ -1621,8 +1632,8 @@ impl RepoView {
     }
 
     #[cfg(test)]
-    pub fn slashed_branch(&self) -> Option<String> {
-        self.slashed.as_ref().map(|(b, _)| b.clone())
+    pub fn slashed_refs(&self) -> Vec<RefLabel> {
+        self.slashed.iter().map(|(r, _)| r.clone()).collect()
     }
 
     /// Plays the "pushed" animation on a branch chip.

@@ -14,6 +14,7 @@ use gpui_kit::{
 
 use crate::repo_view::{Mode, RepoView};
 use crate::workspace::Workspace;
+use mugetsu_git::RefLabel;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -1334,7 +1335,15 @@ fn deleting_a_branch_slashes_its_chip(cx: &mut TestAppContext) {
     .unwrap();
     settle(cx, &view);
     assert!(!git(dir.path(), &["branch", "--list", "feature"]).contains("feature"));
-    cx.read(|cx| assert_eq!(view.read(cx).slashed_branch().as_deref(), Some("feature")));
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx).slashed_refs(),
+            [RefLabel::Branch {
+                name: "feature".into(),
+                head: false
+            }]
+        )
+    });
     cx.update_window(handle, |_, window, cx| window.render_frame(cx))
         .unwrap();
 }
@@ -1396,6 +1405,38 @@ fn deleting_a_remote_branch_can_delete_its_local_copy_too(cx: &mut TestAppContex
         !git(dir.path(), &["branch", "--list", "feature"]).contains("feature"),
         "the local copy went too"
     );
+    cx.read(|cx| {
+        assert_eq!(
+            view.read(cx).slashed_refs(),
+            [
+                RefLabel::Remote("origin/feature".into()),
+                RefLabel::Branch {
+                    name: "feature".into(),
+                    head: false
+                }
+            ]
+        )
+    });
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+}
+
+#[gpui_kit::test]
+fn dropping_a_stash_slashes_its_chip(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::write(dir.path().join("stashed.txt"), "wip").unwrap();
+    git(dir.path(), &["stash", "push", "-q", "-u"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        view.update(cx, |v, cx| v.drop_stash(0, window, cx))
+    });
+    settle(cx, &view);
+    assert!(git(dir.path(), &["stash", "list"]).trim().is_empty());
+    cx.read(|cx| assert_eq!(view.read(cx).slashed_refs(), [RefLabel::Stash(0)]));
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .unwrap();
 }
 
 #[gpui_kit::test]

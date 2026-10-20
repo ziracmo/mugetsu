@@ -481,12 +481,7 @@ pub fn stash_menu(menu: PopupMenu, ctx: &MenuContext, index: usize) -> PopupMenu
                 .into(),
                 tr("Supprimer", "Delete"),
                 move |this, window, cx| {
-                    this.run_op(
-                        tr("Supprimer stash", "Delete stash"),
-                        move |r| r.stash_drop(index),
-                        window,
-                        cx,
-                    );
+                    this.drop_stash(index, window, cx);
                 },
                 window,
                 cx,
