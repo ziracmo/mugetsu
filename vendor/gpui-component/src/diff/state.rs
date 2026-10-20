@@ -90,6 +90,8 @@ pub enum DiffEvent {
     /// The user resolved a merge conflict, or undid its resolution; read it
     /// with [`DiffState::conflict_resolution`].
     ConflictResolved(SharedString, usize),
+    /// Another file became the one being read (see [`DiffState::active_file`]).
+    ActiveFileChanged(Option<SharedString>),
 }
 
 /// Inputs that determine row heights and content width.
@@ -213,6 +215,12 @@ pub struct DiffState {
     resolutions: HashMap<(SharedString, usize), DiffConflictResolution>,
     file_rows: Vec<FileRows>,
     header_rows: Vec<usize>,
+    /// File being read: the one at the top of the viewport.
+    active_file: Option<usize>,
+    /// File scrolled to by [`DiffState::scroll_to_file`]; it stays active
+    /// while its header is on screen, even when the end of the patch keeps
+    /// it from reaching the top.
+    pinned_file: Option<usize>,
     rows: Rc<Vec<DisplayRow>>,
     change_rows: Vec<usize>,
     list: ListState,
@@ -230,6 +238,8 @@ pub struct DiffState {
     layout: Option<LayoutKey>,
     content_width: Pixels,
     row_height: Option<Pixels>,
+    /// List width the row height hint was last applied at.
+    hinted_width: Pixels,
     annotations: HashSet<(Option<DiffLinePosition>, SharedString, ElementId)>,
     window: Option<WindowId>,
     /// Bumped when files or presentation options change, so a preparation
@@ -341,6 +351,8 @@ impl DiffState {
             resolutions: HashMap::new(),
             file_rows: Vec::new(),
             header_rows: Vec::new(),
+            active_file: None,
+            pinned_file: None,
             rows: Rc::default(),
             change_rows: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(0.)),
@@ -361,6 +373,7 @@ impl DiffState {
             layout: None,
             content_width: px(0.),
             row_height: None,
+            hinted_width: px(0.),
             annotations: HashSet::new(),
             window: None,
             presentation_generation: 0,
@@ -505,6 +518,11 @@ impl DiffState {
     pub fn selected_lines(&self) -> Option<DiffLineRange> {
         self.selected_lines.clone()
     }
+    /// Path of the file being read: the one at the top of the viewport, or
+    /// the one last scrolled to while its header is still on screen.
+    pub fn active_file(&self) -> Option<&SharedString> {
+        self.files.get(self.active_file?).map(|file| file.path())
+    }
     /// Whether the file at `path` shows only its header.
     pub fn is_file_collapsed(&self, path: &str) -> bool {
         self.collapsed.contains(path)
@@ -575,6 +593,8 @@ impl DiffState {
         self.selection_cursor = None;
         self.selecting = false;
         self.geometry.borrow_mut().clear();
+        self.active_file = None;
+        self.pinned_file = None;
         self.rebuild(true);
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
         self.ensure_presentation(cx);
@@ -777,17 +797,46 @@ impl DiffState {
 
     /// Scrolls to the header of the file at `path`, a [`DiffFile::path`].
     pub fn scroll_to_file(&mut self, path: &str, cx: &mut Context<Self>) {
-        let Some(item_ix) = self
+        let Some((file, item_ix)) = self
             .file_ix(path)
-            .and_then(|file| self.header_rows.get(file).copied())
+            .and_then(|file| Some((file, *self.header_rows.get(file)?)))
         else {
             return;
         };
+        self.pinned_file = Some(file);
         self.list.scroll_to(ListOffset {
             item_ix,
             offset_in_item: px(0.),
         });
         cx.notify();
+    }
+
+    /// Follows the viewport: reports [`DiffEvent::ActiveFileChanged`] when
+    /// another file is being read. Called on every render, so cheap.
+    pub(crate) fn track_active_file(&mut self, cx: &mut Context<Self>) {
+        let top = self
+            .rows
+            .get(self.list.logical_scroll_top().item_ix)
+            .map(|row| row.file());
+        if let Some(pinned) = self.pinned_file {
+            let header = self.header_rows.get(pinned).copied();
+            // `None` while rows are unmeasured: keep the pin until known.
+            let off_screen = header.is_some_and(|row| {
+                self.list.item_is_above_viewport(row) == Some(true)
+                    || self.list.item_is_below_viewport(row) == Some(true)
+            });
+            if off_screen || header.is_none() {
+                self.pinned_file = None;
+            }
+        }
+        let active = self.pinned_file.or(top);
+        if active != self.active_file {
+            self.active_file = active;
+            let path = active
+                .and_then(|file| self.files.get(file))
+                .map(|f| f.path().clone());
+            cx.emit(DiffEvent::ActiveFileChanged(path));
+        }
     }
 
     /// Moves to the next changed group after the current viewport, across files.
@@ -1321,6 +1370,18 @@ impl DiffState {
             }
         }
         rows
+    }
+
+    /// The list drops every row height when its width changes (a resize, a
+    /// wider line painted); rows left unknown count as zero, which caps the
+    /// scroll at the rows already measured, often the file scrolled to. Puts
+    /// the code-row height back on them before the next layout.
+    pub(crate) fn restore_row_heights(&mut self) {
+        let width = self.list.viewport_bounds().size.width;
+        if width != self.hinted_width {
+            self.hinted_width = width;
+            self.apply_row_height_hint();
+        }
     }
 
     /// Gives unmeasured rows a code-row height so the scrollbar is sized for
