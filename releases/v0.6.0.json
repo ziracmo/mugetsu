@@ -1,0 +1,18 @@
+{
+  "version": "0.6.0",
+  "date": "2026-10-20",
+  "title": "Tree views for changes and commits, smaller downloads",
+  "summary": "The Changes view gets a foldable folder tree where a whole folder stages in one click, commit file trees fold and follow the diff as you scroll, and the downloads are about a third smaller.",
+  "features": [
+    { "id": "changes-tree", "title": "Changes as a folder tree", "body": "The file lists switch between flat and a foldable folder tree. A folder's button stages or unstages everything in it, and ⌘/Ctrl-click picks several files or folders to move them in one go.", "scene": "diff", "highlight": true },
+    { "id": "commit-tree-fold", "title": "Fold folders in a commit", "body": "Click a folder in a commit's file tree to fold or unfold it.", "scene": "diff" },
+    { "id": "commit-scroll-spy", "title": "File tree follows the diff", "body": "The commit's file tree lights up the file being read and scrolls to keep it in view.", "scene": "diff", "highlight": true }
+  ],
+  "improvements": [
+    { "id": "smaller-builds", "title": "Smaller downloads", "body": "Builds are optimised and stripped, and the dmg is compressed with LZMA: about a third smaller.", "scene": "speed" },
+    { "id": "settings-speed", "title": "Faster history rendering", "body": "Settings are read without copying them for every history row." }
+  ],
+  "fixes": [
+    { "id": "commit-diff-scroll", "title": "Scrolling past a clicked file", "body": "After clicking a file in a commit's tree, the diff could stop scrolling at the rows already measured; it now scrolls through." }
+  ]
+}
