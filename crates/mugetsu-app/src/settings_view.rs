@@ -139,7 +139,7 @@ impl SettingsView {
         let name = input(id.name, tr("Prénom Nom", "Full name"), window, cx);
         let email = input(id.email, "you@example.com", window, cx);
         let ai_command = input(
-            settings::get().ai_command,
+            settings::get().ai_command.clone(),
             "claude \"/code-review {url}\"",
             window,
             cx,
@@ -156,7 +156,7 @@ impl SettingsView {
                     .default_value(value)
             })
         };
-        let gitlab_token = secret(current.gitlab_token, "glpat-…", window, cx);
+        let gitlab_token = secret(current.gitlab_token.clone(), "glpat-…", window, cx);
         let gitlab_hosts = input(
             current.gitlab_hosts.join(", "),
             "git.example.com",
@@ -164,7 +164,7 @@ impl SettingsView {
             cx,
         );
         let bitbucket_token = secret(
-            current.bitbucket_token,
+            current.bitbucket_token.clone(),
             tr("utilisateur:mot-de-passe-app", "user:app-password"),
             window,
             cx,

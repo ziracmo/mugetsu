@@ -15,6 +15,14 @@ anyhow = "1"
 lto = "thin"
 codegen-units = 4
 
+# Shipped builds (dmg, installer): whole-program LTO and no symbol table. About a
+# third smaller than `release` and a little faster, for a much longer final link.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = true
+
 # Snappier debug builds: optimise dependencies (GPUI, gix) even in dev.
 [profile.dev.package."*"]
 opt-level = 2

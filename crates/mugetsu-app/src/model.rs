@@ -33,7 +33,7 @@ impl RepoData {
         let folded = Self::fold(&history, refs.head, expanded);
         let status = repo.status()?;
         let operation = repo.operation().unwrap_or_default();
-        let gitlab_hosts = crate::settings::get().gitlab_hosts;
+        let gitlab_hosts = crate::settings::get().gitlab_hosts.clone();
         let forge = refs
             .remotes
             .iter()
