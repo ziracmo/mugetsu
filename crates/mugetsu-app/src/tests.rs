@@ -2723,3 +2723,57 @@ fn filter_narrows_both_lists(cx: &mut TestAppContext) {
         assert!(window.try_find("staged:new.txt").is_none());
     });
 }
+
+#[gpui_kit::test]
+fn the_tree_stages_a_folder_and_picked_files_move_together(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path();
+    fixture(dir);
+    std::fs::create_dir(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/x.txt"), "x\n").unwrap();
+    std::fs::write(dir.join("src/y.txt"), "y\n").unwrap();
+    git(dir, &["add", "src"]);
+    git(dir, &["commit", "-q", "-m", "src"]);
+    for f in ["a.txt", "b.txt", "src/x.txt", "src/y.txt"] {
+        std::fs::write(dir.join(f), "changed\n").unwrap();
+    }
+    let (handle, view) = open_repo_view(cx, dir);
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_focused(true, cx);
+            v.set_mode(Mode::Changes, cx);
+        })
+    });
+    settle(cx, &view);
+    ui_step(cx, handle, &|window, cx| window.click("change-tree", cx));
+    // The folder's button stages everything in it.
+    ui_step(cx, handle, &|window, cx| {
+        window.click("toggle-dir:false:src", cx)
+    });
+    assert_eq!(shown_staged(cx, &view), ["src/x.txt", "src/y.txt"]);
+    settle(cx, &view);
+    // A click folds the folder: its files leave the list.
+    ui_step(cx, handle, &|window, cx| window.click("staged-dir:src", cx));
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("staged:src/x.txt").is_none())
+    });
+    // ⌘/Ctrl-picked files are staged together by one row's button.
+    let pick = gpui_kit::Modifiers::secondary_key();
+    ui_step(cx, handle, &|window, cx| {
+        window.click("unstaged:a.txt", cx);
+        click_with(window, "unstaged:b.txt", pick, cx);
+    });
+    ui_step(cx, handle, &|window, cx| {
+        window.click("toggle:false:b.txt", cx)
+    });
+    assert_eq!(
+        shown_staged(cx, &view),
+        ["a.txt", "b.txt", "src/x.txt", "src/y.txt"]
+    );
+    settle(cx, &view);
+    assert_eq!(
+        git(dir, &["diff", "--cached", "--name-only"]).trim(),
+        "a.txt\nb.txt\nsrc/x.txt\nsrc/y.txt"
+    );
+}

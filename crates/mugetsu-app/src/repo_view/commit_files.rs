@@ -21,6 +21,8 @@ pub enum TreeRow {
     Dir {
         depth: usize,
         name: String,
+        /// Full folder path, e.g. `src/ui`.
+        path: String,
     },
     File {
         depth: usize,
@@ -52,6 +54,7 @@ pub fn tree(paths: &[&str]) -> Vec<TreeRow> {
             rows.push(TreeRow::Dir {
                 depth,
                 name: dir.to_string(),
+                path: dirs[..=depth].join("/"),
             });
             open.push(dir);
         }
@@ -62,6 +65,26 @@ pub fn tree(paths: &[&str]) -> Vec<TreeRow> {
         });
     }
     rows
+}
+
+/// `rows` without what sits under a folder of `folded` (keyed by its path).
+pub fn unfolded(rows: Vec<TreeRow>, folded: &std::collections::HashSet<String>) -> Vec<TreeRow> {
+    let mut hidden_below: Option<usize> = None;
+    rows.into_iter()
+        .filter(|row| {
+            let depth = match row {
+                TreeRow::Dir { depth, .. } | TreeRow::File { depth, .. } => *depth,
+            };
+            if hidden_below.is_some_and(|d| depth > d) {
+                return false;
+            }
+            hidden_below = match row {
+                TreeRow::Dir { path, .. } if folded.contains(path) => Some(depth),
+                _ => None,
+            };
+            true
+        })
+        .collect()
 }
 
 pub fn status_look(status: DiffFileStatus) -> (Lucide, Hsla) {
@@ -99,7 +122,7 @@ impl RepoView {
                 .text_xs()
                 .whitespace_nowrap();
             match row {
-                TreeRow::Dir { depth, name } => base
+                TreeRow::Dir { depth, name, .. } => base
                     .id(("commit-dir", ix))
                     .pl(px(8. + depth as f32 * 12.))
                     .text_color(theme::muted())
@@ -181,7 +204,7 @@ mod tests {
         let shown: Vec<String> = rows
             .iter()
             .map(|r| match r {
-                TreeRow::Dir { depth, name } => format!("{depth}{name}/"),
+                TreeRow::Dir { depth, name, .. } => format!("{depth}{name}/"),
                 TreeRow::File { depth, name, .. } => format!("{depth}{name}"),
             })
             .collect();

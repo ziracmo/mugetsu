@@ -14,7 +14,9 @@ use gpui_kit::{
     prelude::FluentBuilder as _, px,
 };
 use mugetsu_git::{Change, FileStatus};
+use std::collections::HashSet;
 
+use super::commit_files::{TreeRow, tree, unfolded};
 use super::staging::StageOp;
 use super::{
     CopyChangePath, DiscardChange, NextChange, NextConflict, OpenChange, PrevChange, PrevConflict,
@@ -121,7 +123,14 @@ impl RepoView {
         cx.notify();
     }
 
-    fn file_row(&self, f: &FileStatus, staged: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// A file of a list; `depth` is its level in the tree view (flat: `None`).
+    fn file_row(
+        &self,
+        f: &FileStatus,
+        staged: bool,
+        depth: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let change = if staged { f.index } else { f.worktree };
         let color = change_color(change);
         let sel = SelectedChange {
@@ -129,6 +138,7 @@ impl RepoView {
             staged,
         };
         let is_selected = self.selected_change.as_ref() == Some(&sel);
+        let marked = self.change_marks.contains(&sel);
         let (dir, name) = f
             .path
             .rsplit_once('/')
@@ -168,6 +178,7 @@ impl RepoView {
             .test_support()
             .h(px(24.))
             .px_3()
+            .when_some(depth, |s, depth| s.pl(px(12. + depth as f32 * 12.)))
             .gap_2()
             .w_full()
             .min_w_0()
@@ -176,6 +187,7 @@ impl RepoView {
             .border_l_2()
             .border_color(gpui_kit::transparent_black())
             .hover(|s| s.bg(theme::raised()))
+            .when(marked, |s| s.bg(theme::alpha(theme::accent(), 0.12)))
             .when(is_selected, |s| {
                 s.bg(theme::alpha(theme::accent(), 0.12))
                     .border_color(theme::accent())
@@ -189,22 +201,27 @@ impl RepoView {
                     .font_weight(gpui_kit::FontWeight::BOLD)
                     .child(change.letter()),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .max_w(px(260.))
-                    .truncate()
-                    .child(name.to_string()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(dir.to_string()),
-            )
+            .map(|row| match depth {
+                // The tree shows the folder already.
+                Some(_) => row.child(div().flex_1().min_w_0().truncate().child(name.to_string())),
+                None => row
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(px(260.))
+                            .truncate()
+                            .child(name.to_string()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(dir.to_string()),
+                    ),
+            })
             .when(change != Change::Conflicted, |row| {
                 row.child(
                     Button::new(SharedString::from(format!("toggle:{staged}:{}", f.path)))
@@ -225,9 +242,12 @@ impl RepoView {
             .on_click(
                 cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
                     this.change_list_focus.focus(window, cx);
-                    if ev.click_count() >= 2 {
+                    if ev.modifiers().secondary() {
+                        this.mark_changes(vec![sel.clone()], cx);
+                    } else if ev.click_count() >= 2 {
                         this.toggle_stage(&sel, window, cx);
                     } else {
+                        this.change_marks.clear();
                         this.load_change(sel.clone(), cx);
                     }
                 }),
@@ -236,6 +256,188 @@ impl RepoView {
                 super::menus::change_menu(m, &view, &root, &focus, &menu, window, cx)
             })
             .into_any_element()
+    }
+
+    /// A folder of the tree view: a click folds it, its button moves all its files.
+    fn dir_row(
+        &self,
+        files: &[FileStatus],
+        staged: bool,
+        (depth, name, path): (usize, String, String),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let prefix = format!("{path}/");
+        let sels: Vec<SelectedChange> = files
+            .iter()
+            .filter(|f| f.path.starts_with(&prefix))
+            .map(|f| SelectedChange {
+                path: f.path.clone(),
+                staged,
+            })
+            .collect();
+        let folded = self.change_folded.contains(&(staged, path.clone()));
+        let marked = !sels.is_empty() && sels.iter().all(|s| self.change_marks.contains(s));
+        let side = if staged { "staged" } else { "unstaged" };
+        h_flex()
+            .id(SharedString::from(format!("{side}-dir:{path}")))
+            .test_support()
+            .h(px(24.))
+            .pl(px(12. + depth as f32 * 12.))
+            .pr_3()
+            .gap_1p5()
+            .w_full()
+            .min_w_0()
+            .text_sm()
+            .cursor_pointer()
+            .border_l_2()
+            .border_color(gpui_kit::transparent_black())
+            .hover(|s| s.bg(theme::raised()))
+            .when(marked, |s| s.bg(theme::alpha(theme::accent(), 0.12)))
+            .child(
+                Icon::new(if folded {
+                    Lucide::ChevronRight
+                } else {
+                    Lucide::ChevronDown
+                })
+                .xsmall()
+                .text_color(theme::muted()),
+            )
+            .child(
+                Icon::new(if folded {
+                    Lucide::Folder
+                } else {
+                    Lucide::FolderOpen
+                })
+                .xsmall()
+                .text_color(theme::muted()),
+            )
+            .child(div().flex_1().min_w_0().truncate().child(name))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(sels.len().to_string()),
+            )
+            .child(
+                Button::new(SharedString::from(format!("toggle-dir:{staged}:{path}")))
+                    .ghost()
+                    .xsmall()
+                    .icon(Icon::new(if staged { Lucide::Minus } else { Lucide::Plus }))
+                    .tooltip(if staged {
+                        tr("Retirer le dossier de l'index", "Unstage folder")
+                    } else {
+                        tr("Indexer le dossier", "Stage folder")
+                    })
+                    .on_click(cx.listener({
+                        let sels = sels.clone();
+                        move |this, _, window, cx| {
+                            let sels = if marked {
+                                this.change_marks.clone()
+                            } else {
+                                sels.clone()
+                            };
+                            this.toggle_stage_all(sels, window, cx)
+                        }
+                    })),
+            )
+            .on_click(
+                cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
+                    this.change_list_focus.focus(window, cx);
+                    if ev.modifiers().secondary() {
+                        this.mark_changes(sels.clone(), cx);
+                    } else {
+                        let key = (staged, path.clone());
+                        if !this.change_folded.remove(&key) {
+                            this.change_folded.insert(key);
+                        }
+                        cx.notify();
+                    }
+                }),
+            )
+            .into_any_element()
+    }
+
+    /// ⌘/Ctrl-click: picks `sels` too, or drops them when all were picked.
+    fn mark_changes(&mut self, sels: Vec<SelectedChange>, cx: &mut Context<Self>) {
+        if self.change_marks.is_empty()
+            && let Some(sel) = self.selected_change.clone()
+        {
+            self.change_marks.push(sel);
+        }
+        if sels.iter().all(|s| self.change_marks.contains(s)) {
+            self.change_marks.retain(|m| !sels.contains(m));
+        } else {
+            for sel in &sels {
+                if !self.change_marks.contains(sel) {
+                    self.change_marks.push(sel.clone());
+                }
+            }
+            if let [sel] = sels.as_slice() {
+                self.load_change(sel.clone(), cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The tree of a list, without what folded folders hide.
+    fn change_tree_rows(&self, files: &[FileStatus], staged: bool) -> Vec<TreeRow> {
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        let folded: HashSet<String> = self
+            .change_folded
+            .iter()
+            .filter(|(s, _)| *s == staged)
+            .map(|(_, p)| p.clone())
+            .collect();
+        unfolded(tree(&paths), &folded)
+    }
+
+    /// The files of a list in the order shown (the tree skips folded ones).
+    fn shown_files<'a>(&self, files: &'a [FileStatus], staged: bool) -> Vec<&'a FileStatus> {
+        if !self.change_tree {
+            return files.iter().collect();
+        }
+        self.change_tree_rows(files, staged)
+            .into_iter()
+            .filter_map(|row| match row {
+                TreeRow::File { index, .. } => Some(&files[index]),
+                TreeRow::Dir { .. } => None,
+            })
+            .collect()
+    }
+
+    fn list_rows(
+        &self,
+        files: &[FileStatus],
+        staged: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        if !self.change_tree {
+            return files
+                .iter()
+                .map(|f| self.file_row(f, staged, None, cx))
+                .collect();
+        }
+        self.change_tree_rows(files, staged)
+            .into_iter()
+            .map(|row| match row {
+                TreeRow::Dir { depth, name, path } => {
+                    self.dir_row(files, staged, (depth, name, path), cx)
+                }
+                TreeRow::File { depth, index, .. } => {
+                    self.file_row(&files[index], staged, Some(depth), cx)
+                }
+            })
+            .collect()
+    }
+
+    pub(super) fn toggle_change_tree(&mut self, cx: &mut Context<Self>) {
+        self.change_tree = !self.change_tree;
+        let tree = self.change_tree;
+        // Tests run in parallel and share the settings: keep them out of it.
+        if !cfg!(test) {
+            crate::settings::update(cx, |s| s.changes_tree = tree);
+        }
+        cx.notify();
     }
 
     fn list_header(
@@ -348,9 +550,13 @@ impl RepoView {
         let [conflicted, unstaged, staged] = self.change_lists(cx);
         let rows: Vec<SelectedChange> = conflicted
             .iter()
-            .chain(&unstaged)
+            .chain(self.shown_files(&unstaged, false))
             .map(|f| (f, false))
-            .chain(staged.iter().map(|f| (f, true)))
+            .chain(
+                self.shown_files(&staged, true)
+                    .into_iter()
+                    .map(|f| (f, true)),
+            )
             .map(|(f, staged)| SelectedChange {
                 path: f.path.clone(),
                 staged,
@@ -395,14 +601,11 @@ impl RepoView {
         let can_commit =
             (self.data.status.staged().next().is_some() || self.amend) && self.busy.is_none();
         let staged_total = self.data.status.staged().count();
-        let unstaged_rows: Vec<_> = unstaged
-            .iter()
-            .map(|f| self.file_row(f, false, cx))
-            .collect();
-        let staged_rows: Vec<_> = staged.iter().map(|f| self.file_row(f, true, cx)).collect();
+        let unstaged_rows = self.list_rows(&unstaged, false, cx);
+        let staged_rows = self.list_rows(&staged, true, cx);
         let conflict_rows: Vec<_> = conflicted
             .iter()
-            .map(|f| self.file_row(f, false, cx))
+            .map(|f| self.file_row(f, false, None, cx))
             .collect();
 
         let lists = v_flex()
@@ -564,22 +767,41 @@ impl RepoView {
             .border_color(cx.theme().border)
             .children(self.render_operation_banner(cx))
             .child(
-                div()
+                h_flex()
                     .flex_none()
                     .px_2()
                     .py_1p5()
+                    .gap_1()
                     .border_b_1()
                     .border_color(cx.theme().border)
                     .child(
-                        Input::new(&self.change_filter)
-                            .id("change-filter")
+                        div().flex_1().min_w_0().child(
+                            Input::new(&self.change_filter)
+                                .id("change-filter")
+                                .small()
+                                .cleanable(true)
+                                .prefix(
+                                    Icon::new(Lucide::Search)
+                                        .xsmall()
+                                        .text_color(theme::muted()),
+                                ),
+                        ),
+                    )
+                    .child(
+                        Button::new("change-tree")
+                            .ghost()
                             .small()
-                            .cleanable(true)
-                            .prefix(
-                                Icon::new(Lucide::Search)
-                                    .xsmall()
-                                    .text_color(theme::muted()),
-                            ),
+                            .icon(Icon::new(if self.change_tree {
+                                Lucide::Rows3
+                            } else {
+                                Lucide::FolderTree
+                            }))
+                            .tooltip(if self.change_tree {
+                                tr("Afficher en liste", "Show as list")
+                            } else {
+                                tr("Afficher en arbre", "Show as tree")
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_change_tree(cx))),
                     ),
             )
             .child(lists)
