@@ -1300,7 +1300,8 @@ impl Workspace {
     /// Dia-like overlay: a card per open repository, the highlighted one framed.
     fn render_switcher(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
         let selected = self.switcher?;
-        let icons = crate::settings::get().repo_icons;
+        let settings = crate::settings::get();
+        let icons = &settings.repo_icons;
         let cards = self.tabs.iter().enumerate().map(|(i, tab)| {
             let view = tab.view.read(cx);
             let name = view.name();

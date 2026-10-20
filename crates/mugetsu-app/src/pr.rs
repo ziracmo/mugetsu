@@ -32,8 +32,8 @@ fn client(repo: &ForgeRepo) -> Arc<Client> {
     let settings = crate::settings::get();
     let configured = match repo.kind {
         ForgeKind::Github => None,
-        ForgeKind::Gitlab => non_empty(settings.gitlab_token),
-        ForgeKind::Bitbucket => non_empty(settings.bitbucket_token),
+        ForgeKind::Gitlab => non_empty(settings.gitlab_token.clone()),
+        ForgeKind::Bitbucket => non_empty(settings.bitbucket_token.clone()),
     };
     let key = (repo.kind, repo.host.clone(), configured.clone());
     let mut clients = CLIENTS.get_or_init(Default::default).lock().unwrap();
