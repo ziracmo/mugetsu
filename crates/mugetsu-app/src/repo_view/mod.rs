@@ -235,6 +235,8 @@ pub struct RepoView {
     commit_files: usize,
     /// File picked in the commit's file tree.
     commit_file: Option<SharedString>,
+    /// Folders folded in the commit's file tree (their paths).
+    commit_folded: HashSet<String>,
     /// "Copied" feedback on the SHA (sequence, restarts the burst).
     copied: Option<usize>,
     /// Rows swept by a shimmer (new commits, a branch tip shown), with its sequence.
@@ -475,6 +477,7 @@ impl RepoView {
             commit_message: SharedString::default(),
             commit_files: 0,
             commit_file: None,
+            commit_folded: HashSet::new(),
             copied: None,
             shimmer: None,
             body_expanded: false,
@@ -831,6 +834,7 @@ impl RepoView {
         self.body_expanded = false;
         self.line_selection = None;
         self.commit_file = None;
+        self.commit_folded.clear();
         self.commit_message = SharedString::default();
         let repo = self.repo.clone();
         let rev = id.to_string();

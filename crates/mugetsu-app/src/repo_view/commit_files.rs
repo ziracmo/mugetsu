@@ -1,5 +1,6 @@
 //! Side panel of a commit's details: the changed files as a tree, each with
-//! an icon for its kind of change. A click scrolls the diff to the file.
+//! an icon for its kind of change. A click scrolls the diff to the file; a
+//! click on a folder folds or unfolds it.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
@@ -12,15 +13,19 @@ use gpui_kit::{
     px,
 };
 
+use std::collections::HashSet;
+
 use super::RepoView;
 use crate::theme;
 
-/// One line of the tree: a folder, or a file (its index in the diff).
+/// One line of the tree: a folder (with its full path), or a file (its index
+/// in the diff).
 #[derive(Debug, PartialEq, Eq)]
 pub enum TreeRow {
     Dir {
         depth: usize,
         name: String,
+        path: String,
     },
     File {
         depth: usize,
@@ -52,6 +57,7 @@ pub fn tree(paths: &[&str]) -> Vec<TreeRow> {
             rows.push(TreeRow::Dir {
                 depth,
                 name: dir.to_string(),
+                path: dirs[..=depth].join("/"),
             });
             open.push(dir);
         }
@@ -62,6 +68,26 @@ pub fn tree(paths: &[&str]) -> Vec<TreeRow> {
         });
     }
     rows
+}
+
+/// Drops the rows inside folded folders (the folders themselves stay).
+pub fn unfolded(rows: Vec<TreeRow>, folded: &HashSet<String>) -> Vec<TreeRow> {
+    let mut hidden_below: Option<usize> = None;
+    rows.into_iter()
+        .filter(|row| {
+            let depth = match row {
+                TreeRow::Dir { depth, .. } | TreeRow::File { depth, .. } => *depth,
+            };
+            if hidden_below.is_some_and(|d| depth > d) {
+                return false;
+            }
+            hidden_below = match row {
+                TreeRow::Dir { path, .. } if folded.contains(path) => Some(depth),
+                _ => None,
+            };
+            true
+        })
+        .collect()
 }
 
 pub fn status_look(status: DiffFileStatus) -> (Lucide, Hsla) {
@@ -90,7 +116,8 @@ impl RepoView {
             self.repo.root().to_path_buf(),
             self.selected,
         );
-        let rows = tree(&paths).into_iter().enumerate().map(|(ix, row)| {
+        let rows = unfolded(tree(&paths), &self.commit_folded);
+        let rows = rows.into_iter().map(|row| {
             let base = h_flex()
                 .h(px(22.))
                 .gap_1p5()
@@ -99,13 +126,39 @@ impl RepoView {
                 .text_xs()
                 .whitespace_nowrap();
             match row {
-                TreeRow::Dir { depth, name } => base
-                    .id(("commit-dir", ix))
-                    .pl(px(8. + depth as f32 * 12.))
-                    .text_color(theme::muted())
-                    .child(Icon::new(Lucide::Folder).xsmall())
-                    .child(name)
-                    .into_any_element(),
+                TreeRow::Dir { depth, name, path } => {
+                    let folded = self.commit_folded.contains(&path);
+                    base.id(SharedString::from(format!("commit-dir-{path}")))
+                        .test_support()
+                        .pl(px(8. + depth as f32 * 12.))
+                        .cursor_pointer()
+                        .text_color(theme::muted())
+                        .hover(|s| s.bg(theme::raised()))
+                        .child(
+                            Icon::new(if folded {
+                                Lucide::ChevronRight
+                            } else {
+                                Lucide::ChevronDown
+                            })
+                            .xsmall(),
+                        )
+                        .child(
+                            Icon::new(if folded {
+                                Lucide::Folder
+                            } else {
+                                Lucide::FolderOpen
+                            })
+                            .xsmall(),
+                        )
+                        .child(name)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !this.commit_folded.remove(&path) {
+                                this.commit_folded.insert(path.clone());
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                }
                 TreeRow::File { depth, name, index } => {
                     let (path, status, original) = files[index].clone();
                     let (icon, color) = status_look(status);
@@ -181,7 +234,7 @@ mod tests {
         let shown: Vec<String> = rows
             .iter()
             .map(|r| match r {
-                TreeRow::Dir { depth, name } => format!("{depth}{name}/"),
+                TreeRow::Dir { depth, name, .. } => format!("{depth}{name}/"),
                 TreeRow::File { depth, name, .. } => format!("{depth}{name}"),
             })
             .collect();
@@ -199,5 +252,27 @@ mod tests {
             ]
         );
         assert!(matches!(rows[2], TreeRow::File { index: 2, .. }));
+        assert!(matches!(&rows[1], TreeRow::Dir { path, .. } if path == "src/ui"));
+    }
+
+    #[test]
+    fn folded_folders_hide_their_contents() {
+        let paths = ["src/b.rs", "README.md", "src/ui/a.rs", "src/a.rs", "z/y.rs"];
+        let shown = |folded: &[&str]| -> Vec<String> {
+            let folded = folded.iter().map(|s| s.to_string()).collect();
+            unfolded(tree(&paths), &folded)
+                .iter()
+                .map(|r| match r {
+                    TreeRow::Dir { name, .. } => format!("{name}/"),
+                    TreeRow::File { name, .. } => name.clone(),
+                })
+                .collect()
+        };
+        assert_eq!(
+            shown(&["src/ui"]),
+            ["src/", "ui/", "a.rs", "b.rs", "z/", "y.rs", "README.md"]
+        );
+        assert_eq!(shown(&["src"]), ["src/", "z/", "y.rs", "README.md"]);
+        assert_eq!(shown(&["src", "z"]), ["src/", "z/", "README.md"]);
     }
 }
