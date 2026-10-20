@@ -1,0 +1,14 @@
+{
+  "version": "0.5.1",
+  "date": "2026-10-20",
+  "title": "Workspace activity at a glance",
+  "summary": "The overview stacks a month of commits across every open repository, deleted stashes and remote branches get the slash animation, and a tab's menu copies the repository's path.",
+  "features": [
+    { "id": "overview-activity", "title": "Combined activity in the overview", "body": "A month of commits across every open repository, one column per day stacking each repository in its own colour, with a legend and per-repository detail on hover.", "scene": "graph", "highlight": true },
+    { "id": "tab-copy-path", "title": "Copy a repository's path", "body": "A tab's right-click menu copies the repository's path.", "scene": "sidebar" }
+  ],
+  "improvements": [
+    { "id": "delete-slash", "title": "Slash animation for stashes and remote branches", "body": "Deleting a stash or a remote branch plays the same slash animation as a local branch.", "scene": "graph" }
+  ],
+  "fixes": []
+}
