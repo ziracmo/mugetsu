@@ -10,6 +10,7 @@ use std::time::Duration;
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Disableable as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     Animation, AnimationExt as _, AnyElement, Context, Hsla, InteractiveElement as _, IntoElement,
@@ -375,6 +376,7 @@ pub fn render(cards: &[RepoCard], workspace: &str, cx: &mut Context<Workspace>) 
         rows.push(row.into_any_element());
     }
 
+    let activity = activity_panel(cards);
     let todo = todo_panel(cards, &signals, cx);
     let prs = prs_panel(cards, cx);
     v_flex()
@@ -390,6 +392,7 @@ pub fn render(cards: &[RepoCard], workspace: &str, cx: &mut Context<Workspace>) 
                 .pb_8()
                 .gap_4()
                 .children(rows)
+                .children(activity)
                 .child(
                     h_flex()
                         .w_full()
@@ -830,6 +833,241 @@ fn pulse(index: usize, days: &[u32]) -> AnyElement {
         .into_any_element()
 }
 
+/// Commits per day across the repositories: one column per day, oldest
+/// first, holding each card's count in card order. Pulses are aligned on
+/// today (one still counting is all zeros).
+fn stack(cards: &[RepoCard]) -> Vec<Vec<u32>> {
+    let n = cards.iter().map(|c| c.pulse.len()).max().unwrap_or(0);
+    (0..n)
+        .map(|day| {
+            cards
+                .iter()
+                .map(|c| {
+                    let skip = n - c.pulse.len();
+                    day.checked_sub(skip).map_or(0, |i| c.pulse[i])
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// A clean top for the scale: the next multiple of a round step (29 → 30).
+fn scale_top(max: u32) -> u32 {
+    let max = max.max(1);
+    let step = match max {
+        0..=4 => 2,
+        5..=10 => 5,
+        _ => {
+            let p = 10u32.pow(max.ilog10());
+            if max <= 2 * p { p / 2 } else { p }
+        }
+    };
+    max.div_ceil(step) * step
+}
+
+/// Every repository's last month at once: a column per day stacking each
+/// repository's commits in its color, a legend, the detail on hover.
+/// Nothing until a pulse is counted.
+fn activity_panel(cards: &[RepoCard]) -> Option<AnyElement> {
+    let columns = stack(cards);
+    if columns.is_empty() {
+        return None;
+    }
+    let totals: Vec<u32> = (0..cards.len())
+        .map(|r| columns.iter().map(|c| c[r]).sum())
+        .collect();
+    let total: u32 = totals.iter().sum();
+    let top = scale_top(columns.iter().map(|c| c.iter().sum()).max().unwrap_or(0));
+    let n = columns.len();
+    let names: Arc<Vec<String>> = Arc::new(cards.iter().map(|c| c.name.clone()).collect());
+    let today = chrono::Local::now().date_naive();
+    let date = move |ago: usize| {
+        if ago == 0 {
+            tr("aujourd'hui", "today").to_string()
+        } else {
+            (today - chrono::Duration::days(ago as i64))
+                .format("%d/%m")
+                .to_string()
+        }
+    };
+    let bars = columns.into_iter().enumerate().map(|(i, day)| {
+        let sum: u32 = day.iter().sum();
+        let when = date(n - 1 - i);
+        let names = names.clone();
+        let detail = day.clone();
+        let tip = move |_: &mut gpui_kit::Window, _: &mut gpui_kit::App| {
+            v_flex()
+                .gap_1()
+                .min_w(px(150.))
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .text_xs()
+                        .child(
+                            div()
+                                .flex_1()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .child(when.clone()),
+                        )
+                        .child(div().text_color(faint()).child(match sum {
+                            0 => tr("aucun commit", "no commits").to_string(),
+                            1 => "1 commit".to_string(),
+                            _ => format!("{sum} commits"),
+                        })),
+                )
+                .children(
+                    detail
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .filter(|(_, v)| **v > 0)
+                        .map(|(r, v)| {
+                            h_flex()
+                                .gap_2()
+                                .text_xs()
+                                .child(
+                                    div()
+                                        .size(px(7.))
+                                        .rounded_full()
+                                        .bg(theme::lane_color(r as u16)),
+                                )
+                                .child(div().flex_1().truncate().child(names[r].clone()))
+                                .child(v.to_string())
+                        }),
+                )
+        };
+        let segments = day
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, v)| **v > 0)
+            .map(move |(r, &v)| {
+                div()
+                    .w_full()
+                    .h(relative(v as f32 / sum.max(1) as f32))
+                    .bg(theme::alpha(theme::lane_color(r as u16), 0.85))
+                    .border_t_1()
+                    .border_color(theme::alpha(gpui_kit::black(), 0.25))
+            });
+        let h = sum as f32 / top as f32;
+        div()
+            .id(("overview-activity", i))
+            .flex_1()
+            .h_full()
+            .flex()
+            .items_end()
+            .rounded_t(px(4.))
+            .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.04)))
+            .tooltip(move |window, cx| Tooltip::element(tip.clone()).build(window, cx))
+            .child(if sum == 0 {
+                div()
+                    .w_full()
+                    .h(px(2.))
+                    .bg(theme::alpha(gpui_kit::white(), 0.06))
+                    .into_any_element()
+            } else {
+                v_flex()
+                    .w_full()
+                    .min_h(px(3.))
+                    .rounded_t(px(3.))
+                    .overflow_hidden()
+                    .children(segments)
+                    .h(relative(0.))
+                    .with_animation(
+                        ("overview-activity-bar", i),
+                        Animation::new(Duration::from_millis(500 + i as u64 * 12))
+                            .with_easing(gpui_kit::ease_out_quint()),
+                        move |el, t| el.h(relative(h * t)),
+                    )
+                    .into_any_element()
+            })
+    });
+    let gridline = |frac: f32, label: String| {
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .top(relative(1. - frac))
+            .h(px(1.))
+            .bg(theme::alpha(
+                gpui_kit::white(),
+                if frac == 0. { 0.12 } else { 0.05 },
+            ))
+            .child(
+                div()
+                    .absolute()
+                    .right(relative(1.))
+                    .top(px(-7.))
+                    .pr_2()
+                    .text_xs()
+                    .text_color(faint())
+                    .child(label),
+            )
+    };
+    let legend = h_flex()
+        .id("overview-activity-legend")
+        .test_support()
+        .flex_wrap()
+        .gap_x_4()
+        .gap_y_1()
+        .children(cards.iter().zip(&totals).enumerate().map(|(r, (card, t))| {
+            h_flex()
+                .gap_1p5()
+                .text_xs()
+                .text_color(ink2())
+                .child(
+                    div()
+                        .size(px(8.))
+                        .rounded_full()
+                        .bg(theme::lane_color(r as u16)),
+                )
+                .child(card.name.clone())
+                .child(div().text_color(faint()).child(t.to_string()))
+        }));
+    let body = v_flex()
+        .px_4()
+        .pb_3()
+        .gap_2()
+        .child(
+            div()
+                .relative()
+                .ml(px(28.))
+                .h(px(150.))
+                .child(gridline(1., top.to_string()))
+                .child(gridline(0.5, (top / 2).to_string()))
+                .child(gridline(0., "0".into()))
+                .child(
+                    h_flex()
+                        .absolute()
+                        .inset_0()
+                        .items_end()
+                        .gap(px(3.))
+                        .children(bars),
+                ),
+        )
+        .child(
+            h_flex()
+                .ml(px(28.))
+                .text_xs()
+                .text_color(faint())
+                .child(div().flex_1().child(date(n - 1)))
+                .child(date(0)),
+        )
+        .child(legend);
+    Some(
+        div()
+            .w_full()
+            .child(panel(
+                "overview-activity",
+                Lucide::ChartColumn,
+                tr("Activité cumulée · 30 j", "Combined activity · 30 d"),
+                total as usize,
+                body,
+            ))
+            .into_any_element(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,5 +1095,20 @@ mod tests {
         assert_eq!(card.signals()[0].level(), Level::Alert);
         assert_eq!(card.signals()[0].target(), Target::Changes);
         assert!(RepoCard::default().signals().is_empty());
+    }
+
+    #[test]
+    fn activity_stacks_each_repo_on_its_day() {
+        let card = |days: Vec<u32>| RepoCard {
+            pulse: Arc::new(days),
+            ..RepoCard::default()
+        };
+        // The second pulse is still counting: zeros, aligned on today.
+        let cols = stack(&[card(vec![1, 0, 3]), card(vec![]), card(vec![2, 5])]);
+        assert_eq!(cols, [vec![1, 0, 0], vec![0, 0, 2], vec![3, 0, 5]]);
+        assert!(stack(&[card(vec![])]).is_empty());
+        assert_eq!(scale_top(8), 10);
+        assert_eq!(scale_top(29), 30);
+        assert_eq!(scale_top(0), 2);
     }
 }
