@@ -38,8 +38,21 @@ struct ChipContext {
     worktrees: HashMap<String, std::path::PathBuf>,
     /// Branch just pushed (name, sequence).
     pushed: Option<(String, usize)>,
-    /// Branch just deleted (name, sequence).
-    slashed: Option<(String, usize)>,
+    /// Refs just deleted, with their animation sequence.
+    slashed: Vec<(RefLabel, usize)>,
+}
+
+impl ChipContext {
+    /// Sequence of `label`'s slash animation, if it was just deleted.
+    fn slash_seq(&self, label: &RefLabel) -> Option<usize> {
+        self.slashed.iter().find_map(|(r, seq)| {
+            let same = match (r, label) {
+                (RefLabel::Branch { name: a, .. }, RefLabel::Branch { name: b, .. }) => a == b,
+                _ => r == label,
+            };
+            same.then_some(*seq)
+        })
+    }
 }
 
 /// Rings a chip whose name matches the ⌘F query.
@@ -235,10 +248,13 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
         let mut return_slash: Option<AnyElement> = None;
         let element = match label {
             RefLabel::Branch { name, head } => {
-                let synced = ctx
-                    .upstreams
-                    .get(name)
-                    .filter(|u| remotes.contains(u.as_str()));
+                let slashed = ctx.slash_seq(label);
+                // A deleted remote branch leaves the local chip to be slashed on its own.
+                let synced = ctx.upstreams.get(name).filter(|u| {
+                    remotes.contains(u.as_str())
+                        && (slashed.is_some()
+                            || ctx.slash_seq(&RefLabel::Remote(u.to_string())).is_none())
+                });
                 if let Some(u) = synced {
                     merged.insert(u.clone());
                 }
@@ -275,9 +291,10 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     }),
                     ctx,
                 );
-                if let Some((_, seq)) = ctx.slashed.as_ref().filter(|(b, _)| b == name) {
-                    let half = || chip(name.clone(), color, Lucide::GitBranch, *head, None, false);
-                    return_slash = Some(super::shimmer::slash(half, *seq));
+                if let Some(seq) = slashed {
+                    let cloud = synced.map(|_| remote_icon);
+                    let half = || chip(name.clone(), color, Lucide::GitBranch, *head, cloud, false);
+                    return_slash = Some(super::shimmer::slash(half, seq));
                 }
                 match &ctx.pushed {
                     Some((b, seq)) if b == name => super::shimmer::pushed(el, *seq),
@@ -294,15 +311,22 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                 false,
             )
             .into_any_element(),
-            RefLabel::Stash(index) => chip(
-                format!("stash@{{{index}}}"),
-                theme::magenta(),
-                Lucide::Archive,
-                false,
-                None,
-                false,
-            )
-            .into_any_element(),
+            RefLabel::Stash(index) => {
+                let stash = || {
+                    chip(
+                        format!("stash@{{{index}}}"),
+                        theme::magenta(),
+                        Lucide::Archive,
+                        false,
+                        None,
+                        false,
+                    )
+                };
+                if let Some(seq) = ctx.slash_seq(label) {
+                    return_slash = Some(super::shimmer::slash(stash, seq));
+                }
+                stash().into_any_element()
+            }
             RefLabel::DetachedHead => chip(
                 "HEAD".into(),
                 theme::magenta(),
@@ -325,7 +349,7 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
         if let RefLabel::Remote(name) = label
             && !merged.contains(name)
         {
-            let el = checkout_on_double_click(
+            let remote = || {
                 chip(
                     name.clone(),
                     theme::violet(),
@@ -333,13 +357,13 @@ fn chips(labels: &[RefLabel], ctx: &ChipContext) -> Vec<AnyElement> {
                     false,
                     None,
                     false,
-                ),
-                name,
-                true,
-                None,
-                ctx,
-            )
-            .into_any_element();
+                )
+            };
+            if let Some(seq) = ctx.slash_seq(label) {
+                out.push(super::shimmer::slash(remote, seq));
+                continue;
+            }
+            let el = checkout_on_double_click(remote(), name, true, None, ctx).into_any_element();
             out.push(mark_match(el, name, ctx));
         }
     }
