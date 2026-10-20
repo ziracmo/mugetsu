@@ -1347,7 +1347,8 @@ pub fn entries(ws: &Workspace, window: &Window, cx: &App) -> Vec<Entry> {
     ]);
 
     // Repositories: open tabs, then recent ones, then those found in folders.
-    let icons = crate::settings::get().repo_icons;
+    let settings = crate::settings::get();
+    let icons = &settings.repo_icons;
     let mut seen = HashSet::new();
     for (i, root) in ws.tab_roots(cx).into_iter().enumerate() {
         let name = repo_name(&root);

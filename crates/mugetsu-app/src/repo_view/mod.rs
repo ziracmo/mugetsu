@@ -43,8 +43,8 @@ use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_pane
 use gpui_kit::component::{ActiveTheme as _, WindowExt as _, v_flex};
 use gpui_kit::{
     AnimationExt as _, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollStrategy, SharedString,
-    Styled as _, Subscription, Task, UniformListScrollHandle, Window, div,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollHandle, ScrollStrategy,
+    SharedString, Styled as _, Subscription, Task, UniformListScrollHandle, Window, div,
     prelude::FluentBuilder as _,
 };
 use mugetsu_git::{DeadWorktree, FileDiff, RefLabel, Repo};
@@ -235,6 +235,9 @@ pub struct RepoView {
     commit_files: usize,
     /// File picked in the commit's file tree.
     commit_file: Option<SharedString>,
+    commit_files_scroll: ScrollHandle,
+    /// Folders folded in the commit's file tree (their paths).
+    commit_folded: HashSet<String>,
     /// "Copied" feedback on the SHA (sequence, restarts the burst).
     copied: Option<usize>,
     /// Rows swept by a shimmer (new commits, a branch tip shown), with its sequence.
@@ -450,6 +453,11 @@ impl RepoView {
                 let range = match event {
                     DiffEvent::SelectionChanged(r) => r.clone(),
                     DiffEvent::SelectionEnded(r) => Some(r.clone()),
+                    DiffEvent::ActiveFileChanged(path) => {
+                        this.reveal_commit_file(path.as_deref(), cx);
+                        cx.notify();
+                        return;
+                    }
                     _ => return,
                 };
                 if this.line_selection.is_none() && range.is_some() {
@@ -481,6 +489,8 @@ impl RepoView {
             commit_message: SharedString::default(),
             commit_files: 0,
             commit_file: None,
+            commit_files_scroll: ScrollHandle::new(),
+            commit_folded: HashSet::new(),
             copied: None,
             shimmer: None,
             body_expanded: false,
@@ -644,6 +654,13 @@ impl RepoView {
 
     pub fn is_fetching(&self) -> bool {
         self.fetching
+    }
+
+    #[cfg(test)]
+    /// File lit up in the commit's file tree (the one read in the diff).
+    pub fn commit_active_file(&self, cx: &gpui_kit::App) -> Option<SharedString> {
+        let diff = self.commit_diff.read(cx);
+        diff.active_file().or(self.commit_file.as_ref()).cloned()
     }
 
     #[cfg(test)]
@@ -840,6 +857,7 @@ impl RepoView {
         self.body_expanded = false;
         self.line_selection = None;
         self.commit_file = None;
+        self.commit_folded.clear();
         self.commit_message = SharedString::default();
         let repo = self.repo.clone();
         let rev = id.to_string();

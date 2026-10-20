@@ -1002,6 +1002,70 @@ fn commit_details_list_files_and_confirm_copies(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn commit_diff_scrolls_through_every_file_and_the_tree_follows(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let body: String = (0..60).map(|i| format!("line {i}\n")).collect();
+    for i in 0..12 {
+        std::fs::write(dir.path().join(format!("f{i:02}.txt")), &body).unwrap();
+    }
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "many files"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+    settle(cx, &view);
+    let active = |cx: &mut TestAppContext| {
+        cx.run_until_parked();
+        cx.read(|cx| view.read(cx).commit_active_file(cx))
+            .map(|p| p.to_string())
+    };
+    cx.update_window(handle, |_, window, cx| {
+        window.click("commit-file-f05.txt", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert_eq!(active(cx).as_deref(), Some("f05.txt"));
+    // The wheel goes on past the clicked file, through the next ones.
+    let mut seen = vec![];
+    for _ in 0..40 {
+        cx.update_window(handle, |_, window, cx| {
+            window.scroll(
+                "diff-body",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(-400.))),
+                cx,
+            );
+        })
+        .unwrap();
+        let now = active(cx).unwrap();
+        if seen.last() != Some(&now) {
+            seen.push(now);
+        }
+    }
+    assert_eq!(seen[..2], ["f05.txt", "f06.txt"], "{seen:?}");
+    assert_eq!(seen.last().map(String::as_str), Some("f11.txt"), "{seen:?}");
+    // And back up, before the clicked file.
+    for _ in 0..80 {
+        cx.update_window(handle, |_, window, cx| {
+            window.scroll(
+                "diff-body",
+                gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(400.))),
+                cx,
+            );
+        })
+        .unwrap();
+    }
+    assert_eq!(active(cx).as_deref(), Some("f00.txt"));
+    // A file near the end can't reach the top: the clicked one stays lit.
+    cx.update_window(handle, |_, window, cx| {
+        window.click("commit-file-f11.txt", cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert_eq!(active(cx).as_deref(), Some("f11.txt"));
+}
+
+#[gpui_kit::test]
 fn command_f_finds_branch_names_and_sidebar_has_a_prs_tab(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();

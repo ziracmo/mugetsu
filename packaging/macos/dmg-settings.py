@@ -3,7 +3,8 @@
 # from the repository root. Positions are icon centres in the 660x400 background (see dmg-background.py).
 app = defines["app"]  # noqa: F821 (provided by dmgbuild)
 
-format = "UDZO"
+# LZMA: about 30% smaller than the default zlib (UDZO); opens on macOS 10.15+.
+format = "ULMO"
 files = [app]
 symlinks = {"Applications": "/Applications"}
 hide_extension = ["Mugetsu.app"]

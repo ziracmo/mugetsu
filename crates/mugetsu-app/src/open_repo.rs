@@ -146,7 +146,7 @@ struct CloneJob {
 
 /// The workspace folder's copy of `name`, when it is already there.
 fn local_clone(name: &str) -> Option<PathBuf> {
-    let dir = crate::settings::get().clone_dir?.join(name);
+    let dir = crate::settings::get().clone_dir.as_ref()?.join(name);
     dir.join(".git").exists().then_some(dir)
 }
 

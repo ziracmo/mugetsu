@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -367,7 +367,8 @@ fn system_lang() -> Lang {
     }
 }
 
-static CURRENT: RwLock<Option<Settings>> = RwLock::new(None);
+// Shared, not cloned: views read it many times per frame (`theme::accent()` per row).
+static CURRENT: RwLock<Option<Arc<Settings>>> = RwLock::new(None);
 
 fn file() -> Option<PathBuf> {
     Some(dirs::config_dir()?.join("Mugetsu").join("settings.json"))
@@ -402,14 +403,16 @@ impl Settings {
 }
 
 /// Current settings (defaults until [`install`] runs).
-pub fn get() -> Settings {
+pub fn get() -> Arc<Settings> {
     CURRENT
         .read()
         .ok()
         .and_then(|s| s.clone())
-        .unwrap_or_else(|| Settings {
-            lang: Lang::Fr,
-            ..Settings::default()
+        .unwrap_or_else(|| {
+            Arc::new(Settings {
+                lang: Lang::Fr,
+                ..Settings::default()
+            })
         })
 }
 
@@ -417,7 +420,7 @@ pub fn get() -> Settings {
 pub fn install(settings: Settings, cx: &mut gpui_kit::App) {
     crate::i18n::set_english(settings.lang == Lang::En);
     if let Ok(mut current) = CURRENT.write() {
-        *current = Some(settings);
+        *current = Some(Arc::new(settings));
     }
     crate::theme::apply(cx);
     let revision = cx.try_global::<Revision>().map_or(0, |r| r.0) + 1;
@@ -429,7 +432,7 @@ pub fn install(settings: Settings, cx: &mut gpui_kit::App) {
 
 /// Changes and persists the settings.
 pub fn update(cx: &mut gpui_kit::App, f: impl FnOnce(&mut Settings)) {
-    let mut settings = get();
+    let mut settings = Settings::clone(&get());
     f(&mut settings);
     settings.save();
     install(settings, cx);
@@ -437,11 +440,11 @@ pub fn update(cx: &mut gpui_kit::App, f: impl FnOnce(&mut Settings)) {
 
 /// Persists a UI memory (layout, folded sections) without redrawing the app.
 pub fn remember(f: impl FnOnce(&mut Settings)) {
-    let mut settings = get();
+    let mut settings = Settings::clone(&get());
     f(&mut settings);
     settings.save();
     if let Ok(mut current) = CURRENT.write() {
-        *current = Some(settings);
+        *current = Some(Arc::new(settings));
     }
 }
 
