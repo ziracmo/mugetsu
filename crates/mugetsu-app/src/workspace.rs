@@ -16,11 +16,11 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    Animation, AnimationExt as _, AppContext as _, Bounds, Context, DragMoveEvent, Entity,
-    EntityId, InteractiveElement as _, IntoElement, MouseButton, MouseUpEvent, ParentElement as _,
-    PathPromptOptions, Pixels, Point, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Task, Window, WindowHandle, div, point, prelude::FluentBuilder as _,
-    px, size,
+    Animation, AnimationExt as _, AppContext as _, Bounds, ClipboardItem, Context, DragMoveEvent,
+    Entity, EntityId, InteractiveElement as _, IntoElement, MouseButton, MouseUpEvent,
+    ParentElement as _, PathPromptOptions, Pixels, Point, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, Window, WindowHandle, div,
+    point, prelude::FluentBuilder as _, px, size,
 };
 use mugetsu_git::Repo;
 
@@ -1085,19 +1085,27 @@ impl Workspace {
                     this.move_tab(tab.index, index, cx);
                 }
             }))
-            .context_menu(move |menu, _, _| icon_menu(menu, root.clone()))
+            .context_menu(move |menu, _, _| tab_menu(menu, root.clone()))
     }
 }
 
 /// Right-click on a tab.
-fn icon_menu(
+fn tab_menu(
     menu: gpui_kit::component::menu::PopupMenu,
     root: PathBuf,
 ) -> gpui_kit::component::menu::PopupMenu {
+    let path = root.to_string_lossy().into_owned();
     menu.item(
         PopupMenuItem::new(tr("Choisir une icône…", "Choose Icon…"))
             .icon(Icon::new(Lucide::Palette))
             .on_click(move |_, window, cx| crate::repo_icon::open_picker(root.clone(), window, cx)),
+    )
+    .item(
+        PopupMenuItem::new(tr("Copier le chemin", "Copy Path"))
+            .icon(Icon::new(Lucide::Copy))
+            .on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(path.clone()))
+            }),
     )
 }
 
