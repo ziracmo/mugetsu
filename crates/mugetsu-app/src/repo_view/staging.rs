@@ -242,23 +242,49 @@ impl RepoView {
         self.data.status.files.iter().find(|f| f.path == path)
     }
 
-    /// Stages an unstaged file, or unstages a staged one.
+    /// Stages an unstaged file, or unstages a staged one; a ⌘/Ctrl-picked
+    /// file moves with every other picked one.
     pub(super) fn toggle_stage(
         &mut self,
         sel: &SelectedChange,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.is_conflicted(&sel.path) {
-            return;
-        }
-        let paths = vec![sel.path.clone()];
-        let op = if sel.staged {
-            self.unstage_op(paths)
+        let sels = if self.change_marks.contains(sel) {
+            self.change_marks.clone()
         } else {
-            StageOp::Stage(paths)
+            vec![sel.clone()]
         };
-        self.queue_stage(op, window, cx);
+        self.toggle_stage_all(sels, window, cx);
+    }
+
+    /// Stages the unstaged files of `sels` and unstages the staged ones.
+    pub(super) fn toggle_stage_all(
+        &mut self,
+        sels: Vec<SelectedChange>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let listed = |sel: &SelectedChange| {
+            self.data
+                .status
+                .files
+                .iter()
+                .any(|f| f.path == sel.path && side(f, sel.staged))
+        };
+        let (staged, unstaged): (Vec<_>, Vec<_>) = sels
+            .into_iter()
+            .filter(|s| !self.is_conflicted(&s.path) && listed(s))
+            .partition(|s| s.staged);
+        self.change_marks.clear();
+        if !unstaged.is_empty() {
+            let paths = unstaged.into_iter().map(|s| s.path).collect();
+            self.queue_stage(StageOp::Stage(paths), window, cx);
+        }
+        if !staged.is_empty() {
+            let op = self.unstage_op(staged.into_iter().map(|s| s.path).collect());
+            self.queue_stage(op, window, cx);
+        }
     }
 
     /// Unstages `paths`, renames with their source (as a whole, like git shows them).

@@ -280,6 +280,12 @@ pub struct RepoView {
     change_filter: Entity<InputState>,
     /// The file lists, where plain keys (space, arrows) act on files.
     change_list_focus: FocusHandle,
+    /// Files listed as a folder tree rather than flat.
+    change_tree: bool,
+    /// Folded folders of the tree, as (staged list, folder path).
+    change_folded: HashSet<(bool, String)>,
+    /// Files picked with ⌘/Ctrl-click; stage moves act on all of them.
+    change_marks: Vec<SelectedChange>,
 
     // Commit search (⌘F)
     search_open: bool,
@@ -510,6 +516,9 @@ impl RepoView {
             _status: Task::ready(()),
             change_filter,
             change_list_focus: cx.focus_handle(),
+            change_tree: crate::settings::get().changes_tree,
+            change_folded: HashSet::new(),
+            change_marks: Vec::new(),
             collapsed: crate::settings::get()
                 .collapsed_sections
                 .iter()

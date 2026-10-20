@@ -26,6 +26,7 @@ pub enum TreeRow {
     Dir {
         depth: usize,
         name: String,
+        /// Full folder path, e.g. `src/ui`.
         path: String,
     },
     File {

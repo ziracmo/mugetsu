@@ -92,6 +92,8 @@ pub struct Settings {
     pub history_compact: bool,
     /// History shows the commit details beside the list instead of below it.
     pub details_side: bool,
+    /// The Changes view lists files as a folder tree instead of a flat list.
+    pub changes_tree: bool,
     /// Dropping a branch chip on another asks before rebasing.
     pub confirm_drag_rebase: bool,
     /// How the compact view orders branches.
@@ -270,6 +272,7 @@ impl Default for Settings {
             intro_seen: false,
             history_compact: false,
             details_side: false,
+            changes_tree: false,
             confirm_drag_rebase: true,
             compact_sort: CompactSort::default(),
             ai_tool: AiTool::Claude,
