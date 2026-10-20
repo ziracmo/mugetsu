@@ -452,6 +452,8 @@ fn render_diff(
 ) -> AnyElement {
     state.set_window(window.window_handle().window_id());
     state.ensure_presentation(cx);
+    state.restore_row_heights();
+    state.track_active_file(cx);
     let rem = window.rem_size();
     let font_size = rem * (f32::from(cx.theme().mono_font_size) / 16.);
     let font_family = cx.theme().mono_font_family.clone();

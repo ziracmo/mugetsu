@@ -1,6 +1,7 @@
 //! Side panel of a commit's details: the changed files as a tree, each with
-//! an icon for its kind of change. A click scrolls the diff to the file; a
-//! click on a folder folds or unfolds it.
+//! an icon for its kind of change. A click scrolls the diff to the file, a
+//! click on a folder folds or unfolds it; scrolling the diff lights up the
+//! file being read.
 
 use gpui_kit::assets::IconName as Lucide;
 use gpui_kit::base::TestSupportExt as _;
@@ -8,7 +9,7 @@ use gpui_kit::component::diff::DiffFileStatus;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    AnyElement, App, Context, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled as _, div, prelude::FluentBuilder as _,
     px,
 };
@@ -103,6 +104,22 @@ pub fn status_look(status: DiffFileStatus) -> (Lucide, Hsla) {
 }
 
 impl RepoView {
+    /// Scrolls the file tree to `path`, the file read in the diff.
+    pub(super) fn reveal_commit_file(&self, path: Option<&str>, cx: &App) {
+        let Some(path) = path else {
+            return;
+        };
+        let diff = self.commit_diff.read(cx);
+        let paths: Vec<&str> = diff.files().iter().map(|f| f.path().as_ref()).collect();
+        // Rows as shown, folded folders hiding their files.
+        let row = unfolded(tree(&paths), &self.commit_folded)
+            .iter()
+            .position(|r| matches!(r, TreeRow::File { index, .. } if paths[*index] == path));
+        if let Some(row) = row {
+            self.commit_files_scroll.scroll_to_item(row);
+        }
+    }
+
     pub(super) fn render_commit_files(&self, cx: &mut Context<Self>) -> AnyElement {
         let diff = self.commit_diff.read(cx);
         let files: Vec<(SharedString, DiffFileStatus, Option<SharedString>)> = diff
@@ -111,6 +128,8 @@ impl RepoView {
             .map(|f| (f.path().clone(), f.status(), f.original_path().cloned()))
             .collect();
         let paths: Vec<&str> = files.iter().map(|f| f.0.as_ref()).collect();
+        // The file read in the diff (scroll spy), else the one clicked.
+        let active = diff.active_file().or(self.commit_file.as_ref()).cloned();
         let (view, root, rev) = (
             cx.entity().downgrade(),
             self.repo.root().to_path_buf(),
@@ -162,7 +181,7 @@ impl RepoView {
                 TreeRow::File { depth, name, index } => {
                     let (path, status, original) = files[index].clone();
                     let (icon, color) = status_look(status);
-                    let active = self.commit_file.as_ref() == Some(&path);
+                    let active = active.as_ref() == Some(&path);
                     let tip = match original.filter(|o| *o != path) {
                         Some(from) => format!("{from} → {path}"),
                         None => path.to_string(),
@@ -210,6 +229,7 @@ impl RepoView {
             .flex_none()
             .p_1()
             .overflow_y_scroll()
+            .track_scroll(&self.commit_files_scroll)
             .map(|s| {
                 if side {
                     s.w_full().max_h(px(180.)).border_b_1()
