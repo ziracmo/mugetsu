@@ -2,6 +2,7 @@
 //! history graph with commit details, and the working-copy "Changes" view.
 
 mod card;
+mod catch_up;
 mod changes;
 mod commit_files;
 mod compact;
@@ -99,6 +100,7 @@ gpui_kit::actions!(
 
 pub fn init(cx: &mut gpui_kit::App) {
     use gpui_kit::KeyBinding;
+    catch_up::init(cx);
     cx.bind_keys([
         KeyBinding::new("up", SelectNewer, Some("History")),
         // Conflict resolver: from conflict to conflict, and a side for the current one.
@@ -375,6 +377,12 @@ pub struct RepoView {
     /// Lag of the shown stack behind its remote trunk (its branches, bottom first).
     stack_drift: Option<(Vec<String>, mugetsu_git::StackDrift)>,
     _drift: Task<()>,
+    /// Lagging branches and whether each catches up cleanly (see `catch_up`).
+    catch_up: Arc<Vec<mugetsu_git::CatchUp>>,
+    /// Refs and targets the last scan was for.
+    catch_up_key: Option<u64>,
+    _catch_up_scan: Task<()>,
+    catch_up_open: Option<catch_up::Open>,
     /// GitHub login of the user.
     pr_me: Option<String>,
     sidebar_tab: SidebarTab,
@@ -581,6 +589,10 @@ impl RepoView {
             restack: None,
             stack_drift: None,
             _drift: Task::ready(()),
+            catch_up: Arc::default(),
+            catch_up_key: None,
+            _catch_up_scan: Task::ready(()),
+            catch_up_open: None,
             pr_me: None,
             sidebar_tab: if crate::settings::get().shared_layout
                 && crate::settings::get().sidebar_prs
@@ -785,6 +797,7 @@ impl RepoView {
         }
         self.refresh_prs(true, cx);
         self.scan_stack_drift(cx);
+        self.scan_catch_up(cx);
         self.scan_dead_worktrees(cx);
         self.scan_pulse(cx);
         if let Some(head) = self.data.refs.head_branch.clone() {
@@ -973,6 +986,7 @@ impl RepoView {
                     this.pr_list = Arc::new(prs.list);
                     this.pr_me = prs.me;
                     this.scan_stack_drift(cx);
+                    this.scan_catch_up(cx);
                     cx.notify();
                 });
             }
@@ -1761,6 +1775,7 @@ impl RepoView {
     pub fn set_pr_list(&mut self, prs: Vec<mugetsu_forge::PullRequest>, cx: &mut Context<Self>) {
         self.pr_list = Arc::new(prs);
         self.scan_stack_drift(cx);
+        self.scan_catch_up(cx);
         cx.notify();
     }
 
@@ -2027,6 +2042,7 @@ impl Render for RepoView {
             )
             .child(self.render_toolbar(cx))
             .children(self.render_rebase_popover(cx))
+            .children(self.render_catch_up())
             .child(
                 div()
                     .flex_1()

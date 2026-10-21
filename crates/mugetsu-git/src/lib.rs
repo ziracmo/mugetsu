@@ -6,6 +6,7 @@
 
 pub mod batch;
 pub mod blame;
+pub mod catch_up;
 pub mod cli;
 pub mod clone;
 pub mod conflict;
@@ -27,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 pub use batch::BatchDelete;
 pub use blame::{BlameLine, FileCommit};
+pub use catch_up::{CatchUp, CatchUpRequest, Moved, Upstream, Verdict};
 pub use cli::{Git, Identity, global_identity, set_global_identity};
 pub use clone::{ClonePhase, CloneProgress, clone, clone_name, is_clone_url};
 pub use conflict::{Chunk, Conflict, ConflictFile, Operation, OperationState, Resolution};

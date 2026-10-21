@@ -1002,7 +1002,7 @@ impl RepoView {
                 nb,
                 branches,
                 searching,
-                None,
+                self.catch_up_badge(cx),
                 cx,
             ),
             self.section(

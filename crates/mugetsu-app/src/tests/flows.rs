@@ -216,3 +216,46 @@ fn a_pasted_url_is_cloned_into_the_workspace_folder_and_opened(cx: &mut TestAppC
     );
     cx.update(|cx| crate::settings::update(cx, |s| s.clone_dir = None));
 }
+
+#[gpui_kit::test]
+fn catch_up_rebases_the_picked_branches_from_the_keyboard(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path();
+    fixture(p);
+    // A second branch lagging behind main, like topic.
+    git(p, &["branch", "side", "topic~1"]);
+    git(p, &["switch", "-q", "side"]);
+    commit_file(p, "s.txt", "s\n", "side work");
+    git(p, &["switch", "-q", "main"]);
+    let side_before = git(p, &["rev-parse", "side"]);
+    let (handle, view) = open_repo_view(cx, p);
+    for _ in 0..200 {
+        cx.run_until_parked();
+        if cx.read(|cx| view.read(cx).catch_up_ready()) == 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(cx.read(|cx| view.read(cx).catch_up_ready()), 2);
+    ui_step(cx, handle, &|window, cx| window.click("catch-up-badge", cx));
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("catch-up:side").is_some());
+        assert!(window.try_find("catch-up:topic").is_some());
+    });
+    // Rows are alphabetical: S skips side and moves to topic, ⌘↵ rebases.
+    ui_step(cx, handle, &|window, cx| window.press("s", cx));
+    ui_step(cx, handle, &|window, cx| {
+        window.press("secondary-enter", cx)
+    });
+    settle(cx, &view);
+    assert_eq!(
+        git(p, &["rev-parse", "topic~1"]),
+        git(p, &["rev-parse", "main"])
+    );
+    assert_eq!(git(p, &["rev-parse", "side"]), side_before, "skipped");
+    assert_eq!(git(p, &["branch", "--show-current"]).trim(), "main");
+    ui_step(cx, handle, &|window, _| {
+        assert!(window.try_find("catch-up-close").is_some(), "outcome shown")
+    });
+}
