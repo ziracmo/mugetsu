@@ -1,0 +1,13 @@
+{
+  "version": "0.7.0",
+  "date": "2026-10-21",
+  "title": "Catch up branches with their target",
+  "summary": "Mugetsu spots the local branches that would rebase onto their target without a conflict and catches them up in one go, without touching your checkout.",
+  "features": [
+    { "id": "catch-up", "title": "Catch up branches automatically", "body": "After every reload, each local branch is replayed in memory onto its target (its open PR's base, else the trunk). A badge on Branches counts the ones that rebase cleanly; pick them from the keyboard (arrows, P, S, space, ⌘/Ctrl+Enter) and they are rebased one by one without a checkout, pushed ones force-pushed with lease. Stacks go parent first.", "scene": "sidebar", "highlight": true }
+  ],
+  "improvements": [
+    { "id": "catch-up-push-refused", "title": "Clear reason when a push is refused", "body": "If someone pushed to a branch meanwhile, the catch-up puts it back and says why under the branch." }
+  ],
+  "fixes": []
+}
