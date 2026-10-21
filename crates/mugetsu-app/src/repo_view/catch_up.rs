@@ -293,6 +293,24 @@ fn pill(text: &str, color: Hsla) -> impl IntoElement {
         .child(text.to_string())
 }
 
+/// Why a push failed, the branch being back where it was.
+fn push_failure(error: &str) -> String {
+    if error.contains("stale info") || error.contains("fetch first") {
+        tr(
+            "Quelqu'un a poussé sur cette branche depuis le dernier fetch : elle est remise \
+             en place, rien n'est écrasé. Pull puis réessaie.",
+            "Someone pushed to this branch since the last fetch: it is put back, nothing is \
+             overwritten. Pull, then try again.",
+        )
+        .into()
+    } else {
+        trf!(
+            "Push refusé, branche remise en place : {error}",
+            "Push refused, branch put back: {error}"
+        )
+    }
+}
+
 /// Why a branch is left out, in a few words.
 fn blocked_reason(v: &Verdict) -> String {
     match v {
@@ -1226,10 +1244,7 @@ impl RepoView {
                 for (branch, result) in pushes {
                     let state = match result {
                         Ok(()) => RowState::Done { pushed: true },
-                        Err(e) => RowState::Failed(trf!(
-                            "Push refusé, branche remise en place : {e:#}",
-                            "Push refused, branch put back: {e:#}"
-                        )),
+                        Err(e) => RowState::Failed(push_failure(&format!("{e:#}"))),
                     };
                     set(this, &branch, state, cx);
                 }
