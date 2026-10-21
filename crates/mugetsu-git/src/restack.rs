@@ -84,7 +84,7 @@ impl Repo {
             .to_string())
     }
 
-    fn is_ancestor(&self, a: &str, b: &str) -> bool {
+    pub(crate) fn is_ancestor(&self, a: &str, b: &str) -> bool {
         self.git()
             .run(["merge-base", "--is-ancestor", a, b])
             .is_ok()

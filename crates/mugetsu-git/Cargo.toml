@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
-gix = { version = "0.89", default-features = false, features = ["max-performance-safe", "revision", "sha1"] }
+gix = { version = "0.89", default-features = false, features = ["max-performance-safe", "revision", "sha1", "merge"] }
 smallvec = "1.16.3"
 thiserror = "2.0.21"
 

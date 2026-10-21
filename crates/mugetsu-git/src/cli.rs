@@ -97,6 +97,24 @@ impl Git {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
+    /// Runs git and returns whether it succeeded, stdout and stderr (e.g.
+    /// `push --porcelain`, which reports refused refs on stdout).
+    pub fn run_full<I, S>(&self, args: I) -> anyhow::Result<(bool, String, String)>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut cmd = self.command(args);
+        let out = cmd
+            .output()
+            .with_context(|| format!("failed to spawn {cmd:?}"))?;
+        Ok((
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        ))
+    }
+
     /// Runs git and returns stdout whatever the exit code (e.g. `diff --no-index`).
     pub fn run_lenient<I, S>(&self, args: I) -> anyhow::Result<String>
     where
