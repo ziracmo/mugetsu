@@ -39,7 +39,7 @@ fn req(branch: &str, target: &str) -> CatchUpRequest {
 
 /// A clone of a bare remote whose main moved on (touching `shared.txt`)
 /// after these branches were cut from it:
-/// - `clean` (pushed), `conflict` (edits shared.txt), `head` (checked out);
+/// - `clean` (pushed), `conflict` (edits shared.txt), `work` (checked out; not `head`, which clashes with HEAD on macOS);
 /// - stack `a` ← `b` ← `c`.
 fn fixture() -> (tempfile::TempDir, std::path::PathBuf, Repo) {
     let tmp = tempfile::tempdir().unwrap();
@@ -54,7 +54,7 @@ fn fixture() -> (tempfile::TempDir, std::path::PathBuf, Repo) {
     git(&p, &["remote", "add", "origin", remote.to_str().unwrap()]);
     commit_file(&p, "shared.txt", "base\n", "base");
     git(&p, &["push", "-q", "-u", "origin", "main"]);
-    for b in ["clean", "conflict", "head", "a"] {
+    for b in ["clean", "conflict", "work", "a"] {
         git(&p, &["branch", b]);
     }
     git(&p, &["switch", "-q", "clean"]);
@@ -68,13 +68,13 @@ fn fixture() -> (tempfile::TempDir, std::path::PathBuf, Repo) {
     commit_file(&p, "b.txt", "b\n", "b work");
     git(&p, &["switch", "-q", "-c", "c"]);
     commit_file(&p, "c.txt", "c\n", "c work");
-    git(&p, &["switch", "-q", "head"]);
-    commit_file(&p, "head.txt", "h\n", "head work");
+    git(&p, &["switch", "-q", "work"]);
+    commit_file(&p, "work.txt", "w\n", "checked-out work");
     // main moves on, upstream.
     git(&p, &["switch", "-q", "main"]);
     commit_file(&p, "shared.txt", "theirs\n", "upstream change");
     git(&p, &["push", "-q", "origin", "main"]);
-    git(&p, &["switch", "-q", "head"]);
+    git(&p, &["switch", "-q", "work"]);
     let repo = Repo::open(&p).unwrap();
     (tmp, remote, repo)
 }
@@ -88,20 +88,20 @@ fn scan_keeps_what_lags_and_says_what_would_conflict() {
         req("a", "origin/main"),
         req("clean", "origin/main"),
         req("conflict", "origin/main"),
-        req("head", "origin/main"),
+        req("work", "origin/main"),
         req("main", "origin/main"),
     ];
     let scan = repo.catch_up_scan(&reqs).unwrap();
     let names: Vec<&str> = scan.iter().map(|c| c.branch.as_str()).collect();
     // Up to date `main` is left out; the stack comes parent first.
-    assert_eq!(names, ["a", "b", "c", "clean", "conflict", "head"]);
+    assert_eq!(names, ["a", "b", "c", "clean", "conflict", "work"]);
     let verdict = |b: &str| scan.iter().find(|c| c.branch == b).unwrap();
     assert_eq!(verdict("clean").verdict, Verdict::Clean);
     assert_eq!(verdict("clean").behind, 1);
     assert_eq!(verdict("clean").commits, 1);
     assert!(verdict("clean").upstream.is_some());
-    assert_eq!(verdict("head").verdict, Verdict::Clean);
-    assert!(verdict("head").worktree.is_some());
+    assert_eq!(verdict("work").verdict, Verdict::Clean);
+    assert!(verdict("work").worktree.is_some());
     assert_eq!(verdict("b").verdict, Verdict::Clean, "follows a");
     match &verdict("conflict").verdict {
         Verdict::Conflict { paths, summary, .. } => {
@@ -122,7 +122,7 @@ fn rebase_moves_refs_without_checkout_and_force_pushes() {
         req("a", "origin/main"),
         req("b", "a"),
         req("clean", "origin/main"),
-        req("head", "origin/main"),
+        req("work", "origin/main"),
     ];
     let scan = repo.catch_up_scan(&reqs).unwrap();
     let mut moved = Vec::new();
@@ -133,7 +133,7 @@ fn rebase_moves_refs_without_checkout_and_force_pushes() {
     }
     assert_eq!(moved.len(), 4);
     let main = git(&p, &["rev-parse", "origin/main"]);
-    for b in ["a", "clean", "head"] {
+    for b in ["a", "clean", "work"] {
         assert_eq!(git(&p, &["merge-base", b, "origin/main"]), main, "{b}");
     }
     assert_eq!(git(&p, &["rev-parse", "b~1"]), git(&p, &["rev-parse", "a"]));
@@ -189,7 +189,7 @@ fn blocked_branches_are_reported() {
     git(&p, &["branch", "-f", "clean", "clean~1"]);
     git(&p, &["switch", "-q", "clean"]);
     commit_file(&p, "other.txt", "o\n", "diverged work");
-    git(&p, &["switch", "-q", "head"]);
+    git(&p, &["switch", "-q", "work"]);
     let scan = repo
         .catch_up_scan(&[
             req("a", "origin/main"),
