@@ -1,4 +1,4 @@
-use crate::{ActiveTheme, Disableable, StyledExt, h_flex};
+use crate::{ActiveTheme, Disableable, StyledExt, h_flex, tooltip::Tooltip};
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
@@ -14,6 +14,7 @@ pub(crate) struct MenuItemElement {
     style: StyleRefinement,
     disabled: bool,
     selected: bool,
+    tooltip: Option<SharedString>,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     children: SmallVec<[AnyElement; 2]>,
@@ -29,6 +30,7 @@ impl MenuItemElement {
             style: StyleRefinement::default(),
             disabled: false,
             selected: false,
+            tooltip: None,
             on_click: None,
             on_hover: None,
             children: SmallVec::new(),
@@ -38,6 +40,12 @@ impl MenuItemElement {
     /// Set ListItem as the selected item style.
     pub(crate) fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Mugetsu: a tooltip shown on hover.
+    pub(crate) fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(text.into());
         self
     }
 
@@ -106,6 +114,9 @@ impl RenderOnce for MenuItemElement {
             .items_center()
             .justify_between()
             .refine_style(&self.style)
+            .when_some(self.tooltip, |this, text| {
+                this.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
+            })
             .when_some(self.on_hover, |this, on_hover| {
                 this.on_hover(move |hovered, window, cx| (on_hover)(hovered, window, cx))
             })

@@ -34,8 +34,51 @@ fn act(
     })
 }
 
+/// A menu row. Long ref names quoted in the label are cut in the middle,
+/// the full label goes in a tooltip.
 fn item(label: impl Into<gpui_kit::SharedString>, icon: Lucide) -> PopupMenuItem {
-    PopupMenuItem::new(label).icon(Icon::new(icon))
+    let label = label.into();
+    let fitted = fit_quoted(&label);
+    if fitted == *label {
+        PopupMenuItem::new(label).icon(Icon::new(icon))
+    } else {
+        PopupMenuItem::new(fitted)
+            .icon(Icon::new(icon))
+            .tooltip(label)
+    }
+}
+
+/// Longest ref name a menu label shows whole.
+const MAX_REF: usize = 32;
+
+/// `label` with each `'quoted'` part longer than [`MAX_REF`] cut in the
+/// middle, so a label naming two refs ("Merge 'a' into 'b'") keeps the start
+/// and end of both instead of losing the second one off the menu's edge.
+fn fit_quoted(label: &str) -> String {
+    label
+        .split('\'')
+        .enumerate()
+        .map(|(i, part)| {
+            if i % 2 == 1 {
+                middle_ellipsis(part, MAX_REF)
+            } else {
+                part.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("'")
+}
+
+fn middle_ellipsis(text: &str, max: usize) -> String {
+    let len = text.chars().count();
+    if len <= max {
+        return text.to_string();
+    }
+    let head = (max - 1) / 2;
+    let tail = max - 1 - head;
+    let start: String = text.chars().take(head).collect();
+    let end: String = text.chars().skip(len - tail).collect();
+    format!("{start}…{end}")
 }
 
 fn copy(text: String) -> Handler {
@@ -880,7 +923,7 @@ pub fn commit_menu(
         let sha = sha.clone();
         menu = menu.submenu_with_icon(
             Some(Icon::new(Lucide::RotateCcw)),
-            trf!("Reset '{head}' ici", "Reset '{head}' here"),
+            fit_quoted(&trf!("Reset '{head}' ici", "Reset '{head}' here")),
             window,
             cx,
             move |m, _, _| {
@@ -1078,5 +1121,29 @@ impl RepoView {
             }
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_quoted_refs_are_cut_in_the_middle() {
+        let label =
+            "Merge 'feat/block-document-json-schemas' into 'feat/am-i-attacking-range-validation'";
+        assert_eq!(
+            fit_quoted(label),
+            "Merge 'feat/block-document-json-schemas' into 'feat/am-i-attac…range-validation'"
+        );
+        assert_eq!(fit_quoted("Push to 'origin'…"), "Push to 'origin'…");
+        assert_eq!(fit_quoted("Retirer de l'index"), "Retirer de l'index");
+    }
+
+    #[test]
+    fn middle_ellipsis_keeps_max_chars() {
+        let cut = middle_ellipsis(&"x".repeat(80), MAX_REF);
+        assert_eq!(cut.chars().count(), MAX_REF);
+        assert_eq!(middle_ellipsis("main", MAX_REF), "main");
     }
 }
