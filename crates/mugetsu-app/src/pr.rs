@@ -30,9 +30,13 @@ fn client(repo: &ForgeRepo) -> Arc<Client> {
     type Key = (ForgeKind, String, Option<String>);
     static CLIENTS: OnceLock<Mutex<HashMap<Key, Arc<Client>>>> = OnceLock::new();
     let settings = crate::settings::get();
+    // The GitLab token from Settings or the environment isn't tied to a server:
+    // never hand it to an unlisted `gitlab.*` host.
+    let gitlab_trusted = repo.kind == ForgeKind::Gitlab
+        && mugetsu_forge::gitlab_token_allowed(&repo.host, &settings.gitlab_hosts);
     let configured = match repo.kind {
         ForgeKind::Github => None,
-        ForgeKind::Gitlab => non_empty(settings.gitlab_token.clone()),
+        ForgeKind::Gitlab => non_empty(settings.gitlab_token.clone()).filter(|_| gitlab_trusted),
         ForgeKind::Bitbucket => non_empty(settings.bitbucket_token.clone()),
     };
     let key = (repo.kind, repo.host.clone(), configured.clone());
@@ -42,7 +46,9 @@ fn client(repo: &ForgeRepo) -> Arc<Client> {
         .or_insert_with(|| {
             let token = configured.or_else(|| match repo.kind {
                 ForgeKind::Github => mugetsu_forge::token("gh"),
-                ForgeKind::Gitlab => mugetsu_forge::gitlab_token("glab", &repo.host),
+                ForgeKind::Gitlab => {
+                    mugetsu_forge::gitlab_token("glab", &repo.host, gitlab_trusted)
+                }
                 ForgeKind::Bitbucket => mugetsu_forge::bitbucket_token(),
             });
             Arc::new(Client {
@@ -52,6 +58,19 @@ fn client(repo: &ForgeRepo) -> Arc<Client> {
             })
         })
         .clone()
+}
+
+/// Opens a link a forge sent (PR page): only `https://` / `http://`, since the
+/// system would launch whatever a `file:` or custom-scheme URL points to.
+pub fn open_link(cx: &gpui_kit::App, url: &str) {
+    if is_web_link(url) {
+        cx.open_url(url);
+    }
+}
+
+pub fn is_web_link(url: &str) -> bool {
+    let lower = url.trim_start().to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://")
 }
 
 /// Blocking: call from a background task.

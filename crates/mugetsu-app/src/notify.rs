@@ -215,8 +215,15 @@ mod mac {
             let n: *mut Object = msg_send![class!(NSUserNotification), new];
             let _: () = msg_send![n, setTitle: ns_string(&note.title)];
             let _: () = msg_send![n, setInformativeText: ns_string(&note.body)];
+            // Clicking opens the URL: only a web page, never what a forge
+            // could slip in (`file:`, another app's scheme).
+            let url = if crate::pr::is_web_link(&note.url) {
+                note.url.as_str()
+            } else {
+                ""
+            };
             let info: *mut Object = msg_send![class!(NSDictionary),
-                dictionaryWithObject: ns_string(&note.url)
+                dictionaryWithObject: ns_string(url)
                 forKey: ns_string("url")];
             let _: () = msg_send![n, setUserInfo: info];
             let _: () = msg_send![center, deliverNotification: n];

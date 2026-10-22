@@ -224,7 +224,15 @@ impl Scratch {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        std::fs::write(&path, bytes)?;
+        // `create_new`: never through a file or symlink planted at that
+        // predictable name in a shared temp folder (a leftover is removed first).
+        use std::io::Write as _;
+        let _ = std::fs::remove_file(&path);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?
+            .write_all(bytes)?;
         Ok(Self(path))
     }
 }

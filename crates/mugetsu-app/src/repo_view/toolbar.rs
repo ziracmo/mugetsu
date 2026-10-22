@@ -259,7 +259,7 @@ pub fn pr_chip(
                     )
                     .tooltip_show_delay(super::pr_tip::DELAY)
                     .tooltip(move |window, cx| super::pr_tip::view(&card, window, cx))
-                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .on_click(move |_, _, cx| crate::pr::open_link(cx, &url))
                     .into_any_element(),
             )
         }

@@ -142,7 +142,7 @@ fn pr_item(
                 trf!("Ouvrir la {noun} {number}", "Open {noun} {number}"),
                 Lucide::GitPullRequest,
             )
-            .on_click(move |_, _, cx| cx.open_url(&url))
+            .on_click(move |_, _, cx| crate::pr::open_link(cx, &url))
         }
         (None, Some(forge)) => {
             let url = forge.new_pr_url(branch);
