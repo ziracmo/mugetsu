@@ -54,6 +54,10 @@ jobs:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - run: scripts/bundle-macos.sh --universal
+      # dmgbuild's venv: a released Python, not whatever the runner image defaults to.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - run: scripts/dmg-macos.sh dist/Mugetsu.dmg
       # On pull requests, photograph the mounted DMG's Finder window so layout changes can be checked.
       - name: Screenshot the DMG window
