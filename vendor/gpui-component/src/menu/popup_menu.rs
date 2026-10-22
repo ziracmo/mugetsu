@@ -44,6 +44,7 @@ pub enum PopupMenuItem {
         action: Option<Box<dyn Action>>,
         // For link item
         handler: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
+        tooltip: Option<SharedString>,
     },
     /// A menu item with custom element render.
     ElementItem {
@@ -76,6 +77,7 @@ impl PopupMenuItem {
             action: None,
             is_link: false,
             handler: None,
+            tooltip: None,
         }
     }
 
@@ -208,6 +210,16 @@ impl PopupMenuItem {
         self
     }
 
+    /// Mugetsu: a tooltip shown on hover, e.g. the full text of a shortened label.
+    ///
+    /// Only works for [`PopupMenuItem::Item`].
+    pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        if let PopupMenuItem::Item { tooltip, .. } = &mut self {
+            *tooltip = Some(text.into());
+        }
+        self
+    }
+
     /// Create a link menu item.
     #[inline]
     pub fn link(label: impl Into<SharedString>, href: impl Into<String>) -> Self {
@@ -220,6 +232,7 @@ impl PopupMenuItem {
             action: None,
             is_link: true,
             handler: Some(Rc::new(move |_, _, cx| cx.open_url(&href))),
+            tooltip: None,
         }
     }
 
@@ -1191,11 +1204,66 @@ impl PopupMenu {
         self.max_width.unwrap_or(px(500.))
     }
 
+    /// Mugetsu: whether `label` is wider than the room a row of this menu
+    /// leaves it, so it shows cut with an ellipsis and gets a tooltip.
+    fn label_overflows(
+        &self,
+        label: &SharedString,
+        has_left_icon: bool,
+        is_submenu: bool,
+        window: &Window,
+    ) -> bool {
+        // Border, list padding and row padding, then the icon and the
+        // submenu chevron with their gaps.
+        let mut reserved = px(2. + 8. + 16.);
+        if has_left_icon {
+            reserved += px(20.);
+        }
+        if is_submenu {
+            reserved += px(20.);
+        }
+        let style = window.text_style();
+        let font_size = rems(0.875).to_pixels(window.rem_size());
+        let run = gpui::TextRun {
+            len: label.len(),
+            font: style.font(),
+            color: style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let width = window
+            .text_system()
+            .shape_line(label.clone(), font_size, &[run], None)
+            .width;
+        width > self.max_width() - reserved
+    }
+
     /// Calculate the anchor corner and left offset for child submenu
-    fn update_submenu_menu_anchor(&mut self, window: &Window) {
+    fn update_submenu_menu_anchor(&mut self, window: &Window, cx: &App) {
         let bounds = self.bounds;
-        let max_width = self.max_width();
-        let (anchor, left) = if max_width + bounds.origin.x > window.bounds().size.width {
+        // Mugetsu: the submenu opens past this menu's right edge, so that is
+        // what must fit, with the submenu's own width (measured once shown,
+        // its max width before). Upstream tested this menu's left edge plus
+        // its max width, so a submenu off a menu in the middle of the window
+        // still opened right and ran off it. When neither side fits, take
+        // the roomier one.
+        let submenu_width = self
+            .active_submenu()
+            .map(|menu| {
+                let menu = menu.read(cx);
+                if menu.bounds.size.width > Pixels::ZERO {
+                    menu.bounds.size.width
+                } else {
+                    menu.max_width()
+                }
+            })
+            .unwrap_or_else(|| self.max_width());
+        let window_width = window.bounds().size.width;
+        let room_right = window_width - (bounds.origin.x + bounds.size.width);
+        let room_left = bounds.origin.x;
+        let open_left = room_right < submenu_width && room_left > room_right;
+        let (anchor, left) = if open_left {
             (Anchor::TopRight, -px(16.))
         } else {
             (Anchor::TopLeft, bounds.size.width - px(8.))
@@ -1321,9 +1389,14 @@ impl PopupMenu {
                 action,
                 disabled,
                 is_link,
+                tooltip,
                 ..
             } => {
                 let show_link_icon = *is_link && self.external_link_icon;
+                let tooltip = tooltip.clone().or_else(|| {
+                    self.label_overflows(label, has_left_icon, false, window)
+                        .then(|| label.clone())
+                });
                 let action = action.as_ref().map(|action| action.boxed_clone());
                 let key = self.render_key_binding(action, window, cx);
 
@@ -1333,6 +1406,7 @@ impl PopupMenu {
                     )
                 })
                 .disabled(*disabled)
+                .when_some(tooltip, |this, tooltip| this.tooltip(tooltip))
                 .h(item_height)
                 .gap_x_1()
                 .children(Self::render_icon(
@@ -1345,10 +1419,11 @@ impl PopupMenu {
                 .child(
                     h_flex()
                         .w_full()
+                        .min_w_0()
                         .gap_3()
                         .items_center()
                         .justify_between()
-                        .when(!show_link_icon, |this| this.child(label.clone()))
+                        .when(!show_link_icon, |this| this.child(truncated(label)))
                         .children(right_check_icon)
                         .when(show_link_icon, |this| {
                             this.child(
@@ -1375,6 +1450,10 @@ impl PopupMenu {
             } => this
                 .selected(selected)
                 .disabled(*disabled)
+                .when(
+                    self.label_overflows(label, has_left_icon, true, window),
+                    |this| this.tooltip(label.clone()),
+                )
                 .items_start()
                 .child(
                     h_flex()
@@ -1392,10 +1471,11 @@ impl PopupMenu {
                         .child(
                             h_flex()
                                 .flex_1()
+                                .min_w_0()
                                 .gap_2()
                                 .items_center()
                                 .justify_between()
-                                .child(label.clone())
+                                .child(truncated(label))
                                 .child(
                                     Icon::new(IconName::ChevronRight)
                                         .xsmall()
@@ -1438,6 +1518,12 @@ impl Focusable for PopupMenu {
     }
 }
 
+/// Mugetsu: a menu label that ends in an ellipsis instead of spilling out of
+/// the menu when it is wider than the menu's max width.
+fn truncated(label: &SharedString) -> gpui::Div {
+    div().min_w_0().truncate().child(label.clone())
+}
+
 #[derive(Clone, Copy)]
 struct RenderOptions {
     has_left_icon: bool,
@@ -1447,7 +1533,7 @@ struct RenderOptions {
 
 impl Render for PopupMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.update_submenu_menu_anchor(window);
+        self.update_submenu_menu_anchor(window, cx);
 
         // Submenus attached via the public `item()` + `PopupMenuItem::submenu()`
         // path (from contexts that only have the menu value, e.g. a table
