@@ -1,0 +1,18 @@
+{
+  "version": "0.7.1",
+  "date": "2026-10-22",
+  "title": "Security fixes and tidier branch menus",
+  "summary": "A security pass (AI review command, GitLab token, links from forges, dependencies) and branch menus that stay inside the window.",
+  "features": [],
+  "improvements": [
+    { "id": "menus-in-window", "title": "Branch menus stay inside the window", "body": "Submenus open on the side with room, and long branch names are cut in the middle with the full name in a tooltip, so \"Merge 'a' into 'b'\" keeps both names readable.", "scene": "sidebar" },
+    { "id": "release-checksums", "title": "Checksums with each release", "body": "Releases now ship a SHA256SUMS.txt for the dmg and the installer." }
+  ],
+  "fixes": [
+    { "id": "ai-review-injection", "title": "AI review can't run code from a PR title", "body": "PR title, branch, base and URL are sanitised before going into the AI review command, so a crafted title can no longer run shell commands.", "highlight": true },
+    { "id": "gitlab-token-scope", "title": "GitLab token only sent to your servers", "body": "The GitLab token is sent to gitlab.com and the servers listed in Settings only, no longer to any gitlab.* host." },
+    { "id": "safe-links", "title": "Only web links are opened", "body": "PR links and notification clicks open only http(s) URLs, never file: or custom schemes." },
+    { "id": "settings-perms", "title": "Settings file readable by you only", "body": "settings.json, which holds tokens, is written with owner-only permissions." },
+    { "id": "deps", "title": "Dependency security updates", "body": "rustls, rustls-webpki, webpki-roots and quinn-proto updated; cargo audit reports no vulnerabilities." }
+  ]
+}
