@@ -397,9 +397,29 @@ impl Settings {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(json) = serde_json::to_vec_pretty(self) {
-            let _ = std::fs::write(f, json);
+            let _ = write_private(&f, &json);
         }
     }
+}
+
+/// Writes `bytes` to `path` readable by the user only: the file holds tokens.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        // `mode` only applies to a new file: tighten one written by an older version.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(bytes)
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, bytes)
 }
 
 /// Current settings (defaults until [`install`] runs).

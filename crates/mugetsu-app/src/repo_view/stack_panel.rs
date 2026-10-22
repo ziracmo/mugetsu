@@ -523,7 +523,7 @@ impl RepoView {
                     .hover(|s| s.bg(theme::alpha(gpui_kit::white(), 0.05)))
                     .on_click(move |ev, window, cx| {
                         if ev.modifiers().platform || ev.modifiers().control {
-                            cx.open_url(&url);
+                            crate::pr::open_link(cx, &url);
                         } else {
                             let _ = view
                                 .update(cx, |this, cx| this.note_stack_click(number, window, cx));

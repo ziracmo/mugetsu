@@ -61,16 +61,7 @@ impl ForgeRepo {
             ForgeKind::Github
         } else if bare == "bitbucket.org" {
             ForgeKind::Bitbucket
-        } else if bare == "gitlab.com"
-            || bare.starts_with("gitlab.")
-            || gitlab_hosts.iter().any(|h| {
-                let h = h
-                    .trim()
-                    .trim_start_matches("https://")
-                    .trim_end_matches('/');
-                !h.is_empty() && (h.eq_ignore_ascii_case(&host) || h.eq_ignore_ascii_case(&bare))
-            })
-        {
+        } else if bare.starts_with("gitlab.") || listed(&host, gitlab_hosts) {
             ForgeKind::Gitlab
         } else {
             return None;
@@ -147,6 +138,26 @@ impl ForgeRepo {
             None => url,
         }
     }
+}
+
+/// Whether `host` is gitlab.com or one of the servers in `gitlab_hosts`.
+fn listed(host: &str, gitlab_hosts: &[String]) -> bool {
+    let bare = host.split(':').next().unwrap_or(host);
+    bare.eq_ignore_ascii_case("gitlab.com")
+        || gitlab_hosts.iter().any(|h| {
+            let h = h
+                .trim()
+                .trim_start_matches("https://")
+                .trim_end_matches('/');
+            !h.is_empty() && (h.eq_ignore_ascii_case(host) || h.eq_ignore_ascii_case(bare))
+        })
+}
+
+/// Whether a GitLab token that isn't tied to a host (Settings, `GITLAB_TOKEN`)
+/// may be sent to `host`: gitlab.com and the servers the user listed, not any
+/// `gitlab.*` remote, which anyone can name a server.
+pub fn gitlab_token_allowed(host: &str, gitlab_hosts: &[String]) -> bool {
+    listed(host, gitlab_hosts)
 }
 
 /// `(host, path)` of a remote URL; the host keeps an HTTP(S) port.

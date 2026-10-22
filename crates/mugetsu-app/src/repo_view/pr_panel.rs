@@ -332,7 +332,7 @@ impl RepoView {
                 // ⌃/⌘-click: straight to the forge.
                 let m = ev.modifiers();
                 if m.control || m.platform {
-                    cx.open_url(&click_url);
+                    crate::pr::open_link(cx, &click_url);
                     return;
                 }
                 // Click: the PR in the main view; double-click: its branch, shimmering.
@@ -359,7 +359,7 @@ impl RepoView {
                     .item(
                         PopupMenuItem::new(trf!("Ouvrir sur {forge_name}", "Open on {forge_name}"))
                             .icon(Icon::new(Lucide::ExternalLink))
-                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                            .on_click(move |_, _, cx| crate::pr::open_link(cx, &url)),
                     )
                     .item(
                         PopupMenuItem::new(tr("Copier le lien", "Copy link"))

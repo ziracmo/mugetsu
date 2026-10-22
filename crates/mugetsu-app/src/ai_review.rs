@@ -12,13 +12,28 @@ use mugetsu_git::process::command;
 use crate::settings::AiTerminal;
 
 /// Fills `{url}`, `{number}`, `{branch}`, `{base}` and `{title}` in `template`.
+/// The PR's fields are written by whoever opened it and the result runs in a
+/// shell: they are cut down to [`shell_safe`] characters first.
 pub fn expand(template: &str, pr: &PullRequest) -> String {
     template
-        .replace("{url}", &pr.url)
+        .replace("{url}", &shell_safe(&pr.url))
         .replace("{number}", &pr.number.to_string())
-        .replace("{branch}", &pr.head)
-        .replace("{base}", &pr.base)
-        .replace("{title}", &pr.title.replace('"', "'"))
+        .replace("{branch}", &shell_safe(&pr.head))
+        .replace("{base}", &shell_safe(&pr.base))
+        .replace("{title}", &shell_safe(&pr.title))
+}
+
+/// `s` without anything a shell (sh, PowerShell, cmd) could expand or act on,
+/// quoted or not: `$`, backticks, `;`, `&`, `|`, `%`, quotes, newlines… become
+/// spaces, and so does a `-` starting a word (no `--option` in an unquoted spot).
+fn shell_safe(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        let word_start = out.is_empty() || out.ends_with(' ');
+        let keep = c.is_alphanumeric() || " _.,:/#@+=".contains(c) || (c == '-' && !word_start);
+        out.push(if keep { c } else { ' ' });
+    }
+    out
 }
 
 /// `'…'` for a POSIX shell.
@@ -329,8 +344,20 @@ mod tests {
         );
         assert_eq!(
             expand("x {number} {branch}→{base} \"{title}\"", &pr()),
-            "x 42 fix/it→main \"Fix 'it'\""
+            "x 42 fix/it→main \"Fix  it \""
         );
+    }
+
+    #[test]
+    fn pr_fields_cannot_inject_shell() {
+        let mut evil = pr();
+        evil.title = "$(rm -rf ~) `id`; echo \"x\" | sh & %PATH% 'q'\nnext".into();
+        evil.head = "a;$(id)&b".into();
+        let line = expand("tool \"{title}\" {branch}", &evil);
+        assert!(!line.contains(['$', '`', ';', '|', '&', '%', '\'', '\n', '(']));
+        assert_eq!(line.matches('"').count(), 2);
+        evil.title = "fix-it --yolo -x".into();
+        assert_eq!(expand("{title}", &evil), "fix-it   yolo  x");
     }
 
     #[test]

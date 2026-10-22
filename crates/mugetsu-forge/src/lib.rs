@@ -9,7 +9,7 @@ mod forge;
 mod gitlab;
 
 pub use bitbucket::Bitbucket;
-pub use forge::{Forge, ForgeKind, ForgeRepo, RemoteRepo};
+pub use forge::{Forge, ForgeKind, ForgeRepo, RemoteRepo, gitlab_token_allowed};
 pub use gitlab::Gitlab;
 
 use anyhow::Context;
@@ -629,9 +629,10 @@ fn env_token(vars: &[&str]) -> Option<String> {
         .find(|t| !t.trim().is_empty())
 }
 
-/// GitLab token for `host`: `GITLAB_TOKEN` / `GL_TOKEN`, else the GitLab CLI's login.
-pub fn gitlab_token(glab_binary: &str, host: &str) -> Option<String> {
-    if let Some(t) = env_token(&["GITLAB_TOKEN", "GL_TOKEN"]) {
+/// GitLab token for `host`: `GITLAB_TOKEN` / `GL_TOKEN` (only when `env_allowed`,
+/// see [`gitlab_token_allowed`]), else the GitLab CLI's login for that host.
+pub fn gitlab_token(glab_binary: &str, host: &str, env_allowed: bool) -> Option<String> {
+    if env_allowed && let Some(t) = env_token(&["GITLAB_TOKEN", "GL_TOKEN"]) {
         return Some(t);
     }
     let host = host.split(':').next().unwrap_or(host);

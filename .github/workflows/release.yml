@@ -18,8 +18,9 @@ on:
         description: Release tag, e.g. v0.1.0
         required: true
 
+# Read-only by default; only the job that publishes gets write access.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -104,11 +105,15 @@ jobs:
     # Publish the Mac build even if Windows fails; the .exe is added when it builds.
     if: always() && github.event_name != 'pull_request' && needs.notes.result == 'success' && needs.macos.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      # Builds are unsigned: checksums at least let a download be verified.
+      - run: cd dist && sha256sum Mugetsu.dmg $(ls Mugetsu-Setup.exe 2>/dev/null) > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
@@ -119,4 +124,5 @@ jobs:
             dist/Mugetsu.dmg
             dist/Mugetsu-Setup.exe
             dist/release-notes.json
+            dist/SHA256SUMS.txt
           prerelease: ${{ contains(env.TAG, '-') }}

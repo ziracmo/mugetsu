@@ -365,7 +365,7 @@ impl RepoView {
                             .xsmall()
                             .icon(Icon::new(Lucide::ExternalLink))
                             .label("GitHub")
-                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                            .on_click(move |_, _, cx| crate::pr::open_link(cx, &url)),
                     ),
             )
             .into_any_element()
