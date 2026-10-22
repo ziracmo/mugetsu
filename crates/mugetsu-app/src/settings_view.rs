@@ -830,8 +830,8 @@ impl Render for SettingsView {
                     )
                     .into_any_element(),
                     hint(tr(
-                        "Token personnel (scope read_api). Vide : GITLAB_TOKEN ou la connexion glab. Serveurs : vos instances GitLab auto-hébergées, séparées par des virgules (gitlab.com et gitlab.* sont reconnus d'office).",
-                        "Personal access token (read_api scope). Empty: GITLAB_TOKEN or the glab login. Servers: your self-hosted GitLab instances, comma-separated (gitlab.com and gitlab.* are recognised already).",
+                        "Token personnel (scope read_api). Vide : GITLAB_TOKEN ou la connexion glab. Serveurs : vos instances GitLab auto-hébergées, séparées par des virgules (gitlab.com et gitlab.* sont reconnus d'office). Le token n'est envoyé qu'à gitlab.com et à ces serveurs.",
+                        "Personal access token (read_api scope). Empty: GITLAB_TOKEN or the glab login. Servers: your self-hosted GitLab instances, comma-separated (gitlab.com and gitlab.* are recognised already). The token is only sent to gitlab.com and these servers.",
                     )),
                     row(
                         tr("Token Bitbucket", "Bitbucket token"),
