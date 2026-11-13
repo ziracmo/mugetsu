@@ -300,45 +300,81 @@ impl RepoView {
         StageOp::Unstage(paths)
     }
 
-    /// Asks, then throws away the unstaged changes of `path`.
+    /// `sel`, or every picked file of its list when it is one of them.
+    pub(super) fn picked_paths(&self, sel: &SelectedChange) -> Vec<String> {
+        if self.change_marks.contains(sel) {
+            self.change_marks
+                .iter()
+                .filter(|m| m.staged == sel.staged)
+                .map(|m| m.path.clone())
+                .collect()
+        } else {
+            vec![sel.path.clone()]
+        }
+    }
+
+    /// Asks, then throws away the unstaged changes of `paths`.
     pub(super) fn confirm_discard(
         &mut self,
-        path: String,
+        paths: Vec<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(f) = self.change_status(&path) else {
-            return;
-        };
-        if !f.is_unstaged() || f.worktree == Change::Conflicted {
-            return;
+        let (mut tracked, mut untracked) = (vec![], vec![]);
+        for path in paths {
+            let Some(f) = self.change_status(&path) else {
+                continue;
+            };
+            if !f.is_unstaged() || f.worktree == Change::Conflicted {
+                continue;
+            }
+            if f.worktree == Change::Untracked {
+                untracked.push(path);
+            } else {
+                tracked.push(path);
+            }
         }
-        let untracked = f.worktree == Change::Untracked;
-        let description = if untracked {
-            tr(
-                "Ce fichier non suivi est supprimé du disque. C'est irréversible.",
-                "This untracked file is deleted from disk. This cannot be undone.",
-            )
-        } else {
-            tr(
-                "Les modifications non indexées de ce fichier sont perdues. C'est irréversible.",
-                "This file's unstaged changes are lost. This cannot be undone.",
-            )
-        };
-        self.confirm(
-            trf!(
+        let title = match (tracked.as_slice(), untracked.as_slice()) {
+            ([], []) => return,
+            ([path], []) | ([], [path]) => trf!(
                 "Annuler les modifications de « {path} » ?",
                 "Discard changes to '{path}'?"
             ),
+            _ => trf!(
+                "Annuler les modifications de {} fichiers ?",
+                "Discard changes to {} files?",
+                tracked.len() + untracked.len()
+            ),
+        };
+        let description = match (tracked.len(), untracked.len()) {
+            (0, 1) => tr(
+                "Ce fichier non suivi est supprimé du disque. C'est irréversible.",
+                "This untracked file is deleted from disk. This cannot be undone.",
+            ),
+            (1, 0) => tr(
+                "Les modifications non indexées de ce fichier sont perdues. C'est irréversible.",
+                "This file's unstaged changes are lost. This cannot be undone.",
+            ),
+            (_, 0) => tr(
+                "Les modifications non indexées de ces fichiers sont perdues. C'est irréversible.",
+                "These files' unstaged changes are lost. This cannot be undone.",
+            ),
+            _ => tr(
+                "Les modifications non indexées sont perdues et les fichiers non suivis supprimés du disque. C'est irréversible.",
+                "Unstaged changes are lost and untracked files deleted from disk. This cannot be undone.",
+            ),
+        };
+        self.confirm(
+            title,
             description.to_string(),
             tr("Annuler les modifications", "Discard"),
             move |this, window, cx| {
-                let (tracked, untracked) = if untracked {
-                    (vec![], vec![path.clone()])
-                } else {
-                    (vec![path.clone()], vec![])
+                this.change_marks.clear();
+                let op = StageOp::Discard {
+                    tracked: tracked.clone(),
+                    untracked: untracked.clone(),
                 };
-                this.queue_stage(StageOp::Discard { tracked, untracked }, window, cx);
+                this.queue_stage(op, window, cx);
             },
             window,
             cx,

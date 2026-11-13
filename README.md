@@ -136,10 +136,12 @@ On Windows, use Ctrl instead of ⌘.
 | Reload the app (replays the opening eclipse) | ⌃⇧R |
 | Settings | ⌘, |
 
-In Changes, ⌘A stages everything and ⌘S stashes. On the selected file: Space or ↩ stages / unstages it, ⌘⌫
+In Changes, ⌘A selects every file of the list (then ↩ stages them all) and ⌘S stashes. On the selected file: Space or ↩ stages / unstages it, ⌘⌫
 discards its changes (after a confirmation), ⌘↓ opens it, ⌥⌘R reveals it in the Finder, ⇧⌘C copies its path,
 ↑ ↓ (or k j) move through the files and ⌘F filters both lists. Its right-click menu lists the same actions with
-their keys, plus Ignore, Blame and File history.
+their keys, plus Ignore, Blame and File history. Several files can be selected with ⌘-click, ⇧-click (a range),
+⇧↑ ⇧↓ or ⌘A, and Esc clears the selection; staging, unstaging and discarding then act on all of them, as does the
+list's header button.
 
 ## Build from source
 
