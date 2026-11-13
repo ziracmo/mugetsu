@@ -37,3 +37,11 @@ Name: "{autodesktop}\Mugetsu"; Filename: "{app}\Mugetsu.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Mugetsu.exe"; Description: "{cm:LaunchProgram,Mugetsu}"; Flags: nowait postinstall skipifsilent
+; In-app update: the app starts the installer with /VERYSILENT /RELAUNCH=1 and quits.
+Filename: "{app}\Mugetsu.exe"; Flags: nowait; Check: Relaunch
+
+[Code]
+function Relaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;

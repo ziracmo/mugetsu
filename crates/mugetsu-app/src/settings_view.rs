@@ -762,6 +762,32 @@ impl Render for SettingsView {
                     )
                     .into_any_element(),
                     row(
+                        tr("Mises à jour", "Updates"),
+                        h_flex()
+                            .gap_3()
+                            .child(
+                                Switch::new("update-check")
+                                    .checked(current.update_check)
+                                    .color(theme::accent())
+                                    .label(tr(
+                                        "Vérifier au lancement et toutes les 6 h",
+                                        "Check at launch and every 6 h",
+                                    ))
+                                    .on_click(|on: &bool, _, cx| {
+                                        let on = *on;
+                                        settings::update(cx, |s| s.update_check = on)
+                                    }),
+                            )
+                            .child(
+                                Button::new("update-check-now")
+                                    .outline()
+                                    .xsmall()
+                                    .label(tr("Vérifier maintenant", "Check now"))
+                                    .on_click(|_, _, cx| crate::update::check_now(true, cx)),
+                            ),
+                    )
+                    .into_any_element(),
+                    row(
                         tr("Portée", "Scope"),
                         switch(
                             "notify-others",
