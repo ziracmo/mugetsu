@@ -72,8 +72,9 @@ impl History {
 impl Repo {
     /// Walks every commit reachable from `tips` (usually all refs + HEAD).
     pub fn history(&self, tips: &[ObjectId], order: CommitOrder) -> anyhow::Result<History> {
-        let mut repo = gix::open(self.root()).context("opening repository with gix")?;
-        repo.object_cache_size_if_unset(64 * 1024 * 1024);
+        // No object cache: each commit is read once, so a cache only costs memory
+        // (64 MB + 16 MB per decode thread made the peak twice as high, for no speedup).
+        let repo = gix::open(self.root()).context("opening repository with gix")?;
         // Tags may point to tags, trees or blobs: keep only what peels to a commit.
         let tips: Vec<ObjectId> = tips
             .iter()
@@ -103,8 +104,7 @@ impl Repo {
                 .map(|part| {
                     let sync = &sync;
                     scope.spawn(move || -> anyhow::Result<Vec<Commit>> {
-                        let mut repo = sync.to_thread_local();
-                        repo.object_cache_size_if_unset(16 * 1024 * 1024);
+                        let repo = sync.to_thread_local();
                         part.iter().map(|id| decode(&repo, *id)).collect()
                     })
                 })

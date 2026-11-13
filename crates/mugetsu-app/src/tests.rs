@@ -1719,6 +1719,35 @@ fn a_manual_fetch_plays_its_outcome_on_the_button(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_fetch_that_only_sees_edited_files_keeps_the_history(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let (_, view) = open_repo_view(cx, dir.path());
+    let before = cx.read(|cx| view.read(cx).data().history.clone());
+    std::fs::write(dir.path().join("edited.txt"), "wip\n").unwrap();
+    cx.update(|cx| view.update(cx, |v, cx| v.fetch(cx)));
+    settle(cx, &view);
+    cx.read(|cx| {
+        let data = view.read(cx).data();
+        assert!(
+            data.status.files.iter().any(|f| f.path == "edited.txt"),
+            "the new file is listed"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(&before, &data.history),
+            "history not walked again for a working-tree change"
+        );
+    });
+
+    // A new commit (refs moved) still asks for a reload.
+    commit_file(dir.path(), "edited.txt", "done\n", "commit the edit");
+    cx.update(|cx| view.update(cx, |v, cx| v.fetch(cx)));
+    settle(cx, &view);
+    assert!(cx.read(|cx| view.read(cx).has_updates()));
+}
+
+#[gpui_kit::test]
 fn compact_view_lists_branches_and_goes_back(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();

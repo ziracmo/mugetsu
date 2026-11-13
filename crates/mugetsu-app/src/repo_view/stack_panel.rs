@@ -437,9 +437,10 @@ impl RepoView {
                 let node = if is_blocker {
                     node.with_animation(
                         ("stack-pulse", seq * 64 + pos),
-                        Animation::new(Duration::from_millis(1600))
-                            .repeat()
-                            .with_easing(gpui_kit::bounce(gpui_kit::ease_in_out)),
+                        crate::motion::settling(
+                            Duration::from_millis(1600),
+                            gpui_kit::bounce(gpui_kit::ease_in_out),
+                        ),
                         move |el, t| {
                             el.shadow(vec![BoxShadow {
                                 color: theme::alpha(color, 0.45 * (1. - t * 0.6)),

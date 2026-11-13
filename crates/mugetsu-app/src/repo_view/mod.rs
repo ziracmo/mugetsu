@@ -1094,25 +1094,48 @@ impl RepoView {
         let repo = self.repo.clone();
         let before = self.data.refs.fingerprint;
         let status_before = self.data.status.clone();
+        let epoch = self.status_epoch;
         self._fetch = cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
                     let fetched = repo.fetch_all();
                     let refs = repo.refs()?;
                     let status = repo.status()?;
-                    anyhow::Ok((fetched, refs.fingerprint != before, status != status_before))
+                    // Only the working tree moved: the status is enough, the history
+                    // stays (a full reload walks every commit again, every 10 s while
+                    // files are being edited). Conflicts still reload: the operation
+                    // in progress and the resolver follow them.
+                    let conflicts = |s: &mugetsu_git::Status| {
+                        s.files
+                            .iter()
+                            .any(|f| f.index == mugetsu_git::Change::Conflicted)
+                    };
+                    let reload = refs.fingerprint != before
+                        || (status != status_before
+                            && (conflicts(&status) || conflicts(&status_before)));
+                    let status = (status != status_before).then_some(status);
+                    anyhow::Ok((fetched, refs.fingerprint != before, reload, status))
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.fetching = false;
                 if std::mem::take(&mut this.manual_fetch) {
-                    let ok = matches!(&result, Ok((Ok(_), _, _)));
+                    let ok = matches!(&result, Ok((Ok(_), ..)));
                     this.flash_op("Fetch", ok, cx);
                 }
                 match result {
-                    Ok((fetched, refs_moved, status_changed)) => {
+                    Ok((fetched, _, false, Some(status))) => {
                         this.fetch_error = fetched.err().map(|e| e.to_string());
-                        if refs_moved || status_changed {
+                        // Staging moves shown since the fetch began win; they read
+                        // the status again once done.
+                        if this.status_epoch == epoch && this.staging.is_empty() && !this.loading {
+                            Arc::make_mut(&mut this.data).status = status;
+                            this.sync_selected_change(cx);
+                        }
+                    }
+                    Ok((fetched, refs_moved, reload, _)) => {
+                        this.fetch_error = fetched.err().map(|e| e.to_string());
+                        if reload {
                             if this.focused {
                                 this.reload(cx);
                             } else if refs_moved && !this.has_updates {

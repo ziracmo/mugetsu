@@ -1015,9 +1015,11 @@ impl Workspace {
                                 .bg(theme::magenta())
                                 .with_animation(
                                     "updates-pulse",
-                                    Animation::new(Duration::from_millis(1200))
-                                        .repeat()
-                                        .with_easing(gpui_kit::pulsating_between(0.35, 1.)),
+                                    crate::motion::settling_pulse(
+                                        Duration::from_millis(1200),
+                                        0.35,
+                                        1.,
+                                    ),
                                     |el, t| el.opacity(t),
                                 ),
                         )

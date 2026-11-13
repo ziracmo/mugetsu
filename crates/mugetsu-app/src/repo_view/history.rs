@@ -393,9 +393,7 @@ impl RepoView {
                         .bg(theme::amber())
                         .with_animation(
                             "wip-pulse",
-                            Animation::new(Duration::from_millis(1400))
-                                .repeat()
-                                .with_easing(gpui_kit::pulsating_between(0.35, 1.)),
+                            crate::motion::settling_pulse(Duration::from_millis(1400), 0.35, 1.),
                             |el, t| el.opacity(t),
                         ),
                 )
