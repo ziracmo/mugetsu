@@ -26,6 +26,10 @@ Releases are fully automated by `.github/workflows/release.yml`; nothing is uplo
 Pull requests that touch `scripts/`, `packaging/`, `releases/` or the workflow build the dmg and installer
 without publishing, so packaging breakage shows up before a release.
 
+The app updates itself from these releases (`crates/mugetsu-app/src/update.rs`, docs/RELEASING.md › In-app
+updates): keep the asset names `Mugetsu.dmg`, `Mugetsu-Setup.exe`, `SHA256SUMS.txt(.sig)`,
+`release-notes.json`, and the `UPDATE_SIGNING_KEY` secret that signs the checksums.
+
 Builds are unsigned for now (README › Download explains first launch and what signing would need).
 
 ## Conventions

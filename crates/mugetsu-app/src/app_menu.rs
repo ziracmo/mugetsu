@@ -1,4 +1,4 @@
-//! macOS menu bar: Mugetsu (About, Settings…, Quit), File, Repository, View.
+//! macOS menu bar: Mugetsu (About, Check for Updates…, Settings…, Quit), File, Repository, View.
 
 use gpui_kit::{AnyWindowHandle, App, Entity, Global, KeyBinding, Menu, MenuItem};
 
@@ -6,7 +6,17 @@ use crate::i18n::tr;
 use crate::repo_view as repo;
 use crate::workspace as ws;
 
-gpui_kit::actions!(app, [About, OpenSettings, Quit, ClearRecent, NewWindow]);
+gpui_kit::actions!(
+    app,
+    [
+        About,
+        CheckForUpdates,
+        OpenSettings,
+        Quit,
+        ClearRecent,
+        NewWindow
+    ]
+);
 
 /// File > Open Recent > n-th repository of `Settings::recent`.
 #[derive(Clone, PartialEq, serde::Deserialize, gpui_kit::Action)]
@@ -71,6 +81,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-shift-n", NewWindow, None),
     ]);
     cx.on_action(|_: &About, cx| crate::about::open(cx));
+    cx.on_action(|_: &CheckForUpdates, cx| crate::update::check_now(true, cx));
     cx.on_action(|_: &NewWindow, cx| new_window(cx));
     cx.on_action(|_: &OpenSettings, cx| crate::settings_view::open(cx));
     cx.on_action(|_: &Quit, cx| cx.quit());
@@ -84,6 +95,10 @@ pub fn set(cx: &mut App) {
     cx.set_menus([
         Menu::new("Mugetsu").items([
             MenuItem::action(tr("À propos de Mugetsu", "About Mugetsu"), About),
+            MenuItem::action(
+                tr("Rechercher des mises à jour…", "Check for Updates…"),
+                CheckForUpdates,
+            ),
             MenuItem::separator(),
             MenuItem::action(tr("Réglages…", "Settings…"), OpenSettings),
             MenuItem::separator(),

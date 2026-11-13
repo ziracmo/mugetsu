@@ -127,6 +127,8 @@ pub struct Settings {
     pub recap_reminder: bool,
     /// ISO week the recap was last offered (`2026-W42`).
     pub recap_offered: String,
+    /// Look for a new version at launch and every few hours.
+    pub update_check: bool,
 }
 
 /// Which branch deletes skip the confirmation. A local one is then forced
@@ -289,6 +291,7 @@ impl Default for Settings {
             clone_https: None,
             recap_reminder: true,
             recap_offered: String::new(),
+            update_check: true,
         }
     }
 }
