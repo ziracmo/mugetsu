@@ -753,11 +753,10 @@ pub fn worktree_menu(menu: PopupMenu, ctx: &MenuContext, wt: &WorktreeMenu) -> P
                         }
                     }
                     None => trf!(
-                        "{path} est supprimé (refusé s'il a des modifications non commitées). La branche reste.",
-                        "{path} is deleted (refused if it has uncommitted changes). The branch stays."
+                        "{path} est supprimé, modifications non commitées et fichiers non suivis compris. La branche reste.",
+                        "{path} is deleted, uncommitted changes and untracked files included. The branch stays."
                     ),
                 };
-                let force = wt.dead.is_some();
                 this.confirm(
                     trf!(
                         "Supprimer le worktree « {label} » ?",
@@ -769,13 +768,9 @@ pub fn worktree_menu(menu: PopupMenu, ctx: &MenuContext, wt: &WorktreeMenu) -> P
                         let path = path.clone();
                         this.run_op(
                             tr("Supprimer worktree", "Remove worktree"),
-                            move |r| {
-                                if force {
-                                    r.worktree_purge(&path)
-                                } else {
-                                    r.worktree_remove(&path)
-                                }
-                            },
+                            // Always forced: asking to remove it means
+                            // its changes go too (the dialog says so).
+                            move |r| r.worktree_purge(&path),
                             window,
                             cx,
                         );
