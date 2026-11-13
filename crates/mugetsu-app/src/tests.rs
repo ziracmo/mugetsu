@@ -943,7 +943,7 @@ fn push_dialog_can_force_with_lease(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn changes_shortcuts_stage_all_and_stash(cx: &mut TestAppContext) {
+fn changes_shortcuts_select_all_stage_and_stash(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
@@ -957,7 +957,9 @@ fn changes_shortcuts_stage_all_and_stash(cx: &mut TestAppContext) {
         })
     });
     ui_step(cx, handle, &|_, _| {});
+    // ⌘A selects the whole list, ↩ stages the selection.
     ui_step(cx, handle, &|window, cx| window.press("secondary-a", cx));
+    ui_step(cx, handle, &|window, cx| window.press("enter", cx));
     settle(cx, &view);
     let staged = git(dir.path(), &["diff", "--cached", "--name-only"]);
     assert_eq!(staged.trim(), "a.txt\nnew.txt");

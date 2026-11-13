@@ -605,6 +605,8 @@ pub struct ChangeMenu {
     pub untracked: bool,
     /// The file is on disk (not deleted).
     pub exists: bool,
+    /// Files the stage and discard entries act on (the picked ones, or this one).
+    pub picked: usize,
 }
 
 /// Right-click menu of a Changes row, in the spirit of Fork: each entry shows
@@ -624,11 +626,13 @@ pub fn change_menu(
         path: path.clone(),
         staged: c.staged,
     };
+    let n = c.picked;
     let toggle = item(
-        if c.staged {
-            tr("Retirer de l'index", "Unstage")
-        } else {
-            tr("Ajouter à l'index", "Stage")
+        match (c.staged, n) {
+            (true, 1) => tr("Retirer de l'index", "Unstage").to_string(),
+            (false, 1) => tr("Ajouter à l'index", "Stage").to_string(),
+            (true, _) => trf!("Retirer {n} fichiers de l'index", "Unstage {n} files"),
+            (false, _) => trf!("Indexer {n} fichiers", "Stage {n} files"),
         },
         if c.staged {
             Lucide::Minus
@@ -642,15 +646,26 @@ pub fn change_menu(
         this.toggle_stage(&sel, window, cx)
     }));
     let discard = {
-        let path = path.clone();
+        let sel = super::SelectedChange {
+            path: path.clone(),
+            staged: c.staged,
+        };
         item(
-            tr("Annuler les modifications…", "Discard changes…"),
+            if n == 1 {
+                tr("Annuler les modifications…", "Discard changes…").to_string()
+            } else {
+                trf!(
+                    "Annuler les modifications de {n} fichiers…",
+                    "Discard changes to {n} files…"
+                )
+            },
             Lucide::Undo2,
         )
         .action(Box::new(DiscardChange))
         .disabled(c.conflicted)
         .on_click(act(view, move |this, window, cx| {
-            this.confirm_discard(path.clone(), window, cx)
+            let paths = this.picked_paths(&sel);
+            this.confirm_discard(paths, window, cx)
         }))
     };
     let open = {

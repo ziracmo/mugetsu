@@ -102,3 +102,51 @@ fn commit_context_menu_offers_the_commit_actions(cx: &mut TestAppContext) {
     });
     let _ = view;
 }
+
+#[gpui_kit::test]
+fn shift_click_range_and_select_all_move_several_files(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    for name in ["n1.txt", "n2.txt", "n3.txt", "n4.txt"] {
+        std::fs::write(dir.path().join(name), "new\n").unwrap();
+    }
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update(|cx| view.update(cx, |v, cx| v.set_mode(Mode::Changes, cx)));
+    settle(cx, &view);
+    let sel = |path: &str, staged: bool| crate::repo_view::SelectedChange {
+        path: path.into(),
+        staged,
+    };
+    let staged = |cx: &mut TestAppContext| -> Vec<String> {
+        cx.read(|cx| {
+            view.read(cx)
+                .data()
+                .status
+                .staged()
+                .map(|f| f.path.clone())
+                .collect()
+        })
+    };
+
+    // n1 is selected first; ⇧ n3 picks n1..n3, which the header button moves.
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.select_change_range(sel("n3.txt", false), false, cx)
+        })
+    });
+    ui_step(cx, handle, &|window, cx| window.click("stage-all", cx));
+    settle(cx, &view);
+    assert_eq!(staged(cx), ["n1.txt", "n2.txt", "n3.txt"]);
+
+    // ⌘A in the staged list, then unstage: all go back.
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.select_change_range(sel("n2.txt", true), false, cx);
+            v.select_all_changes(cx);
+        })
+    });
+    ui_step(cx, handle, &|window, cx| window.click("unstage-all", cx));
+    settle(cx, &view);
+    assert!(staged(cx).is_empty());
+}

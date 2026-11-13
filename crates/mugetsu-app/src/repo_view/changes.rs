@@ -19,9 +19,9 @@ use std::collections::HashSet;
 use super::commit_files::{TreeRow, tree, unfolded};
 use super::staging::StageOp;
 use super::{
-    CopyChangePath, DiscardChange, NextChange, NextConflict, OpenChange, PrevChange, PrevConflict,
-    RepoView, RevealChange, SelectedChange, StageAll, StashChanges, TakeOurs, TakeTheirs,
-    ToggleStage,
+    ClearChangeMarks, CopyChangePath, DiscardChange, ExtendNextChange, ExtendPrevChange,
+    NextChange, NextConflict, OpenChange, PrevChange, PrevConflict, RepoView, RevealChange,
+    SelectAllChanges, SelectedChange, StageAll, StashChanges, TakeOurs, TakeTheirs, ToggleStage,
 };
 use crate::i18n::tr;
 use crate::theme;
@@ -166,6 +166,7 @@ impl RepoView {
             untracked: f.worktree == Change::Untracked,
             // Deleted on disk, from either list.
             exists: f.worktree != Change::Deleted && f.index != Change::Deleted,
+            picked: if marked { self.change_marks.len() } else { 1 },
         };
         let focus = self.change_list_focus.clone();
         let id = SharedString::from(format!(
@@ -242,12 +243,17 @@ impl RepoView {
             .on_click(
                 cx.listener(move |this, ev: &gpui_kit::ClickEvent, window, cx| {
                     this.change_list_focus.focus(window, cx);
-                    if ev.modifiers().secondary() {
+                    let modifiers = ev.modifiers();
+                    if modifiers.shift {
+                        this.select_change_range(sel.clone(), modifiers.secondary(), cx);
+                    } else if modifiers.secondary() {
+                        this.change_anchor = Some(sel.clone());
                         this.mark_changes(vec![sel.clone()], cx);
                     } else if ev.click_count() >= 2 {
                         this.toggle_stage(&sel, window, cx);
                     } else {
                         this.change_marks.clear();
+                        this.change_anchor = Some(sel.clone());
                         this.load_change(sel.clone(), cx);
                     }
                 }),
@@ -377,6 +383,91 @@ impl RepoView {
             }
         }
         cx.notify();
+    }
+
+    /// ⇧-click (or ⇧↑ ⇧↓): picks every shown file of the list from the anchor
+    /// to `target`; `add` (⌘⇧-click) keeps what was picked before.
+    pub(crate) fn select_change_range(
+        &mut self,
+        target: SelectedChange,
+        add: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let rows: Vec<SelectedChange> = self
+            .shown_changes(cx)
+            .into_iter()
+            .filter(|r| r.staged == target.staged)
+            .collect();
+        let Some(to) = rows.iter().position(|r| *r == target) else {
+            return;
+        };
+        let from = self
+            .change_anchor
+            .clone()
+            .or_else(|| self.selected_change.clone())
+            .and_then(|a| rows.iter().position(|r| *r == a))
+            .unwrap_or(to);
+        if self.change_anchor.is_none() || from == to {
+            self.change_anchor = Some(rows[from].clone());
+        }
+        if !add {
+            self.change_marks.clear();
+        }
+        for sel in &rows[from.min(to)..=from.max(to)] {
+            if !self.change_marks.contains(sel) {
+                self.change_marks.push(sel.clone());
+            }
+        }
+        if self.change_marks.len() < 2 {
+            self.change_marks.clear();
+        }
+        self.load_change(target, cx);
+    }
+
+    /// ⌘A: picks every shown file of the list the selected file is in
+    /// (the unstaged one when nothing is selected).
+    pub(crate) fn select_all_changes(&mut self, cx: &mut Context<Self>) {
+        let rows = self.shown_changes(cx);
+        let pickable = |staged: bool| -> Vec<SelectedChange> {
+            rows.iter()
+                .filter(|r| r.staged == staged && (staged || !self.is_conflicted(&r.path)))
+                .cloned()
+                .collect()
+        };
+        let side = self.selected_change.as_ref().map(|s| s.staged);
+        let mut picked = pickable(side.unwrap_or(false));
+        if picked.is_empty() && side.is_none() {
+            picked = pickable(true);
+        }
+        let Some(first) = picked.first().cloned() else {
+            return;
+        };
+        self.change_anchor = Some(first.clone());
+        let keep = self
+            .selected_change
+            .as_ref()
+            .is_some_and(|s| picked.contains(s));
+        self.change_marks = picked;
+        if !keep {
+            self.load_change(first, cx);
+        }
+        cx.notify();
+    }
+
+    /// Esc: drops the picked files, the selected one stays.
+    fn clear_change_marks(&mut self, cx: &mut Context<Self>) {
+        self.change_marks.clear();
+        self.change_anchor = self.selected_change.clone();
+        cx.notify();
+    }
+
+    /// The picked files of one list.
+    fn marks_of(&self, staged: bool) -> Vec<SelectedChange> {
+        self.change_marks
+            .iter()
+            .filter(|m| m.staged == staged)
+            .cloned()
+            .collect()
     }
 
     /// The tree of a list, without what folded folders hide.
@@ -545,10 +636,10 @@ impl RepoView {
         !self.change_filter.read(cx).value().trim().is_empty()
     }
 
-    /// Selects the next (or previous) shown file, conflicts, unstaged, then staged.
-    fn step_change(&mut self, forward: bool, cx: &mut Context<Self>) {
+    /// Every shown file in order: conflicts, unstaged, then staged.
+    fn shown_changes(&self, cx: &App) -> Vec<SelectedChange> {
         let [conflicted, unstaged, staged] = self.change_lists(cx);
-        let rows: Vec<SelectedChange> = conflicted
+        conflicted
             .iter()
             .chain(self.shown_files(&unstaged, false))
             .map(|f| (f, false))
@@ -561,7 +652,13 @@ impl RepoView {
                 path: f.path.clone(),
                 staged,
             })
-            .collect();
+            .collect()
+    }
+
+    /// Selects the next (or previous) shown file; `extend` (⇧↑ ⇧↓) picks the
+    /// files on the way, within the list of the selected one.
+    fn step_change(&mut self, forward: bool, extend: bool, cx: &mut Context<Self>) {
+        let rows = self.shown_changes(cx);
         let at = self
             .selected_change
             .as_ref()
@@ -572,9 +669,27 @@ impl RepoView {
             None if forward => 0,
             None => rows.len().saturating_sub(1),
         };
-        if let Some(sel) = rows.get(next).cloned()
-            && Some(next) != at
-        {
+        let Some(sel) = rows.get(next).cloned() else {
+            return;
+        };
+        if extend {
+            let current = at.map(|i| rows[i].clone());
+            if self
+                .change_anchor
+                .as_ref()
+                .is_none_or(|a| !rows.contains(a))
+                || self.change_marks.is_empty()
+            {
+                self.change_anchor = current.clone();
+            }
+            // The range stays in one list: stop at its edge.
+            if current.is_some_and(|c| c.staged != sel.staged) {
+                return;
+            }
+            self.select_change_range(sel, false, cx);
+        } else if Some(next) != at {
+            self.change_marks.clear();
+            self.change_anchor = Some(sel.clone());
             self.load_change(sel, cx);
         }
     }
@@ -622,7 +737,8 @@ impl RepoView {
             .on_action(cx.listener(|this, _: &DiscardChange, window, cx| {
                 this.on_selected(window, cx, |this, sel, window, cx| {
                     if !sel.staged {
-                        this.confirm_discard(sel.path, window, cx)
+                        let paths = this.picked_paths(&sel);
+                        this.confirm_discard(paths, window, cx)
                     }
                 })
             }))
@@ -641,8 +757,18 @@ impl RepoView {
                     this.copy_change_path(&sel.path, cx)
                 })
             }))
-            .on_action(cx.listener(|this, _: &NextChange, _, cx| this.step_change(true, cx)))
-            .on_action(cx.listener(|this, _: &PrevChange, _, cx| this.step_change(false, cx)))
+            .on_action(cx.listener(|this, _: &NextChange, _, cx| this.step_change(true, false, cx)))
+            .on_action(
+                cx.listener(|this, _: &PrevChange, _, cx| this.step_change(false, false, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ExtendNextChange, _, cx| this.step_change(true, true, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ExtendPrevChange, _, cx| this.step_change(false, true, cx)),
+            )
+            .on_action(cx.listener(|this, _: &SelectAllChanges, _, cx| this.select_all_changes(cx)))
+            .on_action(cx.listener(|this, _: &ClearChangeMarks, _, cx| this.clear_change_marks(cx)))
             .when(!conflicted.is_empty(), |el| {
                 el.child(self.list_header(tr("Conflits", "Conflicts"), conflicted.len(), None, cx))
                     .child(
@@ -660,15 +786,25 @@ impl RepoView {
                 (!unstaged.is_empty()).then(|| {
                     // Filtered: only the files shown.
                     let paths: Vec<String> = unstaged.iter().map(|f| f.path.clone()).collect();
+                    let picked = self.marks_of(false);
                     Button::new("stage-all")
                         .xsmall()
                         .ghost()
-                        .label(if filtering {
-                            tr("Indexer ceux-ci", "Stage shown")
+                        .label(if picked.len() > 1 {
+                            trf!(
+                                "Indexer la sélection ({})",
+                                "Stage selected ({})",
+                                picked.len()
+                            )
+                        } else if filtering {
+                            tr("Indexer ceux-ci", "Stage shown").to_string()
                         } else {
-                            tr("Tout indexer", "Stage all")
+                            tr("Tout indexer", "Stage all").to_string()
                         })
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            if picked.len() > 1 {
+                                return this.toggle_stage_all(picked.clone(), window, cx);
+                            }
                             let op = if filtering {
                                 StageOp::Stage(paths.clone())
                             } else {
@@ -693,15 +829,25 @@ impl RepoView {
                 staged.len(),
                 (!staged.is_empty()).then(|| {
                     let paths: Vec<String> = staged.iter().map(|f| f.path.clone()).collect();
+                    let picked = self.marks_of(true);
                     Button::new("unstage-all")
                         .xsmall()
                         .ghost()
-                        .label(if filtering {
-                            tr("Retirer ceux-ci", "Unstage shown")
+                        .label(if picked.len() > 1 {
+                            trf!(
+                                "Retirer la sélection ({})",
+                                "Unstage selected ({})",
+                                picked.len()
+                            )
+                        } else if filtering {
+                            tr("Retirer ceux-ci", "Unstage shown").to_string()
                         } else {
-                            tr("Tout retirer", "Unstage all")
+                            tr("Tout retirer", "Unstage all").to_string()
                         })
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            if picked.len() > 1 {
+                                return this.toggle_stage_all(picked.clone(), window, cx);
+                            }
                             let op = this.unstage_op(paths.clone());
                             this.queue_stage(op, window, cx)
                         }))

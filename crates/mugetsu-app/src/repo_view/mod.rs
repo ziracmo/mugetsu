@@ -94,7 +94,11 @@ gpui_kit::actions!(
         RevealChange,
         CopyChangePath,
         NextChange,
-        PrevChange
+        PrevChange,
+        SelectAllChanges,
+        ExtendNextChange,
+        ExtendPrevChange,
+        ClearChangeMarks
     ]
 );
 
@@ -161,6 +165,12 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("j", NextChange, Some("ChangeList")),
         KeyBinding::new("up", PrevChange, Some("ChangeList")),
         KeyBinding::new("k", PrevChange, Some("ChangeList")),
+        // Picking several files: ⌘A takes the whole list, ⇧↑ ⇧↓ grow the range.
+        KeyBinding::new("secondary-a", SelectAllChanges, Some("ChangeList")),
+        KeyBinding::new("ctrl-a", SelectAllChanges, Some("ChangeList")),
+        KeyBinding::new("shift-down", ExtendNextChange, Some("ChangeList")),
+        KeyBinding::new("shift-up", ExtendPrevChange, Some("ChangeList")),
+        KeyBinding::new("escape", ClearChangeMarks, Some("ChangeList")),
         // Back / forward, as in browsers and editors (the mouse side buttons too).
         KeyBinding::new(
             if cfg!(target_os = "macos") {
@@ -286,8 +296,10 @@ pub struct RepoView {
     change_tree: bool,
     /// Folded folders of the tree, as (staged list, folder path).
     change_folded: HashSet<(bool, String)>,
-    /// Files picked with ⌘/Ctrl-click; stage moves act on all of them.
+    /// Files picked with ⌘/Ctrl-click, ⇧-click or ⌘A; stage moves act on all of them.
     change_marks: Vec<SelectedChange>,
+    /// Where a ⇧-click or ⇧↑ ⇧↓ range starts.
+    change_anchor: Option<SelectedChange>,
 
     // Commit search (⌘F)
     search_open: bool,
@@ -527,6 +539,7 @@ impl RepoView {
             change_tree: crate::settings::get().changes_tree,
             change_folded: HashSet::new(),
             change_marks: Vec::new(),
+            change_anchor: None,
             collapsed: crate::settings::get()
                 .collapsed_sections
                 .iter()
