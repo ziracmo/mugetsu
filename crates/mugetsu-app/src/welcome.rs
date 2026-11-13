@@ -383,9 +383,10 @@ pub fn empty_state(recent: &[PathBuf], on_open: OnOpen, on_recent: OnRecent) -> 
                         .rounded_full()
                         .with_animation(
                             "welcome-glow",
-                            Animation::new(Duration::from_millis(2800))
-                                .repeat()
-                                .with_easing(gpui_kit::bounce(gpui_kit::ease_in_out)),
+                            crate::motion::settling(
+                                Duration::from_millis(2800),
+                                gpui_kit::bounce(gpui_kit::ease_in_out),
+                            ),
                             |el, t| {
                                 el.shadow(vec![glow(
                                     theme::alpha(theme::accent(), 0.25 + 0.3 * t),

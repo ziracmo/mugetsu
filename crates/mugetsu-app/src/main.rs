@@ -14,6 +14,7 @@ mod fmt;
 mod i18n;
 mod graph_view;
 mod model;
+mod motion;
 mod notify;
 mod open_repo;
 mod overview;
