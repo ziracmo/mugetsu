@@ -1,0 +1,15 @@
+{
+  "version": "0.8.0",
+  "date": "2026-11-13",
+  "title": "Multi-select files and a quieter idle app",
+  "summary": "Pick several files at once in Changes, remove dirty worktrees in one go, and far less CPU and memory while the app sits idle.",
+  "features": [
+    { "id": "multi-select-changes", "title": "Select several files in Changes", "body": "⇧-click picks a range, ⌘A picks every shown file of the list, ⇧↑/⇧↓ grow the range and Esc clears it. Stage, unstage or discard the whole selection at once with Space/↩, ⌘⌫, the right-click menu or the \"Stage selected (n)\" button. ⌘A in the file list now selects; press ↩ to stage them.", "scene": "diff", "highlight": true }
+  ],
+  "improvements": [
+    { "id": "idle-cpu-memory", "title": "Much lighter when idle", "body": "Status dots and glows stop pulsing after a few cycles instead of redrawing forever, the background fetch only refreshes the status when no ref moved, and the history load no longer keeps big object caches. On git.git with an edited file, idle CPU drops from ~250% to ~7% and memory by about a third.", "scene": "speed" }
+  ],
+  "fixes": [
+    { "id": "force-worktree-remove", "title": "Removing a worktree with changes works", "body": "\"Remove worktree…\" no longer fails on worktrees with modified or untracked files. The confirmation says those changes will be deleted; the branch stays." }
+  ]
+}
