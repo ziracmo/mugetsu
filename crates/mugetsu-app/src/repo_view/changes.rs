@@ -10,8 +10,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Task, Window,
+    div, prelude::FluentBuilder as _, px,
 };
 use mugetsu_git::{Change, FileStatus};
 use std::collections::HashSet;
@@ -883,9 +883,8 @@ impl RepoView {
                         Checkbox::new("amend")
                             .label("Amend")
                             .checked(self.amend)
-                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                this.amend = *checked;
-                                cx.notify();
+                            .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                                this.set_amend(*checked, window, cx)
                             })),
                     )
                     .child(div().flex_1())
@@ -894,7 +893,9 @@ impl RepoView {
                             .primary()
                             .small()
                             .icon(Icon::new(Lucide::GitCommitHorizontal))
-                            .label(if staged_total == 0 {
+                            .label(if self.amend {
+                                "Amend".to_string()
+                            } else if staged_total == 0 {
                                 "Commit".to_string()
                             } else {
                                 trf!("Commit {} fichier(s)", "Commit {} file(s)", staged_total)
@@ -1014,6 +1015,41 @@ impl RepoView {
             .child(right)
     }
 
+    /// Ticks or unticks Amend. Ticking with an empty box fills it with HEAD's
+    /// message, as amending usually keeps it; unticking takes that text back
+    /// out if it was left as is.
+    pub(super) fn set_amend(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.amend = on;
+        cx.notify();
+        if !on {
+            self._amend = Task::ready(());
+            if let Some(prefill) = self.amend_prefill.take()
+                && self.message.read(cx).value() == prefill.as_str()
+            {
+                self.message.update(cx, |m, cx| m.set_value("", window, cx));
+            }
+            return;
+        }
+        if !self.message.read(cx).value().trim().is_empty() {
+            return;
+        }
+        let repo = self.repo.clone();
+        self._amend = cx.spawn_in(window, async move |this, cx| {
+            let message = cx
+                .background_spawn(async move { repo.git().run(["log", "-1", "--format=%B"]) })
+                .await;
+            let Ok(message) = message else { return };
+            let message = message.trim_end().to_string();
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.amend && this.message.read(cx).value().trim().is_empty() {
+                    this.message
+                        .update(cx, |m, cx| m.set_value(message.clone(), window, cx));
+                    this.amend_prefill = Some(message);
+                }
+            });
+        });
+    }
+
     /// Commits the staged changes; `push` also pushes HEAD afterwards (⇧⌘↩).
     pub(super) fn commit(&mut self, push: bool, window: &mut Window, cx: &mut Context<Self>) {
         let message = self.message.read(cx).value().to_string();
@@ -1034,6 +1070,7 @@ impl RepoView {
             move |this, window, cx| {
                 this.message.update(cx, |m, cx| m.set_value("", window, cx));
                 this.amend = false;
+                this.amend_prefill = None;
                 if push {
                     // run_op_then reloads after this callback; queue the push behind it.
                     let entity = cx.entity().downgrade();
