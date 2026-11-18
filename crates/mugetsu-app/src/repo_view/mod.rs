@@ -272,6 +272,10 @@ pub struct RepoView {
     change_svg: Option<svg_preview::SvgPreview>,
     message: Entity<TextareaState>,
     amend: bool,
+    /// HEAD's message, put in the empty box when Amend was ticked: cleared
+    /// again on untick if left untouched.
+    amend_prefill: Option<String>,
+    _amend: Task<()>,
     /// Three-pane resolver on the selected conflicted file.
     conflict: Option<conflicts::ConflictEditor>,
     /// A file was just marked resolved (sequence), for the banner's pill.
@@ -524,6 +528,8 @@ impl RepoView {
             change_svg: None,
             message,
             amend: false,
+            amend_prefill: None,
+            _amend: Task::ready(()),
             conflict: None,
             resolved_flash: None,
             staging: Default::default(),
@@ -1818,6 +1824,16 @@ impl RepoView {
     #[cfg(test)]
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    #[cfg(test)]
+    pub fn amend(&self) -> bool {
+        self.amend
+    }
+
+    #[cfg(test)]
+    pub fn commit_message_text(&self, cx: &gpui_kit::App) -> String {
+        self.message.read(cx).value().to_string()
     }
 
     pub fn history_focus_handle(&self) -> FocusHandle {

@@ -400,6 +400,74 @@ fn branches_are_foldered_and_searchable(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn amend_keeps_the_head_message_and_folds_staged_files_in(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    std::fs::write(dir.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
+    let count = git(dir.path(), &["rev-list", "--count", "HEAD"]);
+    let (handle, view) = open_repo_view(cx, dir.path());
+
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("wip", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("toggle:false:a.txt", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+
+    // Ticking Amend fills the empty box with HEAD's message.
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("amend", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+    let message = cx.read(|cx| view.read(cx).commit_message_text(cx));
+    assert_eq!(message, "merge feature");
+
+    // Unticking takes it back out; ticking again brings it back.
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("amend", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+    let message = cx.read(|cx| view.read(cx).commit_message_text(cx));
+    assert_eq!(message, "");
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("amend", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("commit", cx);
+    })
+    .unwrap();
+    settle(cx, &view);
+
+    assert_eq!(
+        git(dir.path(), &["log", "-1", "--format=%s"]).trim(),
+        "merge feature"
+    );
+    assert_eq!(git(dir.path(), &["rev-list", "--count", "HEAD"]), count);
+    assert_eq!(
+        git(dir.path(), &["show", "HEAD:a.txt"]),
+        "one\ntwo\nthree\n",
+        "staged change folded into HEAD"
+    );
+    cx.read(|cx| assert!(!view.read(cx).amend()));
+}
+
+#[gpui_kit::test]
 fn commit_descriptions_start_hidden(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();
