@@ -43,7 +43,7 @@ pub use refs::{Branch, RefLabel, RefsSnapshot, Remote, Stash, Tag, Worktree};
 pub use restack::{Restack, StackDrift, StackLink};
 pub use stats::{FileHeat, Person, RepoStats};
 pub use status::{Change, FileStatus, Status};
-pub use worktrees::{DeadReason, DeadWorktree};
+pub use worktrees::{DeadReason, DeadWorktree, WorktreeCheckoutStep};
 
 /// Handle on one repository. Cheap to clone, safe to send to background threads.
 #[derive(Clone, Debug)]

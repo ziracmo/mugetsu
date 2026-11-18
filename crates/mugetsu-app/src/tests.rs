@@ -1316,6 +1316,41 @@ fn new_commits_shimmer_and_worktree_branches_open_their_tab(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn checkout_here_from_a_worktree_shows_its_progress(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    fixture(dir.path());
+    let wt = dir.path().with_extension("wt-progress");
+    git(
+        dir.path(),
+        &["worktree", "add", "-q", wt.to_str().unwrap(), "topic"],
+    );
+    std::fs::write(wt.join("wip.txt"), "wip\n").unwrap();
+    let (handle, view) = open_repo_view(cx, dir.path());
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.checkout_from_worktree("topic".into(), wt.clone(), window, cx)
+        });
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.read(|cx| {
+        let title = view.read(cx).op_progress_title().unwrap_or_default();
+        assert!(title.contains("'topic'"), "{title}");
+    });
+    settle(cx, &view);
+    cx.executor().advance_clock(Duration::from_millis(250));
+    cx.run_until_parked();
+    cx.read(|cx| assert_eq!(view.read(cx).op_progress_title(), None));
+    assert!(!wt.exists());
+    assert_eq!(
+        git(dir.path(), &["branch", "--show-current"]).trim(),
+        "topic"
+    );
+    assert!(dir.path().join("wip.txt").exists());
+}
+
+#[gpui_kit::test]
 fn sidebar_pulse_counts_todays_commits_across_branches(cx: &mut TestAppContext) {
     init(cx);
     let dir = tempfile::tempdir().unwrap();

@@ -20,6 +20,19 @@ pub enum DeadReason {
     Merged,
 }
 
+/// Steps of [`Repo::checkout_from_worktree_with`], in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WorktreeCheckoutStep {
+    /// Stashing the worktree's uncommitted changes.
+    Stash,
+    /// Deleting the worktree's folder (the long one: `node_modules`…).
+    Remove,
+    /// Checking the branch out here.
+    Checkout,
+    /// Reapplying the worktree's changes here.
+    Reapply,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeadWorktree {
     pub path: String,
@@ -104,6 +117,18 @@ impl Repo {
         branch: &str,
         changes: LocalChanges,
     ) -> anyhow::Result<()> {
+        self.checkout_from_worktree_with(path, branch, changes, &|_| {})
+    }
+
+    /// [`Self::checkout_from_worktree`], calling `step` as each step starts
+    /// (steps with nothing to do are skipped).
+    pub fn checkout_from_worktree_with(
+        &self,
+        path: &str,
+        branch: &str,
+        changes: LocalChanges,
+        step: &dyn Fn(WorktreeCheckoutStep),
+    ) -> anyhow::Result<()> {
         let wt = Git::new(Path::new(path));
         let dirty = Path::new(path).exists()
             && !wt
@@ -113,6 +138,7 @@ impl Repo {
         // The stash is shared by every worktree: what is stashed there can
         // be popped here. Remembered by id, other stashes may come on top.
         let stash = if dirty {
+            step(WorktreeCheckoutStep::Stash);
             wt.run([
                 "stash",
                 "push",
@@ -129,6 +155,7 @@ impl Repo {
         } else {
             None
         };
+        step(WorktreeCheckoutStep::Remove);
         if let Err(e) = self.worktree_purge(path) {
             if stash.is_some() {
                 let _ = wt.run(["stash", "pop", "--index"]);
@@ -142,8 +169,10 @@ impl Repo {
                 "the worktree is removed"
             }
         };
+        step(WorktreeCheckoutStep::Checkout);
         self.switch_to(branch, None, changes).with_context(kept)?;
         if let Some(id) = stash {
+            step(WorktreeCheckoutStep::Reapply);
             let list = self.git().run(["stash", "list", "--format=%H"])?;
             let index = list
                 .lines()

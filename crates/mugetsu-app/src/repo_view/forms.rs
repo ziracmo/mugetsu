@@ -546,18 +546,63 @@ impl RepoView {
                         ),
                 )
                 .on_ok(move |_, window, cx| {
-                    let (path, branch) = (path.to_string_lossy().to_string(), branch.clone());
+                    let (path, branch) = (path.clone(), branch.clone());
                     let _ = view.update(cx, |this, cx| {
-                        this.run_op(
-                            "Checkout",
-                            move |r| r.checkout_from_worktree(&path, &branch, LocalChanges::Stash),
-                            window,
-                            cx,
-                        )
+                        this.checkout_from_worktree(branch, path, window, cx)
                     });
                     true
                 })
         });
+    }
+
+    /// Runs "Checkout here" with its progress card: the folder's deletion
+    /// can take a while (`node_modules`…).
+    pub fn checkout_from_worktree(
+        &mut self,
+        branch: String,
+        path: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.busy.is_some() {
+            return;
+        }
+        let progress = self.start_op_progress(
+            trf!("Checkout de '{branch}' ici", "Checking out '{branch}' here"),
+            vec![
+                tr(
+                    "Mise de côté des modifications du worktree…",
+                    "Stashing the worktree's changes…",
+                ),
+                tr("Suppression du worktree…", "Removing the worktree…"),
+                tr("Checkout…", "Checking out…"),
+                tr(
+                    "Réapplication des modifications…",
+                    "Reapplying the changes…",
+                ),
+            ],
+            cx,
+        );
+        let path = path.to_string_lossy().to_string();
+        self.run_op(
+            "Checkout",
+            move |r| {
+                use mugetsu_git::WorktreeCheckoutStep as S;
+                let result =
+                    r.checkout_from_worktree_with(&path, &branch, LocalChanges::Stash, &|step| {
+                        progress.step(match step {
+                            S::Stash => 0,
+                            S::Remove => 1,
+                            S::Checkout => 2,
+                            S::Reapply => 3,
+                        })
+                    });
+                progress.finish();
+                result
+            },
+            window,
+            cx,
+        );
     }
 
     /// Opens the push sheet, on `branch` or the checked-out one.

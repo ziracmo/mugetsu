@@ -16,6 +16,7 @@ mod local_changes;
 mod menus;
 mod multi;
 mod nav;
+mod op_progress;
 mod particles;
 mod pr_panel;
 mod pr_tip;
@@ -340,6 +341,10 @@ pub struct RepoView {
     fetch_error: Option<String>,
     has_updates: bool,
     busy: Option<&'static str>,
+    /// Card showing a long multi-step operation's progress.
+    op_progress: Option<op_progress::OpProgress>,
+    progress_seq: usize,
+    progress_shown_secs: u64,
     /// Last Fetch / Pull / Push outcome on its button: (label, ok, seq).
     op_flash: Option<(&'static str, bool, usize)>,
     /// The running fetch was asked for (button, ⇧⌘F), not the timer.
@@ -570,6 +575,9 @@ impl RepoView {
             fetch_error: None,
             has_updates: false,
             busy: None,
+            op_progress: None,
+            progress_seq: 0,
+            progress_shown_secs: 0,
             op_flash: None,
             manual_fetch: false,
             _load: Task::ready(()),
@@ -1979,7 +1987,8 @@ impl Render for RepoView {
                                 .bg(crate::theme::glass_edge()),
                         )
                         .child(main)
-                        .children(self.render_search(cx)),
+                        .children(self.render_search(cx))
+                        .children(self.render_op_progress()),
                 );
             if self.sidebar_collapsed {
                 card.into_any_element()
