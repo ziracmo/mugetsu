@@ -607,6 +607,8 @@ pub struct ChangeMenu {
     pub exists: bool,
     /// Files the stage and discard entries act on (the picked ones, or this one).
     pub picked: usize,
+    /// Names of the two sides of a conflicted file (ours, theirs).
+    pub sides: Option<(String, String)>,
 }
 
 /// Right-click menu of a Changes row, in the spirit of Fork: each entry shows
@@ -668,6 +670,50 @@ pub fn change_menu(
             this.confirm_discard(paths, window, cx)
         }))
     };
+    let stash = {
+        let sel = super::SelectedChange {
+            path: path.clone(),
+            staged: c.staged,
+        };
+        item(
+            if n == 1 {
+                tr("Stasher ce fichier", "Stash file").to_string()
+            } else {
+                trf!("Stasher {n} fichiers", "Stash {n} files")
+            },
+            Lucide::Archive,
+        )
+        .disabled(c.conflicted)
+        .on_click(act(view, move |this, window, cx| {
+            let paths = this.picked_paths(&sel);
+            this.stash_paths(paths, window, cx)
+        }))
+    };
+    let resolve = |ours: bool, side: &str| {
+        let path = path.clone();
+        item(
+            if ours {
+                trf!("Résoudre avec ours '{side}'", "Resolve using ours '{side}'")
+            } else {
+                trf!(
+                    "Résoudre avec theirs '{side}'",
+                    "Resolve using theirs '{side}'"
+                )
+            },
+            if ours {
+                Lucide::ArrowLeft
+            } else {
+                Lucide::ArrowRight
+            },
+        )
+        .on_click(act(view, move |this, window, cx| {
+            this.resolve_file_side(path.clone(), ours, window, cx)
+        }))
+    };
+    let resolve = c
+        .sides
+        .as_ref()
+        .map(|(o, t)| [resolve(true, o), resolve(false, t)]);
     let open = {
         let path = path.clone();
         item(tr("Ouvrir", "Open"), Lucide::ExternalLink)
@@ -700,8 +746,12 @@ pub fn change_menu(
     });
     let menu = menu
         .action_context(focus.clone())
+        .when_some(resolve, |m, [ours, theirs]| {
+            m.item(ours).item(theirs).separator()
+        })
         .item(toggle)
         .when(!c.staged, |m| m.item(discard))
+        .item(stash)
         .separator()
         .item(open)
         .item(reveal)
@@ -716,6 +766,137 @@ pub fn change_menu(
         })
         .separator();
     file_menu_with(menu, view, root, &c.file, Some(Box::new(CopyChangePath)))
+}
+
+/// A folder of the Changes tree as shown in its menu.
+#[derive(Clone)]
+pub struct DirMenu {
+    /// Relative to the repository, without a trailing `/`.
+    pub path: String,
+    /// Row of the staged list.
+    pub staged: bool,
+    /// What the entries act on: the folder's files of this list, or every
+    /// picked file when the whole folder is picked.
+    pub files: Vec<super::SelectedChange>,
+    /// The folder is one of the picked ones (the entries name a file count).
+    pub picked: bool,
+    /// Some of its files are untracked: it can be ignored.
+    pub untracked: bool,
+}
+
+/// Right-click menu of a folder of the Changes tree: what its button does,
+/// and what the file menu offers that makes sense for a folder.
+pub fn dir_menu(
+    menu: PopupMenu,
+    view: &WeakEntity<RepoView>,
+    root: &Path,
+    d: &DirMenu,
+) -> PopupMenu {
+    let n = d.files.len();
+    let paths: Vec<String> = d
+        .files
+        .iter()
+        .filter(|f| f.staged == d.staged)
+        .map(|f| f.path.clone())
+        .collect();
+    let toggle = {
+        let files = d.files.clone();
+        item(
+            match (d.staged, d.picked) {
+                (true, false) => trf!(
+                    "Retirer le dossier de l'index ({n})",
+                    "Unstage folder ({n})"
+                ),
+                (false, false) => trf!("Indexer le dossier ({n})", "Stage folder ({n})"),
+                (true, true) => trf!("Retirer {n} fichiers de l'index", "Unstage {n} files"),
+                (false, true) => trf!("Indexer {n} fichiers", "Stage {n} files"),
+            },
+            if d.staged {
+                Lucide::Minus
+            } else {
+                Lucide::Plus
+            },
+        )
+        .on_click(act(view, move |this, window, cx| {
+            this.toggle_stage_all(files.clone(), window, cx)
+        }))
+    };
+    let discard = {
+        let paths = paths.clone();
+        item(
+            if d.picked {
+                trf!(
+                    "Annuler les modifications de {n} fichiers…",
+                    "Discard changes to {n} files…"
+                )
+            } else {
+                tr(
+                    "Annuler les modifications du dossier…",
+                    "Discard folder changes…",
+                )
+                .to_string()
+            },
+            Lucide::Undo2,
+        )
+        .on_click(act(view, move |this, window, cx| {
+            this.confirm_discard(paths.clone(), window, cx)
+        }))
+    };
+    let stash = {
+        let paths = paths.clone();
+        item(
+            if d.picked {
+                trf!("Stasher {n} fichiers", "Stash {n} files")
+            } else {
+                tr("Stasher le dossier", "Stash folder").to_string()
+            },
+            Lucide::Archive,
+        )
+        .on_click(act(view, move |this, window, cx| {
+            this.stash_paths(paths.clone(), window, cx)
+        }))
+    };
+    let exists = root.join(&d.path).is_dir();
+    let open = {
+        let path = d.path.clone();
+        item(tr("Ouvrir", "Open"), Lucide::ExternalLink)
+            .disabled(!exists)
+            .on_click(act(view, move |this, _, cx| this.open_change(&path, cx)))
+    };
+    let reveal = {
+        let path = d.path.clone();
+        item(super::staging::reveal_label(), Lucide::FolderOpen)
+            .on_click(act(view, move |this, _, cx| this.reveal_change(&path, cx)))
+    };
+    let ignore = (d.untracked && !d.staged).then(|| {
+        let dir = d.path.clone();
+        item(
+            trf!("Ignorer le dossier '{dir}/'", "Ignore folder '{dir}/'"),
+            Lucide::EyeOff,
+        )
+        .on_click(act(view, move |this, window, cx| {
+            let pattern = mugetsu_git::ignore_literal(&dir) + "/";
+            this.ignore_change(format!("{dir}/"), pattern, window, cx)
+        }))
+    });
+    menu.item(toggle)
+        .when(!d.staged, |m| m.item(discard))
+        .item(stash)
+        .separator()
+        .item(open)
+        .item(reveal)
+        .when_some(ignore, |m, ignore| m.separator().item(ignore))
+        .separator()
+        .item(
+            item(tr("Copier le chemin", "Copy path"), Lucide::Copy).on_click(copy(d.path.clone())),
+        )
+        .item(
+            item(
+                tr("Copier le chemin complet", "Copy full path"),
+                Lucide::Copy,
+            )
+            .on_click(copy(root.join(&d.path).to_string_lossy().into_owned())),
+        )
 }
 
 /// A linked worktree as shown in a menu.

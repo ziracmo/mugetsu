@@ -324,6 +324,18 @@ impl Repo {
         .map(drop)
     }
 
+    /// Stashes the changes of `paths` only (staged, unstaged and untracked),
+    /// leaving the rest of the working copy as it is.
+    pub fn stash_push_paths(&self, message: Option<&str>, paths: &[&str]) -> anyhow::Result<()> {
+        let mut args = vec!["stash", "push", "--include-untracked"];
+        if let Some(m) = message {
+            args.extend(["-m", m]);
+        }
+        args.push("--");
+        args.extend_from_slice(paths);
+        self.git().run(args).map(drop)
+    }
+
     /// Drops every stash.
     pub fn stash_clear(&self) -> anyhow::Result<()> {
         self.git().run(["stash", "clear"]).map(drop)

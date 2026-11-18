@@ -167,6 +167,7 @@ impl RepoView {
             // Deleted on disk, from either list.
             exists: f.worktree != Change::Deleted && f.index != Change::Deleted,
             picked: if marked { self.change_marks.len() } else { 1 },
+            sides: (change == Change::Conflicted).then(|| self.side_labels()),
         };
         let focus = self.change_list_focus.clone();
         let id = SharedString::from(format!(
@@ -284,6 +285,20 @@ impl RepoView {
         let folded = self.change_folded.contains(&(staged, path.clone()));
         let marked = !sels.is_empty() && sels.iter().all(|s| self.change_marks.contains(s));
         let side = if staged { "staged" } else { "unstaged" };
+        let menu = super::menus::DirMenu {
+            path: path.clone(),
+            staged,
+            files: if marked {
+                self.change_marks.clone()
+            } else {
+                sels.clone()
+            },
+            picked: marked,
+            untracked: files
+                .iter()
+                .any(|f| f.path.starts_with(&prefix) && f.worktree == Change::Untracked),
+        };
+        let (view, root) = (cx.entity().downgrade(), self.repo.root().to_path_buf());
         h_flex()
             .id(SharedString::from(format!("{side}-dir:{path}")))
             .test_support()
@@ -360,6 +375,7 @@ impl RepoView {
                     }
                 }),
             )
+            .context_menu(move |m, _, _| super::menus::dir_menu(m, &view, &root, &menu))
             .into_any_element()
     }
 

@@ -684,6 +684,28 @@ impl RepoView {
         );
     }
 
+    /// Keeps one side's whole `path` from the Changes menu, open or not.
+    pub(super) fn resolve_file_side(
+        &mut self,
+        path: String,
+        ours: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self.conflict.as_ref().is_some_and(|c| c.path == path);
+        self.run_op_then(
+            tr("Résoudre", "Resolve"),
+            move |r| r.resolve_side(&path, ours),
+            move |this, _, cx| {
+                if open {
+                    this.after_resolve(cx)
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
     fn after_resolve(&mut self, cx: &mut Context<Self>) {
         self.conflict = None;
         self.selected_change = None;
@@ -906,7 +928,7 @@ impl RepoView {
     }
 
     /// Sides' names: the operation's, else HEAD and the stash.
-    fn side_labels(&self) -> (String, String) {
+    pub(super) fn side_labels(&self) -> (String, String) {
         match &self.data.operation {
             Some(s) => (s.ours.clone(), s.theirs.clone()),
             None => ("HEAD".into(), "stash".into()),

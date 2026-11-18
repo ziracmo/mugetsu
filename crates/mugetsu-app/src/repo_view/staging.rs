@@ -23,7 +23,7 @@ pub(super) enum StageOp {
         tracked: Vec<String>,
         untracked: Vec<String>,
     },
-    /// A `.gitignore` line, and the untracked file it was asked for.
+    /// A `.gitignore` line, and the untracked file (or `folder/`) it was asked for.
     Ignore {
         pattern: String,
         path: String,
@@ -53,9 +53,11 @@ impl StageOp {
                 status.discard_paths(&refs(tracked));
                 status.discard_paths(&refs(untracked));
             }
-            Self::Ignore { path, .. } => status
-                .files
-                .retain(|f| !(f.path == *path && f.worktree == Change::Untracked)),
+            // `path` ends with `/` for a folder: every untracked file in it goes.
+            Self::Ignore { path, .. } => status.files.retain(|f| {
+                let hit = f.path == *path || (path.ends_with('/') && f.path.starts_with(path));
+                !(hit && f.worktree == Change::Untracked)
+            }),
         }
     }
 
@@ -410,6 +412,25 @@ impl RepoView {
                 .to_path_buf()
         };
         cx.reveal_path(&target);
+    }
+
+    /// Stashes the changes of `paths` only, staged ones included.
+    pub(super) fn stash_paths(
+        &mut self,
+        paths: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        self.change_marks.clear();
+        self.run_op(
+            "Stash",
+            move |r| r.stash_push_paths(None, &refs(&paths)),
+            window,
+            cx,
+        );
     }
 
     pub(super) fn copy_change_path(&self, path: &str, cx: &mut Context<Self>) {
