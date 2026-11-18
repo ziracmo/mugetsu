@@ -9,7 +9,7 @@ mod forge;
 mod gitlab;
 
 pub use bitbucket::Bitbucket;
-pub use forge::{Forge, ForgeKind, ForgeRepo, RemoteRepo, gitlab_token_allowed};
+pub use forge::{Forge, ForgeKind, ForgeRepo, RemoteRepo, gitlab_token_allowed, tls};
 pub use gitlab::Gitlab;
 
 use anyhow::Context;
@@ -423,6 +423,7 @@ pub struct Github {
 impl Github {
     pub fn new(token: Option<String>) -> Self {
         let agent = ureq::Agent::config_builder()
+            .tls_config(forge::tls())
             .timeout_global(Some(std::time::Duration::from_secs(10)))
             .build()
             .into();
@@ -893,6 +894,7 @@ pub fn avatar_url(email: &str, size: u32) -> String {
 /// Downloads an avatar; `Ok(None)` when the person has none.
 pub fn fetch_avatar(email: &str, size: u32) -> anyhow::Result<Option<Vec<u8>>> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(forge::tls())
         .timeout_global(Some(std::time::Duration::from_secs(10)))
         .http_status_as_error(false)
         .build()

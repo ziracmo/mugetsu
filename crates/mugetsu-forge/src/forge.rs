@@ -239,8 +239,19 @@ pub trait Forge: Send + Sync {
 /// Pages fetched at most when listing repositories (100 per page).
 pub(crate) const REPO_PAGES: usize = 3;
 
+/// TLS checked against the system's trust store (Keychain on macOS, the
+/// certificate store on Windows) rather than a bundled root list: a proxy or
+/// antivirus that inspects HTTPS with a root the system trusts then works,
+/// as in the browser.
+pub fn tls() -> ureq::tls::TlsConfig {
+    ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build()
+}
+
 pub(crate) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
+        .tls_config(tls())
         .timeout_global(Some(std::time::Duration::from_secs(10)))
         .build()
         .into()

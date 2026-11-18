@@ -215,15 +215,58 @@ fn checked_url(asset: &Asset) -> anyhow::Result<&str> {
 
 fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
+        .tls_config(mugetsu_forge::tls())
         .timeout_global(Some(timeout))
         .build()
         .into()
 }
 
+/// Hosts a release asset download may be redirected to.
+fn allowed_host(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    host == "github.com" || host.ends_with(".githubusercontent.com")
+}
+
+/// GETs a release asset, following GitHub's redirect to its storage by hand:
+/// ureq's own follow reads the redirect's body first, which some proxies
+/// garble (`ChunkExpectedCrLf`), and each hop's host is checked here.
+fn get_asset(url: &str, timeout: Duration) -> anyhow::Result<ureq::http::Response<ureq::Body>> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(mugetsu_forge::tls())
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .build()
+        .into();
+    let mut url = url.to_string();
+    for _ in 0..5 {
+        if !allowed_host(&url) {
+            bail!(
+                "{} {url}",
+                tr(
+                    "Hôte de téléchargement inattendu :",
+                    "Unexpected download host:"
+                )
+            );
+        }
+        let response = agent.get(&url).call()?;
+        if !response.status().is_redirection() {
+            return Ok(response);
+        }
+        url = response
+            .headers()
+            .get("location")
+            .and_then(|l| l.to_str().ok())
+            .context("redirect without a location")?
+            .to_string();
+    }
+    bail!("too many redirects")
+}
+
 fn get_small(url: &str, limit: u64) -> anyhow::Result<Vec<u8>> {
-    Ok(agent(Duration::from_secs(20))
-        .get(url)
-        .call()?
+    Ok(get_asset(url, Duration::from_secs(20))?
         .body_mut()
         .with_config()
         .limit(limit)
@@ -337,7 +380,7 @@ pub fn download_and_install(update: &Update) -> anyhow::Result<Relaunch> {
 
 /// Streams `url` into `path`, failing unless it hashes to `expected`.
 fn download(url: &str, path: &Path, expected: &[u8; 32]) -> anyhow::Result<()> {
-    let mut response = agent(Duration::from_secs(15 * 60)).get(url).call()?;
+    let mut response = get_asset(url, Duration::from_secs(15 * 60))?;
     let mut reader = response.body_mut().as_reader().take(MAX_INSTALLER);
     let mut out = std::fs::File::create(path)?;
     let mut hasher = Sha256::new();
@@ -879,6 +922,23 @@ mod tests {
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn redirects_stay_on_github() {
+        assert!(allowed_host(
+            "https://github.com/ziracmo/mugetsu/releases/download/v1/x"
+        ));
+        assert!(allowed_host(
+            "https://release-assets.githubusercontent.com/github-production-release-asset/1?sig=x"
+        ));
+        assert!(!allowed_host(
+            "http://release-assets.githubusercontent.com/x"
+        ));
+        assert!(!allowed_host(
+            "https://githubusercontent.com.evil.example/x"
+        ));
+        assert!(!allowed_host("https://evil.example/github.com"));
     }
 
     #[test]
