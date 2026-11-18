@@ -118,6 +118,21 @@ jobs:
           merge-multiple: true
       # Builds are unsigned: checksums at least let a download be verified.
       - run: cd dist && sha256sum Mugetsu.dmg $(ls Mugetsu-Setup.exe 2>/dev/null) > SHA256SUMS.txt
+      # The in-app updater installs only releases whose checksums carry this
+      # Ed25519 signature (public key in crates/mugetsu-app/src/update.rs).
+      - name: Sign the checksums
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::warning::UPDATE_SIGNING_KEY not set: release unsigned, the app won't auto-update to it"
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/update-key.pem"
+          openssl pkeyutl -sign -inkey "$RUNNER_TEMP/update-key.pem" -rawin \
+            -in dist/SHA256SUMS.txt -out dist/SHA256SUMS.txt.sig
+          rm -f "$RUNNER_TEMP/update-key.pem"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
@@ -129,4 +144,5 @@ jobs:
             dist/Mugetsu-Setup.exe
             dist/release-notes.json
             dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt.sig
           prerelease: ${{ contains(env.TAG, '-') }}
