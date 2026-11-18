@@ -658,8 +658,16 @@ fn checkout_from_worktree_carries_its_changes_and_keeps_the_branch() {
     // And a change here, carried over by the checkout.
     std::fs::write(p.join("here.txt"), "here\n").unwrap();
 
-    repo.checkout_from_worktree(wt_str, "side", LocalChanges::Stash)
-        .unwrap();
+    let steps = std::cell::RefCell::new(vec![]);
+    repo.checkout_from_worktree_with(wt_str, "side", LocalChanges::Stash, &|s| {
+        steps.borrow_mut().push(s)
+    })
+    .unwrap();
+    use mugetsu_git::WorktreeCheckoutStep as S;
+    assert_eq!(
+        steps.into_inner(),
+        [S::Stash, S::Remove, S::Checkout, S::Reapply]
+    );
 
     assert!(!wt.exists());
     let refs = repo.refs().unwrap();

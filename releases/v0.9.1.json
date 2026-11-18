@@ -1,0 +1,23 @@
+{
+  "version": "0.9.1",
+  "date": "2026-11-18",
+  "title": "See \"Checkout here\" at work, and amend fixed",
+  "summary": "Checking out a worktree's branch here now shows its progress while it runs, and Amend works again without retyping the message.",
+  "features": [],
+  "improvements": [
+    {
+      "id": "checkout-from-worktree",
+      "title": "Progress for \"Checkout here\"",
+      "body": "While a worktree's branch is brought into the current folder, a card at the bottom of the view shows each step (stashing the worktree's changes, removing the worktree, checking out, reapplying the changes) with a segmented bar and the time spent. Removing a big worktree (node_modules…) no longer looks frozen.",
+      "scene": "sidebar",
+      "highlight": true
+    }
+  ],
+  "fixes": [
+    {
+      "id": "amend-message",
+      "title": "Amend keeps HEAD's message",
+      "body": "Ticking Amend now fills the commit box with the last commit's message (untick to clear it), and the button reads Amend. Before, the box stayed empty and the amend was refused unless the message was retyped."
+    }
+  ]
+}
