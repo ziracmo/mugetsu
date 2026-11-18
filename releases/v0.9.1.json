@@ -1,0 +1,11 @@
+{
+  "version": "0.9.1",
+  "date": "2026-11-18",
+  "title": "See \"Checkout here\" at work",
+  "summary": "Checking out a worktree's branch here now shows its progress while it runs.",
+  "features": [],
+  "improvements": [
+    { "id": "checkout-from-worktree", "title": "Progress for \"Checkout here\"", "body": "While a worktree's branch is brought into the current folder, a card at the bottom of the view shows each step (stashing the worktree's changes, removing the worktree, checking out, reapplying the changes) with a segmented bar and the time spent. Removing a big worktree (node_modules…) no longer looks frozen.", "scene": "sidebar", "highlight": true }
+  ],
+  "fixes": []
+}
