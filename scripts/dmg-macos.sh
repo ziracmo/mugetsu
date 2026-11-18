@@ -11,7 +11,8 @@ mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 
 if ! command -v dmgbuild >/dev/null; then
-  python3 -m venv target/dmgbuild-venv
+  # --clear: a venv restored by the Rust cache can point at a Python that is gone.
+  python3 -m venv --clear target/dmgbuild-venv
   target/dmgbuild-venv/bin/pip install -q 'dmgbuild==1.6.7'
   PATH="$PWD/target/dmgbuild-venv/bin:$PATH"
 fi

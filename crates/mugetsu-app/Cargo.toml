@@ -12,6 +12,8 @@ path = "src/main.rs"
 anyhow.workspace = true
 chrono = "0.4.45"
 dirs = "7.0.0"
+# Update signatures (verify only).
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 resvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 gix = { version = "0.89", default-features = false }
 gpui-kit = "0.7.3"
@@ -19,10 +21,12 @@ mugetsu-forge = { version = "0.8.0", path = "../mugetsu-forge" }
 mugetsu-git = { version = "0.8.0", path = "../mugetsu-git" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.10"
 smallvec = "1.16.3"
 sys-locale = "0.3"
 # Same version GPUI renders SVGs with; only used to read an SVG's size.
 usvg = { version = "0.46", default-features = false }
+ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
 gpui-kit = { version = "0.7.3", features = ["test-support"] }

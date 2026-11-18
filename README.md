@@ -43,6 +43,9 @@ All versions are on the [Releases page](https://github.com/ziracmo/mugetsu/relea
 > `xattr -dr com.apple.quarantine /Applications/Mugetsu.app`.
 > **Windows:** if SmartScreen warns, click **More info › Run anyway**.
 
+After that, Mugetsu updates itself: a toast offers each new version, with its notes, and installs it in place
+after checking its signed checksum.
+
 ## Features
 
 ### History

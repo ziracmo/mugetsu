@@ -29,6 +29,7 @@ mod settings_view;
 mod tab_ghost;
 mod theme;
 mod toast;
+mod update;
 mod welcome;
 mod workspace;
 
@@ -127,6 +128,7 @@ fn main() {
             app_menu::init(cx);
             palette::init(cx);
             recap::init(cx);
+            update::init(cx);
             let main = open_workspace_window(session, true, None, cx)
                 .expect("failed to open the main window");
             cx.set_global(app_menu::MainWorkspace(main.0, main.1.clone()));

@@ -22,6 +22,23 @@ Pull requests touching `scripts/`, `packaging/`, `releases/` or the workflow bui
 without publishing, so packaging breakage shows up before a release. Running the CI workflow by hand also uploads
 a zipped `Mugetsu-macos` app as a CI artifact.
 
+## In-app updates
+
+The app checks `api.github.com/repos/ziracmo/mugetsu/releases` at launch and every 6 h (Settings › Updates,
+or Mugetsu › Check for Updates…). A newer published release shows a toast; *What's new* opens the
+`release-notes.json` of every release since the running one, *Update* downloads the installer and relaunches:
+
+- **macOS**: `Mugetsu.dmg` is mounted, its `Mugetsu.app` copied next to the running bundle and swapped in
+  (the old one moved aside, put back on failure). Fails cleanly when the folder isn't writable.
+- **Windows**: `Mugetsu-Setup.exe /VERYSILENT /CLOSEAPPLICATIONS /RELAUNCH=1`, which restarts the app.
+
+Before anything is installed, `SHA256SUMS.txt` must carry a valid Ed25519 signature
+(`SHA256SUMS.txt.sig`) from the public key in `crates/mugetsu-app/src/update.rs`, and the download must
+match its line. The release workflow signs with the **`UPDATE_SIGNING_KEY`** secret (the PEM private key;
+`openssl genpkey -algorithm ed25519`). Without the secret the release is published unsigned and apps
+refuse to auto-install it (they offer the release page). Rotating the key means shipping the new public
+key in a release signed with the old one.
+
 ## Signing (not done yet)
 
 Builds are unsigned, hence the right-click › Open / SmartScreen steps in the README.
