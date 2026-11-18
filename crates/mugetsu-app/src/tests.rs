@@ -2975,3 +2975,125 @@ fn the_tree_stages_a_folder_and_picked_files_move_together(cx: &mut TestAppConte
         "a.txt\nb.txt\nsrc/x.txt\nsrc/y.txt"
     );
 }
+
+#[gpui_kit::test]
+fn folder_menu_stages_discards_and_ignores(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path();
+    fixture(dir);
+    std::fs::create_dir(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/x.txt"), "x\n").unwrap();
+    std::fs::write(dir.join("src/y.txt"), "y\n").unwrap();
+    git(dir, &["add", "src"]);
+    git(dir, &["commit", "-q", "-m", "src"]);
+    std::fs::write(dir.join("src/x.txt"), "changed\n").unwrap();
+    std::fs::write(dir.join("src/y.txt"), "changed\n").unwrap();
+    std::fs::create_dir(dir.join("gen")).unwrap();
+    std::fs::write(dir.join("gen/out.txt"), "o\n").unwrap();
+    let (handle, view) = open_repo_view(cx, dir);
+    cx.update(|cx| {
+        view.update(cx, |v, cx| {
+            v.set_focused(true, cx);
+            v.set_mode(Mode::Changes, cx);
+        })
+    });
+    settle(cx, &view);
+    ui_step(cx, handle, &|window, cx| window.click("change-tree", cx));
+
+    // Stage the folder, then unstage it, from its menu.
+    ui_step(cx, handle, &|window, cx| {
+        window.right_click("unstaged-dir:src", cx)
+    });
+    ui_step(cx, handle, &|window, cx| {
+        let mut menu = window.within("popup-menu");
+        assert_eq!(menu.find(0usize).label(), Some("Indexer le dossier (2)"));
+        assert_eq!(
+            menu.find(1usize).label(),
+            Some("Annuler les modifications du dossier…")
+        );
+        menu.click(0usize, cx);
+    });
+    assert_eq!(shown_staged(cx, &view), ["src/x.txt", "src/y.txt"]);
+    settle(cx, &view);
+    ui_step(cx, handle, &|window, cx| {
+        window.right_click("staged-dir:src", cx)
+    });
+    ui_step(cx, handle, &|window, cx| {
+        let mut menu = window.within("popup-menu");
+        assert_eq!(
+            menu.find(0usize).label(),
+            Some("Retirer le dossier de l'index (2)")
+        );
+        menu.click(0usize, cx);
+    });
+    settle(cx, &view);
+    assert!(shown_staged(cx, &view).is_empty());
+
+    // Discard asks first.
+    ui_step(cx, handle, &|window, cx| {
+        window.right_click("unstaged-dir:src", cx)
+    });
+    ui_step(cx, handle, &|window, cx| {
+        window.within("popup-menu").click(1usize, cx)
+    });
+    assert_eq!(
+        std::fs::read_to_string(dir.join("src/x.txt")).unwrap(),
+        "changed\n",
+        "nothing discarded before the confirmation"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    ui_step(cx, handle, &|window, cx| window.click("ok", cx));
+    settle(cx, &view);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("src/x.txt")).unwrap(),
+        "x\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("src/y.txt")).unwrap(),
+        "y\n"
+    );
+
+    // An untracked folder can be ignored as a whole.
+    ui_step(cx, handle, &|window, cx| {
+        view.update(cx, |v, cx| {
+            v.ignore_change("gen/".into(), "/gen/".into(), window, cx)
+        })
+    });
+    assert!(
+        cx.read(|cx| view
+            .read(cx)
+            .data()
+            .status
+            .files
+            .iter()
+            .all(|f| !f.path.starts_with("gen/"))),
+        "gone from the list right away"
+    );
+    settle(cx, &view);
+    assert_eq!(
+        std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
+        "/gen/\n"
+    );
+}
+
+#[gpui_kit::test]
+fn file_menu_stashes_only_that_file(cx: &mut TestAppContext) {
+    init(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let (handle, view) = changes_view(cx, dir.path());
+    ui_step(cx, handle, &|window, cx| {
+        window.right_click("unstaged:a.txt", cx)
+    });
+    ui_step(cx, handle, &|window, cx| {
+        let mut menu = window.within("popup-menu");
+        assert_eq!(menu.find(2usize).label(), Some("Stasher ce fichier"));
+        menu.click(2usize, cx);
+    });
+    settle(cx, &view);
+    assert_eq!(
+        git(dir.path(), &["status", "--porcelain"]).trim(),
+        "?? new.txt"
+    );
+    assert_eq!(git(dir.path(), &["stash", "list"]).lines().count(), 1);
+}

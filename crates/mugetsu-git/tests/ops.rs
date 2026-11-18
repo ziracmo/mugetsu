@@ -224,6 +224,29 @@ fn stashes_push_pop_drop_and_clear() {
 }
 
 #[test]
+fn stash_push_paths_leaves_the_other_files() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    std::fs::write(p.join("a.txt"), "stashed\n").unwrap();
+    std::fs::create_dir(p.join("dir")).unwrap();
+    std::fs::write(p.join("dir/new.txt"), "u\n").unwrap();
+    std::fs::write(p.join("kept.txt"), "kept\n").unwrap();
+    repo.stash_push_paths(None, &["a.txt", "dir"]).unwrap();
+    assert_eq!(repo.refs().unwrap().stashes.len(), 1);
+    assert!(
+        !p.join("dir/new.txt").exists(),
+        "untracked file of the folder stashed"
+    );
+    assert!(p.join("kept.txt").exists(), "other files stay");
+    repo.stash_pop(0).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(p.join("a.txt")).unwrap(),
+        "stashed\n"
+    );
+    assert!(p.join("dir/new.txt").exists());
+}
+
+#[test]
 fn stash_apply_keeps_it_and_decorates_its_commit() {
     let (dir, repo) = fixture();
     let p = dir.path();
