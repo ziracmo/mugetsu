@@ -640,3 +640,67 @@ fn ignore_appends_an_escaped_line() {
         .collect();
     assert_eq!(untracked, [".gitignore", "keep.log"]);
 }
+
+#[test]
+fn checkout_from_worktree_carries_its_changes_and_keeps_the_branch() {
+    let (dir, repo) = fixture();
+    let p = dir.path();
+    let wt_dir = tempfile::tempdir().unwrap();
+    let wt = wt_dir.path().join("side");
+    let wt_str = wt.to_str().unwrap();
+    repo.worktree_add(wt_str, "side", true).unwrap();
+    commit_file(&wt, "side.txt", "side\n", "side work");
+    std::fs::write(wt.join("a.txt"), "edited in the worktree\n").unwrap();
+    std::fs::write(wt.join("new.txt"), "untracked\n").unwrap();
+    // A stash of the main worktree's own, which must stay untouched.
+    std::fs::write(p.join("a.txt"), "main stash\n").unwrap();
+    repo.stash_push(Some("mine")).unwrap();
+    // And a change here, carried over by the checkout.
+    std::fs::write(p.join("here.txt"), "here\n").unwrap();
+
+    repo.checkout_from_worktree(wt_str, "side", LocalChanges::Stash)
+        .unwrap();
+
+    assert!(!wt.exists());
+    let refs = repo.refs().unwrap();
+    assert_eq!(refs.worktrees.len(), 1);
+    assert_eq!(refs.head_branch.as_deref(), Some("side"));
+    assert!(refs.branches.iter().any(|b| b.name == "side"));
+    assert_eq!(
+        std::fs::read_to_string(p.join("a.txt")).unwrap(),
+        "edited in the worktree\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(p.join("new.txt")).unwrap(),
+        "untracked\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(p.join("here.txt")).unwrap(),
+        "here\n"
+    );
+    assert!(p.join("side.txt").exists());
+    let stashes = git(p, &["stash", "list", "--format=%s"]);
+    assert!(stashes.ends_with("mine"), "{stashes}");
+    assert_eq!(stashes.lines().count(), 1, "{stashes}");
+}
+
+#[test]
+fn checkout_from_clean_worktree() {
+    let (dir, repo) = fixture();
+    let wt_dir = tempfile::tempdir().unwrap();
+    let wt = wt_dir.path().join("side");
+    let wt_str = wt.to_str().unwrap();
+    repo.worktree_add(wt_str, "side", true).unwrap();
+    std::fs::create_dir(wt.join("node_modules")).unwrap();
+    std::fs::write(wt.join(".gitignore"), "node_modules\n").unwrap();
+    git(&wt, &["add", ".gitignore"]);
+    git(&wt, &["commit", "-q", "-m", "ignore"]);
+    std::fs::write(wt.join("node_modules/x"), "x").unwrap();
+
+    repo.checkout_from_worktree(wt_str, "side", LocalChanges::Keep)
+        .unwrap();
+    assert!(!wt.exists());
+    assert_eq!(repo.refs().unwrap().head_branch.as_deref(), Some("side"));
+    assert!(!repo.is_dirty().unwrap());
+    assert_eq!(git(dir.path(), &["stash", "list"]), "");
+}

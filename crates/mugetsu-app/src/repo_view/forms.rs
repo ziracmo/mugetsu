@@ -372,9 +372,10 @@ impl RepoView {
         } else {
             (name, None)
         };
-        // A local branch checked out in another worktree: open that worktree.
+        // A local branch checked out in another worktree: bring it here, or
+        // open that worktree.
         if !is_remote && let Some(path) = self.other_worktrees().remove(&local) {
-            cx.emit(super::RepoEvent::OpenWorktree(path));
+            self.request_checkout_from_worktree(local, path, window, cx);
             return;
         }
         let exists = self.data.refs.branches.iter().any(|b| b.name == local);
@@ -475,6 +476,84 @@ impl RepoView {
                     let (track, changes) = (f.remote.clone(), f.changes);
                     let _ = view.update(cx, |this, cx| {
                         this.checkout_branch(local, track, changes, window, cx)
+                    });
+                    true
+                })
+        });
+    }
+
+    /// `branch` is checked out in the worktree at `path`: asks whether to
+    /// bring it here (the worktree goes, its changes follow) or open that
+    /// worktree. The main worktree can't be removed: it just opens.
+    pub fn request_checkout_from_worktree(
+        &mut self,
+        branch: String,
+        path: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let is_main = (self.data.refs.worktrees.iter()).any(|w| w.is_main && path == *w.path);
+        if is_main {
+            cx.emit(super::RepoEvent::OpenWorktree(path));
+            return;
+        }
+        let shown = path.display().to_string();
+        let description = trf!(
+            "Checkout ici supprime le worktree {shown} et bascule ce dossier sur '{branch}'. Ses modifications non commitées suivent (fichiers non suivis compris), ses fichiers ignorés (node_modules, build…) sont supprimés. La branche, locale et distante, reste.",
+            "Checkout here removes the worktree {shown} and switches this folder to '{branch}'. Its uncommitted changes follow (untracked files included), its ignored files (node_modules, build…) are deleted. The branch, local and remote, stays."
+        );
+        let view = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let (open_view, open_path) = (view.clone(), path.clone());
+            let (view, path, branch) = (view.clone(), path.clone(), branch.clone());
+            dialog
+                .bg(crate::theme::sheet())
+                .title(trf!(
+                    "'{branch}' est dans un worktree",
+                    "'{branch}' is in a worktree"
+                ))
+                .w(px(520.))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme::muted())
+                        .child(description.clone()),
+                )
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            DialogClose::new()
+                                .trigger(|b| b.ghost().label(tr("Annuler", "Cancel"))),
+                        )
+                        .child(
+                            Button::new("worktree-open")
+                                .ghost()
+                                .label(tr("Ouvrir le worktree", "Open the worktree"))
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let path = open_path.clone();
+                                    let _ = open_view.update(cx, |_, cx| {
+                                        cx.emit(super::RepoEvent::OpenWorktree(path))
+                                    });
+                                }),
+                        )
+                        .child(
+                            DialogAction::new().child(
+                                Button::new("worktree-bring")
+                                    .primary()
+                                    .label(tr("Checkout ici", "Checkout here")),
+                            ),
+                        ),
+                )
+                .on_ok(move |_, window, cx| {
+                    let (path, branch) = (path.to_string_lossy().to_string(), branch.clone());
+                    let _ = view.update(cx, |this, cx| {
+                        this.run_op(
+                            "Checkout",
+                            move |r| r.checkout_from_worktree(&path, &branch, LocalChanges::Stash),
+                            window,
+                            cx,
+                        )
                     });
                     true
                 })

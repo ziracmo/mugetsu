@@ -752,6 +752,7 @@ impl RepoView {
                         menus::WorktreeMenu {
                             path: w.path.clone(),
                             label: label.clone(),
+                            branch: w.branch.clone(),
                             dead: dead.cloned(),
                         },
                     );

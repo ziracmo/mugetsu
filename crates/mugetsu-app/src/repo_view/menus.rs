@@ -724,6 +724,8 @@ pub struct WorktreeMenu {
     pub path: String,
     /// Branch, or "(detached)".
     pub label: String,
+    /// The checked-out branch, none when detached.
+    pub branch: Option<String>,
     pub dead: Option<mugetsu_git::DeadWorktree>,
 }
 
@@ -749,27 +751,27 @@ pub fn worktree_menu(menu: PopupMenu, ctx: &MenuContext, wt: &WorktreeMenu) -> P
                 let dirty = wt.dead.as_ref().is_some_and(|d| d.dirty);
                 let description = match &wt.dead {
                     _ if !Path::new(&path).exists() => tr(
-                        "Le dossier n'existe plus : git oublie ce worktree. La branche reste.",
-                        "The folder no longer exists: git forgets this worktree. The branch stays.",
+                        "Le dossier n'existe plus : git oublie ce worktree. La branche, locale et distante, reste.",
+                        "The folder no longer exists: git forgets this worktree. The branch, local and remote, stays.",
                     )
                     .to_string(),
                     Some(d) => {
                         let size = crate::fmt::human_size(d.bytes);
                         if dirty {
                             trf!(
-                                "{path} ({size}) est supprimé, modifications non commitées comprises. La branche reste.",
-                                "{path} ({size}) is deleted, uncommitted changes included. The branch stays."
+                                "{path} ({size}) est supprimé, modifications non commitées comprises. La branche, locale et distante, reste.",
+                                "{path} ({size}) is deleted, uncommitted changes included. The branch, local and remote, stays."
                             )
                         } else {
                             trf!(
-                                "{path} ({size}) est supprimé. La branche reste.",
-                                "{path} ({size}) is deleted. The branch stays."
+                                "{path} ({size}) est supprimé. La branche, locale et distante, reste.",
+                                "{path} ({size}) is deleted. The branch, local and remote, stays."
                             )
                         }
                     }
                     None => trf!(
-                        "{path} est supprimé, modifications non commitées et fichiers non suivis compris. La branche reste.",
-                        "{path} is deleted, uncommitted changes and untracked files included. The branch stays."
+                        "{path} est supprimé, modifications non commitées et fichiers non suivis compris. La branche, locale et distante, reste.",
+                        "{path} is deleted, uncommitted changes and untracked files included. The branch, local and remote, stays."
                     ),
                 };
                 this.confirm(
@@ -796,9 +798,24 @@ pub fn worktree_menu(menu: PopupMenu, ctx: &MenuContext, wt: &WorktreeMenu) -> P
             },
         ))
     };
-    menu.item(open).separator().item(delete).separator().item(
-        item(tr("Copier le chemin", "Copy path"), Lucide::Copy).on_click(copy(wt.path.clone())),
-    )
+    let bring = {
+        let (path, branch) = (PathBuf::from(&wt.path), wt.branch.clone());
+        item(tr("Checkout ici", "Checkout here"), Lucide::Check)
+            .disabled(branch.is_none())
+            .on_click(act(&ctx.view, move |this, window, cx| {
+                if let Some(branch) = branch.clone() {
+                    this.request_checkout_from_worktree(branch, path.clone(), window, cx);
+                }
+            }))
+    };
+    menu.item(open)
+        .item(bring)
+        .separator()
+        .item(delete)
+        .separator()
+        .item(
+            item(tr("Copier le chemin", "Copy path"), Lucide::Copy).on_click(copy(wt.path.clone())),
+        )
 }
 
 /// Commit row menu: a submenu per ref on the commit, then commit actions.

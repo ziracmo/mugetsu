@@ -4,7 +4,9 @@
 
 use std::path::Path;
 
-use crate::{Git, RefsSnapshot, Repo};
+use anyhow::Context as _;
+
+use crate::{Git, LocalChanges, RefsSnapshot, Repo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeadReason {
@@ -88,6 +90,70 @@ impl Repo {
                 .run(["worktree", "prune", "--expire", "now"])
                 .map(drop)
         }
+    }
+
+    /// Brings `branch`, checked out in the linked worktree at `path`, back
+    /// into this one: the worktree's uncommitted changes (untracked files
+    /// included) are stashed, the worktree is removed (its ignored files,
+    /// `node_modules` and such, go with it), `branch` is checked out here
+    /// (`changes` says what to do with this worktree's own changes), then the
+    /// stash is reapplied on top. The branch, local and remote, stays.
+    pub fn checkout_from_worktree(
+        &self,
+        path: &str,
+        branch: &str,
+        changes: LocalChanges,
+    ) -> anyhow::Result<()> {
+        let wt = Git::new(Path::new(path));
+        let dirty = Path::new(path).exists()
+            && !wt
+                .run(["status", "--porcelain", "--ignore-submodules"])?
+                .trim()
+                .is_empty();
+        // The stash is shared by every worktree: what is stashed there can
+        // be popped here. Remembered by id, other stashes may come on top.
+        let stash = if dirty {
+            wt.run([
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                &format!("Mugetsu: worktree {branch}"),
+            ])?;
+            Some(
+                self.git()
+                    .run(["rev-parse", "refs/stash"])?
+                    .trim()
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        if let Err(e) = self.worktree_purge(path) {
+            if stash.is_some() {
+                let _ = wt.run(["stash", "pop", "--index"]);
+            }
+            return Err(e);
+        }
+        let kept = || {
+            if stash.is_some() {
+                "the worktree's changes are kept in the stash"
+            } else {
+                "the worktree is removed"
+            }
+        };
+        self.switch_to(branch, None, changes).with_context(kept)?;
+        if let Some(id) = stash {
+            let list = self.git().run(["stash", "list", "--format=%H"])?;
+            let index = list
+                .lines()
+                .position(|l| l.trim() == id)
+                .context("the worktree's stash is gone")?;
+            self.stash_pop(index).context(
+                "checked out, but the worktree's changes conflict: they are kept in the stash",
+            )?;
+        }
+        Ok(())
     }
 }
 

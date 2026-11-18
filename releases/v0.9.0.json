@@ -1,0 +1,14 @@
+{
+  "version": "0.9.0",
+  "date": "2026-11-18",
+  "title": "In-app updates and worktree branches brought home",
+  "summary": "Mugetsu now updates itself from a verified release, and a branch held by a worktree can be checked out in your usual folder in one click.",
+  "features": [
+    { "id": "in-app-updates", "title": "In-app updates", "body": "Mugetsu checks for new releases at launch and every 6 hours. A toast offers to update, show what's new or wait; \"What's new\" lists the notes of every release since yours. Updating downloads the release, checks its signed checksums, installs it and relaunches. Turn it off or check now in Settings › Updates, or from Mugetsu › Check for updates…", "scene": "fetch", "highlight": true },
+    { "id": "checkout-from-worktree", "title": "Check out a worktree's branch here", "body": "Checking out a branch held by a worktree now offers \"Checkout here\": the worktree's uncommitted changes are stashed, the worktree is removed, the branch is checked out in the current folder and the changes reapplied. Also in the worktree's menu. \"Open the worktree\" is still there. The branch, local and remote, stays.", "scene": "sidebar", "highlight": true }
+  ],
+  "improvements": [
+    { "id": "force-worktree-remove", "title": "Clearer worktree removal", "body": "The removal dialog now says that the branch stays, both local and remote." }
+  ],
+  "fixes": []
+}
